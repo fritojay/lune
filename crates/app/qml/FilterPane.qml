@@ -42,6 +42,7 @@ ColumnLayout {
         clip: true
         reuseItems: true
         boundsBehavior: Flickable.StopAtBounds
+        maximumFlickVelocity: Theme.maxFlickVelocity
         currentIndex: filterPane.currentRow
         keyNavigationEnabled: true
         onCurrentIndexChanged: filterPane.rowChosen(currentIndex)

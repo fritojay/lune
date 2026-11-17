@@ -43,7 +43,7 @@ Dialog {
                 anchors.fill: parent
                 clip: true
                 model: preferences.folders
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: ListScrollBar {}
 
                 Label {
                     anchors.centerIn: parent

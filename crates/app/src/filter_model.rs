@@ -286,11 +286,13 @@ impl qobject::FilterModel {
         let valid = usize::try_from(grouping)
             .ok()
             .is_some_and(|g| g < GROUPINGS.len());
-        if !valid || grouping == self.grouping {
+        if !valid {
             return;
         }
-        self.as_mut().rust_mut().grouping = grouping;
-        self.as_mut().grouping_changed();
+        if grouping != self.grouping {
+            self.as_mut().rust_mut().grouping = grouping;
+            self.as_mut().grouping_changed();
+        }
         self.recompute(None, true);
     }
 

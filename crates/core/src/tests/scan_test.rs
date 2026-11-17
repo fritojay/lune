@@ -570,6 +570,31 @@ fn prune_forgets_the_scans_of_removed_folders_only() {
     );
 }
 
+#[test]
+fn prune_forgets_the_scan_of_a_removed_folder_while_another_is_unavailable() {
+    let dir = TempDir::new();
+    let mut conn = db::open_in_memory().unwrap();
+    scan_two_folders(&mut conn, &dir);
+    let (keep, drop) = (dir.path().join("keep"), dir.path().join("drop"));
+    let unmounted = dir.path().join("unmounted-drive");
+    for folder in [&keep, &drop] {
+        record_folder_scan(&conn, folder, UNIX_EPOCH).unwrap();
+    }
+    assert_eq!(prune(&mut conn, &[keep.clone(), unmounted]).unwrap(), None);
+    assert_eq!(folder_scans(&conn, &[keep, drop]).unwrap(), [Some(0), None]);
+}
+
+#[test]
+fn prune_forgets_the_scan_of_a_folder_covered_by_a_new_parent() {
+    let dir = TempDir::new();
+    let mut conn = db::open_in_memory().unwrap();
+    scan_two_folders(&mut conn, &dir);
+    let keep = dir.path().join("keep");
+    record_folder_scan(&conn, &keep, UNIX_EPOCH).unwrap();
+    prune(&mut conn, &[dir.path().to_path_buf()]).unwrap();
+    assert_eq!(folder_scans(&conn, &[keep]).unwrap(), [None]);
+}
+
 fn art(hash: &str) -> Option<crate::EmbeddedArt> {
     Some(crate::EmbeddedArt {
         hash: hash.into(),

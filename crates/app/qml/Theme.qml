@@ -6,6 +6,9 @@ QtObject {
     readonly property int coverSize: 160
     readonly property int albumPadding: 12
     readonly property int timeWidth: 56
+    // Qt's default of 2500 px/s caps a fling well short of the end of a long
+    // list. BenchRun flicks at that default, so raising this doesn't skew it.
+    readonly property real maxFlickVelocity: 10000
 
     // A tint of the text color rather than alternateBase, which the macOS style makes
     // near-white regardless of the text color, so stripes stay readable in light and dark mode.

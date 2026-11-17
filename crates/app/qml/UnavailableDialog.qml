@@ -37,7 +37,7 @@ Dialog {
                 anchors.fill: parent
                 clip: true
                 model: unavailable.model
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: ListScrollBar {}
 
                 Label {
                     anchors.centerIn: parent

@@ -186,6 +186,7 @@ ColumnLayout {
         clip: true
         reuseItems: true
         boundsBehavior: Flickable.StopAtBounds
+        maximumFlickVelocity: Theme.maxFlickVelocity
         ScrollBar.vertical: ListScrollBar {
             id: albumScroll
         }

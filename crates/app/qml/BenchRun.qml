@@ -8,6 +8,10 @@ Item {
     signal frame(real seconds)
     signal finished()
 
+    // Qt's default maximumFlickVelocity, not the list's own, so runs stay
+    // comparable when the app's flick speed changes.
+    readonly property real flickVelocity: 2500
+
     function start() {
         run.start()
     }
@@ -30,11 +34,11 @@ Item {
             duration: 10000
         }
         ScriptAction { script: benchRun.phaseStarted("flick") }
-        ScriptAction { script: benchRun.list.flick(0, -benchRun.list.maximumFlickVelocity) }
+        ScriptAction { script: benchRun.list.flick(0, -benchRun.flickVelocity) }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: benchRun.list.flick(0, -benchRun.list.maximumFlickVelocity) }
+        ScriptAction { script: benchRun.list.flick(0, -benchRun.flickVelocity) }
         PauseAnimation { duration: 1500 }
-        ScriptAction { script: benchRun.list.flick(0, benchRun.list.maximumFlickVelocity) }
+        ScriptAction { script: benchRun.list.flick(0, benchRun.flickVelocity) }
         PauseAnimation { duration: 1500 }
         ScriptAction { script: benchRun.phaseStarted("jump") }
         ScriptAction { script: jumps.start() }

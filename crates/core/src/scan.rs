@@ -247,6 +247,9 @@ fn scan_using(
 /// or `None` if any folder can't be resolved (e.g. an unmounted drive): its
 /// tracks can't be told apart then, so nothing is removed.
 pub(crate) fn prune(conn: &mut Connection, folders: &[PathBuf]) -> Result<Option<usize>> {
+    // Keyed by the path as configured, so unlike tracks these can be told
+    // apart even while a folder is unavailable.
+    forget_folder_scans(conn, folders)?;
     // Tracks are stored under the canonical root the scan walked.
     let mut roots = Vec::with_capacity(folders.len() * 2);
     for folder in folders {
@@ -299,16 +302,6 @@ pub(crate) fn prune(conn: &mut Connection, folders: &[PathBuf]) -> Result<Option
             delete.execute([dir])?;
         }
     }
-    {
-        let mut stmt = tx.prepare("SELECT path FROM folder_scans")?;
-        let folders: Vec<String> = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        let mut delete = tx.prepare_cached("DELETE FROM folder_scans WHERE path = ?1")?;
-        for folder in folders.iter().filter(|folder| !inside(folder)) {
-            delete.execute([folder])?;
-        }
-    }
     refresh_albums(&tx, &touched)?;
     tx.commit()?;
     if !outside.is_empty() {
@@ -326,6 +319,20 @@ pub(crate) fn record_folder_scan(conn: &Connection, folder: &Path, at: SystemTim
     };
     conn.prepare_cached("INSERT OR REPLACE INTO folder_scans (path, scanned_ns) VALUES (?1, ?2)")?
         .execute(params![folder, unix_ns(at)])?;
+    Ok(())
+}
+
+/// Deletes the scan times of folders not in `folders`.
+fn forget_folder_scans(conn: &Connection, folders: &[PathBuf]) -> Result<()> {
+    let keep: HashSet<&str> = folders.iter().filter_map(|f| f.to_str()).collect();
+    let mut stmt = conn.prepare("SELECT path FROM folder_scans")?;
+    let recorded: Vec<String> = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut delete = conn.prepare_cached("DELETE FROM folder_scans WHERE path = ?1")?;
+    for folder in recorded.iter().filter(|f| !keep.contains(f.as_str())) {
+        delete.execute([folder])?;
+    }
     Ok(())
 }
 
