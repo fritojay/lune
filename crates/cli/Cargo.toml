@@ -1,0 +1,26 @@
+[package]
+name = "lune-cli"
+description = "Headless harness for the engine and library."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "lune-cli"
+path = "src/main.rs"
+
+[dependencies]
+lune-core.workspace = true
+lune-engine.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[features]
+# `gen-library`: fake library rows for UI benchmarks.
+synthetic = ["lune-core/synthetic"]
+
+[lints]
+workspace = true

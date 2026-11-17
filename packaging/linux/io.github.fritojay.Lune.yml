@@ -1,0 +1,52 @@
+id: io.github.fritojay.Lune
+# KDE 6.11 ships Qt 6.11.x on freedesktop 25.08.
+runtime: org.kde.Platform
+runtime-version: '6.11'
+sdk: org.kde.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: lune
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # cpal plays through ALSA, which the runtime routes to PulseAudio/PipeWire.
+  - --socket=pulseaudio
+  # Music is only ever read. Other folders: `flatpak override` (DEVELOPMENT.md).
+  - --filesystem=xdg-music:ro
+  - --filesystem=/run/media:ro
+  - --filesystem=/media:ro
+  - --filesystem=/mnt:ro
+  # MPRIS (media_controls.rs registers dbus_name "lune").
+  - --own-name=org.mpris.MediaPlayer2.lune
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    # cargo-sources.json's cargo config is under here.
+    CARGO_HOME: /run/build/lune/cargo
+modules:
+  - name: lune
+    buildsystem: simple
+    build-commands:
+      # This is the SDK extension's rustc, not rust-toolchain.toml's (rustup
+      # isn't in the SDK); log it so a release records what built it.
+      - rustc --version && cargo --version
+      # cxx-qt finds Qt through QMAKE; the SDK's Qt 6 qmake may be either name.
+      - QMAKE="$(command -v qmake6 || command -v qmake)" cargo build --offline --locked --release -p lune-app --bin lune
+      - install -Dm755 target/release/lune /app/bin/lune
+      - install -Dm644 packaging/linux/io.github.fritojay.Lune.desktop -t /app/share/applications
+      - install -Dm644 packaging/linux/io.github.fritojay.Lune.metainfo.xml -t /app/share/metainfo
+      - install -Dm644 packaging/icon/lune.svg /app/share/icons/hicolor/scalable/apps/io.github.fritojay.Lune.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - target
+          - .flatpak-builder
+          - build-dir
+          - repo
+          - dist
+          - tmp
+      - cargo-sources.json

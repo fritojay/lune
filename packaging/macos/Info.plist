@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Lune</string>
+    <key>CFBundleExecutable</key>
+    <string>lune</string>
+    <key>CFBundleIconFile</key>
+    <string>lune</string>
+    <key>CFBundleIdentifier</key>
+    <string>io.github.fritojay.Lune</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Lune</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@VERSION@</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.music</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>@MIN_MACOS@</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <!-- Shown when macOS asks for access to a protected folder a library is in. -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Lune reads music in the folders you add to your library. It never changes your files.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Lune reads music in the folders you add to your library. It never changes your files.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Lune reads music in the folders you add to your library. It never changes your files.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Lune reads music in the folders you add to your library. It never changes your files.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>Lune reads music in the folders you add to your library. It never changes your files.</string>
+</dict>
+</plist>

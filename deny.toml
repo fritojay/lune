@@ -1,0 +1,42 @@
+[graph]
+# Check every platform we ship or may ship, so target-gated deps are covered.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = false
+
+[advisories]
+yanked = "deny"
+ignore = [
+    # paste is unmaintained (no fixed version). It's a compile-time proc-macro
+    # pulled in by lofty, so nothing of it ships. Remove when lofty drops it.
+    { id = "RUSTSEC-2024-0436", reason = "compile-time only, via lofty; no alternative upstream" },
+]
+
+[licenses]
+# Permissive licenses only. Add one only after reading which crate needs it.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "MPL-2.0",     # symphonia (file-level copyleft; we don't modify it)
+    "Unicode-3.0", # unicode-ident
+    "Zlib",        # foldhash (via cxx and hashbrown)
+    "ISC",         # inotify (via notify), equivalent to MIT
+    "CC0-1.0",     # notify (public-domain dedication)
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# Workspace path deps have no version; that's fine for unpublished crates.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

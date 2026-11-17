@@ -1,0 +1,32 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# Music files are read-only (CONTRIBUTING.md). Anything that can create, overwrite,
+# move, or delete a file is banned; the few legitimate uses (the app's own DB
+# directory, the CLI capture file, test temp dirs) opt out with
+# `#[expect(clippy::disallowed_methods, reason = "...")]`.
+disallowed-methods = [
+    { path = "std::fs::write", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::remove_file", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::remove_dir", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::remove_dir_all", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::rename", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::copy", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::File::create", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::File::create_new", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::File::options", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "std::fs::OpenOptions::new", reason = "music files are read-only (CONTRIBUTING.md)" },
+    { path = "lofty::file::AudioFile::save_to", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+    { path = "lofty::file::AudioFile::save_to_path", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+    { path = "lofty::tag::TagExt::save_to", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+    { path = "lofty::tag::TagExt::save_to_path", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+    { path = "lofty::tag::TagExt::remove_from", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+    { path = "lofty::tag::TagExt::remove_from_path", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+    { path = "lofty::tag::TagType::remove_from", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+    { path = "lofty::tag::TagType::remove_from_path", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+]
+
+# Every lofty write path takes WriteOptions; banning the type catches any we missed.
+disallowed-types = [
+    { path = "lofty::config::WriteOptions", reason = "never call lofty write APIs (CONTRIBUTING.md)" },
+]

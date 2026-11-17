@@ -1,0 +1,14 @@
+use super::*;
+
+#[test]
+fn chain_shows_every_cause() {
+    let io = std::io::Error::other("disk on fire");
+    let err = EngineError::Output {
+        context: "starting the stream",
+        source: Box::new(io),
+    };
+    assert_eq!(
+        Chain(&err).to_string(),
+        "audio output error: starting the stream: disk on fire"
+    );
+}

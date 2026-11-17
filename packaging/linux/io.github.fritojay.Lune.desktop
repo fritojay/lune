@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Lune
+GenericName=Music Player
+Comment=Play your music library gaplessly
+Exec=lune
+Icon=io.github.fritojay.Lune
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;audio;player;gapless;flac;mp3;
+StartupWMClass=lune

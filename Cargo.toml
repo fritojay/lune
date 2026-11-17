@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/engine", "crates/cli", "crates/app"]
+default-members = ["crates/core", "crates/engine", "crates/cli", "crates/app"]
+
+[workspace.package]
+version = "0.1.4"
+edition = "2024"
+# Highest MSRV among dependencies (lofty, rusqlite). Checked in CI (msrv job).
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+lune-core = { path = "crates/core" }
+lune-engine = { path = "crates/engine" }
+
+thiserror = "2.0.21"
+anyhow = "1.0.104"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# CXX-Qt: pinned exact versions (see CONTRIBUTING.md). Only crates/app may depend on these.
+cxx = "=1.0.205"
+cxx-qt = "=0.10.0"
+cxx-qt-lib = { version = "=0.10.0", features = ["qt_gui", "qt_qml", "qt_quickcontrols"] }
+cxx-qt-build = "=0.10.0"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+
+# Never set `panic = "abort"`: the scanner and decoder catch panics from
+# lofty and Symphonia on malformed files (see scan::read_guarded, Source).
+[profile.release]
+lto = "thin"
+codegen-units = 1

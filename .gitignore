@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+.DS_Store
+
+# Machine-specific (see DEVELOPMENT.md)
+crates/app/.qmlls.ini
+
+# Local scratch notes
+/tmp/
+
+# Packaging output (packaging/macos/build-app.sh, flatpak-builder)
+/dist/
+/.flatpak-builder/
+/build-dir/
+/repo/

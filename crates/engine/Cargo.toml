@@ -1,0 +1,27 @@
+[package]
+name = "lune-engine"
+description = "Audio engine: Symphonia decode, rubato resampling, cpal output, lock-free ring buffer, gapless transitions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+
+[dependencies]
+cpal = "0.18.2"
+rtrb = "0.4.1"
+rubato = "5.0.1"
+# Only the formats in scope: every extra demuxer/decoder is more
+# parser surface exposed to untrusted files.
+symphonia = { version = "0.6.1", default-features = false, features = [
+    "opt-simd",
+    "mp3", "flac", "aac", "alac", "vorbis", "pcm",
+    "isomp4", "ogg", "wav", "aiff",
+    "id3v1", "id3v2", "ape",
+] }
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

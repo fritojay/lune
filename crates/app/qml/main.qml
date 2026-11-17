@@ -1,0 +1,362 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Dialogs
+import QtQuick.Layouts
+import com.lune.player
+
+ApplicationWindow {
+    id: window
+    width: layout.width
+    height: layout.height
+    visibility: layout.maximized ? Window.Maximized : Window.Windowed
+    title: player.hasTrack ? qsTr("%1 – %2").arg(player.title).arg(player.artist) : qsTr("Lune")
+
+    property bool queueShown: layout.queueShown
+    // The size while not maximized, which is what gets saved.
+    property real normalWidth: layout.width
+    property real normalHeight: layout.height
+
+    onWidthChanged: if (visibility === Window.Windowed) normalWidth = width
+    onHeightChanged: if (visibility === Window.Windowed) normalHeight = height
+
+    Component.onCompleted: layout.fit(Screen.desktopAvailableWidth, Screen.desktopAvailableHeight,
+                                      mainPane.SplitView.minimumWidth)
+
+    WindowLayout {
+        id: layout
+    }
+
+    Connections {
+        target: Qt.application
+        function onAboutToQuit() {
+            layout.save(window.normalWidth, window.normalHeight, window.visibility === Window.Maximized,
+                        filterPane.SplitView.preferredWidth, queuePane.SplitView.preferredWidth, window.queueShown)
+        }
+    }
+
+    // Native on macOS, where Qt moves "Preferences…" into the application menu by its text.
+    menuBar: MenuBar {
+        Menu {
+            title: qsTr("&File")
+            Action {
+                text: qsTr("&Preferences…")
+                shortcut: StandardKey.Preferences
+                onTriggered: settings.open()
+            }
+            Action {
+                text: qsTr("&Unavailable Tracks (%1)…").arg(library.missingCount)
+                onTriggered: unavailableList.open()
+            }
+        }
+        Menu {
+            title: qsTr("&Help")
+            Action {
+                text: qsTr("&Keyboard Shortcuts")
+                onTriggered: shortcutList.open()
+            }
+        }
+    }
+
+    LibraryManager {
+        id: library
+        onLoaded: {
+            filters.reload()
+            player.refresh()
+            bench.listLoaded(filters.trackCount)
+            if (bench.enabled)
+                benchRun.start()
+        }
+        onLibraryChanged: {
+            filters.reload()
+            player.refresh()
+        }
+        onMissingChanged: {
+            missingTracks.refresh()
+            queueModel.refresh()
+        }
+    }
+
+    MissingModel {
+        id: missingTracks
+    }
+
+    FilterModel {
+        id: filters
+        onViewChanged: reset => {
+            // A rescan keeps the list where it was.
+            const y = trackPane.list.contentY
+            albums.refresh()
+            trackPane.resetView(reset, y)
+        }
+    }
+
+    AlbumListModel {
+        id: albums
+    }
+
+    QueueModel {
+        id: queueModel
+        currentRow: player.queueIndex
+    }
+
+    PlayerController {
+        id: player
+        onQueueEdited: queueModel.refresh()
+        onTrackStarted: filters.played()
+    }
+
+    BenchProbe {
+        id: bench
+    }
+
+    onFrameSwapped: bench.firstFrame()
+
+    Timer {
+        interval: 100
+        running: true
+        repeat: true
+        onTriggered: player.poll()
+    }
+
+    Shortcut {
+        id: playPauseKey
+        sequence: "Space"
+        onActivated: player.togglePause()
+    }
+    Shortcut {
+        id: seekBackKey
+        sequence: "Left"
+        onActivated: player.seekBy(-5)
+    }
+    Shortcut {
+        id: seekForwardKey
+        sequence: "Right"
+        onActivated: player.seekBy(5)
+    }
+    Shortcut {
+        id: previousKey
+        sequence: "Ctrl+Left"
+        onActivated: player.previous()
+    }
+    Shortcut {
+        id: nextKey
+        sequence: "Ctrl+Right"
+        onActivated: player.next()
+    }
+    Shortcut {
+        id: findKey
+        sequences: [StandardKey.Find]
+        onActivated: filterPane.focusSearch()
+    }
+    // Only names the Preferences menu item's key for the shortcut list, which reads
+    // each key from its Shortcut so it shows what this platform binds.
+    Shortcut {
+        id: preferencesKey
+        sequences: [StandardKey.Preferences]
+        enabled: false
+    }
+
+    ShortcutsDialog {
+        id: shortcutList
+        anchors.centerIn: parent
+        width: Math.min(480, window.width - 40)
+        shortcuts: [
+            [playPauseKey.nativeText, qsTr("Play or pause")],
+            [seekBackKey.nativeText, qsTr("Back 5 seconds")],
+            [seekForwardKey.nativeText, qsTr("Forward 5 seconds")],
+            [previousKey.nativeText, qsTr("Previous track")],
+            [nextKey.nativeText, qsTr("Next track")],
+            [findKey.nativeText, qsTr("Search")],
+            [qsTr("Esc"), qsTr("Clear the search (while typing in it)")],
+            [qsTr("Up / Down"), qsTr("Previous or next entry in the filter list")],
+            [qsTr("Return"), qsTr("Press the focused speaker or queue button")],
+            [qsTr("Up / Down"), qsTr("Change the volume (while its slider is open)")],
+            [qsTr("Esc"), qsTr("Close the volume slider")],
+            [preferencesKey.nativeText, qsTr("Preferences")],
+        ]
+    }
+
+    FolderDialog {
+        id: folderDialog
+        title: qsTr("Add a music folder")
+        options: library.nativeFolderDialog ? 0 : FolderDialog.DontUseNativeDialog
+        onAccepted: library.addFolder(selectedFolder)
+    }
+
+    PreferencesDialog {
+        id: settings
+        anchors.centerIn: parent
+        width: Math.min(560, window.width - 40)
+        folders: library.folders
+        busy: library.busy
+        status: library.status
+        onAddFolderRequested: folderDialog.open()
+        onRemoveFolderRequested: index => library.removeFolder(index)
+        onRescanRequested: library.rescan()
+    }
+
+    UnavailableDialog {
+        id: unavailableList
+        anchors.centerIn: parent
+        width: Math.min(720, window.width - 40)
+        height: Math.min(560, window.height - 40)
+        model: missingTracks
+        count: library.missingCount
+        onForgetRequested: trackId => library.forgetMissing(trackId)
+        onForgetAllRequested: library.forgetAllMissing()
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        // Errors from the library thread (settings file, database).
+        ErrorBanner {
+            Layout.fillWidth: true
+            message: library.error
+            onDismissed: library.clearError()
+        }
+
+        // The audio output failed (e.g. its device was unplugged).
+        ErrorBanner {
+            Layout.fillWidth: true
+            message: player.error
+            onDismissed: player.clearError()
+        }
+
+        // Quick filters: picks which grouping the filter pane lists.
+        GroupingBar {
+            Layout.fillWidth: true
+            Layout.margins: 6
+            grouping: filters.grouping
+            onGroupingChosen: grouping => filters.setGrouping(grouping)
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: 1
+            color: window.palette.mid
+        }
+
+        SplitView {
+            id: panes
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+
+            // A thin visible line, with a wider grab area so it stays easy to drag.
+            handle: Rectangle {
+                id: paneHandle
+                implicitWidth: 1
+                color: SplitHandle.pressed || SplitHandle.hovered ? window.palette.highlight : window.palette.mid
+                containmentMask: Item {
+                    x: (paneHandle.width - width) / 2
+                    width: 9
+                    height: panes.height
+                }
+            }
+
+            FilterPane {
+                id: filterPane
+                SplitView.preferredWidth: layout.filterPaneWidth
+                SplitView.minimumWidth: 160
+                model: filters
+                currentRow: filters.currentRow
+                cover: player.cover
+                onSearchEdited: text => filters.setSearch(text)
+                onRowChosen: row => filters.select(row)
+            }
+
+            ColumnLayout {
+                id: mainPane
+                SplitView.fillWidth: true
+                SplitView.minimumWidth: Math.max(400, nowPlayingBar.minimumWidth)
+                spacing: 0
+
+                TrackPane {
+                    id: trackPane
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    model: albums
+                    albumCount: albums.albumCount
+                    trackCount: filters.trackCount
+                    title: filters.title
+                    loading: filters.loading
+                    sortColumn: filters.sortColumn
+                    sortDescending: filters.sortDescending
+                    hasFolders: library.folders.length > 0
+                    scanStatus: library.busy ? library.status : ""
+                    currentTrackId: player.currentTrackId
+                    onSortClicked: column => filters.sortBy(column)
+                    onSortChosen: (column, descending) => filters.setSort(column, descending)
+                    onPlayRequested: start => window.playView(start)
+                    onPlayNextRequested: (start, tracks) => player.playNextFromView(start, tracks)
+                    onAddToQueueRequested: (start, tracks) => player.addFromView(start, tracks)
+                    onAddFolderRequested: folderDialog.open()
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 1
+                    color: window.palette.mid
+                }
+
+                NowPlayingBar {
+                    id: nowPlayingBar
+                    Layout.fillWidth: true
+                    available: player.available
+                    hasTrack: player.hasTrack
+                    playing: player.playing
+                    title: player.title
+                    artist: player.artist
+                    album: player.album
+                    position: player.position
+                    duration: player.duration
+                    volume: player.volume
+                    muted: player.muted
+                    queueShown: window.queueShown
+                    onPrevious: player.previous()
+                    onTogglePause: player.togglePause()
+                    onNext: player.next()
+                    onSeek: seconds => player.seek(seconds)
+                    onVolumeMoved: volume => player.setVolume(volume)
+                    onMuteToggled: player.toggleMute()
+                    onQueueToggled: shown => window.queueShown = shown
+                }
+            }
+
+            QueuePane {
+                id: queuePane
+                visible: window.queueShown
+                SplitView.preferredWidth: layout.queuePaneWidth
+                SplitView.minimumWidth: 200
+                model: queueModel
+                count: queueModel.count
+                currentRow: queueModel.currentRow
+                totalDuration: queueModel.totalDuration
+                shuffle: player.shuffle
+                onShuffleToggled: shuffle => player.setShuffle(shuffle)
+                onClearRequested: player.clearQueue()
+                onPlayRequested: row => player.playQueueRow(row)
+                onRemoveRequested: row => player.removeQueueRow(row)
+                onMoveRequested: (from, to) => player.moveQueueRow(from, to)
+            }
+        }
+    }
+
+    function playView(index) {
+        player.playView(index)
+        queuePane.showCurrent()
+    }
+
+    BenchRun {
+        id: benchRun
+        list: trackPane.list
+        onPhaseStarted: name => bench.beginPhase(name)
+        onFrame: seconds => bench.frame(seconds)
+        onFinished: {
+            bench.finish(window.screen.refreshRate)
+            Qt.quit()
+        }
+    }
+}

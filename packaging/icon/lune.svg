@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The tile follows the macOS grid: 824 px with a 100 px margin. -->
+  <defs>
+    <linearGradient id="space" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a1440"/>
+      <stop offset="1" stop-color="#05060f"/>
+    </linearGradient>
+    <radialGradient id="nebulaA" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8a3ffc" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#8a3ffc" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="nebulaB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#2fb8ff" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#2fb8ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.6" stop-color="#cfc4ff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#cfc4ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="surface" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#fbf7ff"/>
+      <stop offset="0.6" stop-color="#cdc5e6"/>
+      <stop offset="1" stop-color="#8e86b3"/>
+    </radialGradient>
+    <radialGradient id="label" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#ffd27a"/>
+      <stop offset="1" stop-color="#ff7a45"/>
+    </radialGradient>
+    <!-- The night side of the moon, offset to leave a lit crescent. -->
+    <mask id="night">
+      <circle cx="512" cy="512" r="280" fill="#fff"/>
+      <circle cx="404" cy="440" r="300" fill="#000" filter="url(#soft)"/>
+    </mask>
+    <clipPath id="tile">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+    <clipPath id="disc">
+      <circle cx="512" cy="512" r="280"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#space)"/>
+    <ellipse cx="250" cy="820" rx="360" ry="260" fill="url(#nebulaA)"/>
+    <ellipse cx="820" cy="210" rx="300" ry="220" fill="url(#nebulaB)"/>
+    <g fill="#ffffff">
+      <circle cx="633" cy="168" r="3" opacity="0.41"/><circle cx="579" cy="841" r="2" opacity="0.37"/><circle cx="459" cy="166" r="1.5" opacity="0.68"/><circle cx="158" cy="565" r="2" opacity="0.73"/><circle cx="579" cy="160" r="3" opacity="0.59"/><circle cx="895" cy="147" r="2" opacity="0.52"/><circle cx="226" cy="205" r="2" opacity="0.69"/><circle cx="658" cy="193" r="3" opacity="0.73"/><circle cx="160" cy="158" r="2" opacity="0.65"/><circle cx="484" cy="852" r="2" opacity="0.53"/><circle cx="898" cy="205" r="2.5" opacity="0.45"/><circle cx="385" cy="860" r="2.5" opacity="0.37"/><circle cx="870" cy="491" r="4" opacity="0.39"/><circle cx="823" cy="389" r="2.5" opacity="0.56"/><circle cx="847" cy="509" r="2" opacity="0.62"/><circle cx="769" cy="805" r="2" opacity="0.77"/><circle cx="903" cy="659" r="2.5" opacity="0.92"/><circle cx="231" cy="252" r="2" opacity="0.75"/><circle cx="120" cy="778" r="2" opacity="0.51"/><circle cx="113" cy="447" r="2" opacity="0.72"/><circle cx="366" cy="211" r="3" opacity="0.92"/><circle cx="875" cy="657" r="3" opacity="0.59"/><circle cx="431" cy="193" r="4" opacity="0.59"/><circle cx="263" cy="902" r="2.5" opacity="0.45"/><circle cx="383" cy="152" r="1.5" opacity="0.69"/><circle cx="541" cy="873" r="3" opacity="0.37"/><circle cx="229" cy="313" r="2" opacity="0.71"/><circle cx="502" cy="896" r="2.5" opacity="0.64"/><circle cx="179" cy="192" r="2" opacity="0.79"/><circle cx="875" cy="401" r="4" opacity="0.68"/><circle cx="132" cy="535" r="4" opacity="0.87"/><circle cx="289" cy="762" r="2" opacity="0.83"/><circle cx="768" cy="705" r="2" opacity="0.47"/><circle cx="906" cy="745" r="2.5" opacity="0.51"/><circle cx="667" cy="879" r="2.5" opacity="0.84"/><circle cx="894" cy="175" r="1.5" opacity="0.49"/><circle cx="268" cy="274" r="3" opacity="0.94"/><circle cx="601" cy="112" r="4" opacity="0.56"/>
+    </g>
+    <circle cx="512" cy="512" r="345" fill="url(#glow)"/>
+    <circle cx="512" cy="512" r="280" fill="url(#surface)"/>
+    <g clip-path="url(#disc)" fill="#7d74a6" fill-opacity="0.35">
+      <circle cx="390" cy="360" r="42"/>
+      <circle cx="660" cy="430" r="30"/>
+      <circle cx="600" cy="680" r="52"/>
+      <circle cx="350" cy="620" r="24"/>
+      <circle cx="470" cy="740" r="18"/>
+      <circle cx="700" cy="300" r="16"/>
+    </g>
+    <!-- Record grooves cut across the lunar surface. -->
+    <g fill="none" stroke="#3a3366" stroke-opacity="0.22" stroke-width="3">
+      <circle cx="512" cy="512" r="110"/>
+      <circle cx="512" cy="512" r="124"/>
+      <circle cx="512" cy="512" r="138"/>
+      <circle cx="512" cy="512" r="152"/>
+      <circle cx="512" cy="512" r="166"/>
+      <circle cx="512" cy="512" r="180"/>
+      <circle cx="512" cy="512" r="194"/>
+      <circle cx="512" cy="512" r="208"/>
+      <circle cx="512" cy="512" r="222"/>
+      <circle cx="512" cy="512" r="236"/>
+      <circle cx="512" cy="512" r="250"/>
+      <circle cx="512" cy="512" r="264"/>
+    </g>
+    <circle cx="512" cy="512" r="280" fill="#0d0b24" fill-opacity="0.72" mask="url(#night)"/>
+    <circle cx="512" cy="512" r="88" fill="url(#label)"/>
+    <circle cx="512" cy="512" r="12" fill="#0d0b24"/>
+  </g>
+</svg>

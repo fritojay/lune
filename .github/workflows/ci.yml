@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Third-party actions are pinned to full commit SHAs (tag in the comment) so a
+# moved tag can't change what runs. Update the SHA and the comment together.
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned Qt version; must match DEVELOPMENT.md and the Fedora release below.
+  QT_VERSION: "6.11.2"
+
+jobs:
+  linux:
+    name: Linux (Fedora 44)
+    runs-on: ubuntu-latest
+    # fedora:44, pinned by digest (update deliberately).
+    container: fedora@sha256:15da97ed9aa94dd3d92c3925eb89520f6c80e07ea7ee24cba848d1f8b6912b3e
+    env:
+      QMAKE: /usr/bin/qmake6
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+    steps:
+      - name: Install system packages
+        run: |
+          dnf -y install \
+            gcc gcc-c++ lld pkgconf-pkg-config git tar xz which \
+            qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel \
+            alsa-lib-devel dbus-devel
+      - name: Check Qt version
+        run: |
+          $QMAKE -query QT_VERSION
+          test "$($QMAKE -query QT_VERSION)" = "$QT_VERSION"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.100.0 # keep in sync with rust-toolchain.toml
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: test
+        run: cargo test --locked --workspace --all-features
+      - name: build
+        run: cargo build --locked --workspace --all-targets
+      - name: Smoke test (app launches headless)
+        run: |
+          set +e
+          timeout 5 target/debug/lune
+          code=$?
+          # 124 = still running when the timeout fired, i.e. QML loaded and the event loop ran.
+          test "$code" -eq 124 || { echo "lune exited early with code $code"; exit 1; }
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: ${{ env.QT_VERSION }}
+          aqtversion: "==3.3.0"
+          cache: true
+      - name: Point CXX-Qt at the pinned Qt
+        run: |
+          echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> "$GITHUB_ENV"
+          "$QT_ROOT_DIR/bin/qmake" -query QT_VERSION
+          test "$("$QT_ROOT_DIR/bin/qmake" -query QT_VERSION)" = "$QT_VERSION"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.100.0 # keep in sync with rust-toolchain.toml
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: test
+        run: cargo test --locked --workspace --all-features
+      - name: build
+        run: cargo build --locked --workspace --all-targets
+      - name: Smoke test (app launches headless)
+        run: |
+          set +e
+          # macOS has no coreutils `timeout`; use perl's alarm instead.
+          perl -e 'alarm 5; exec @ARGV' target/debug/lune
+          code=$?
+          # 142 = killed by SIGALRM while still running, i.e. QML loaded and the event loop ran.
+          test "$code" -eq 142 || { echo "lune exited early with code $code"; exit 1; }
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+
+  packaging:
+    name: Packaging files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install validators
+        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils appstream
+      # The Flatpak builds offline from this list, so it must match Cargo.lock.
+      - name: cargo-sources.json is up to date
+        run: packaging/linux/cargo-sources.sh --check
+      - name: Cargo.toml and the AppStream release agree on the version
+        run: packaging/check-version.py
+      - name: Desktop entry and AppStream metadata
+        run: |
+          desktop-file-validate packaging/linux/io.github.fritojay.Lune.desktop
+          appstreamcli validate --no-net packaging/linux/io.github.fritojay.Lune.metainfo.xml
+      - name: Shell scripts
+        run: shellcheck packaging/macos/build-app.sh packaging/linux/build-flatpak.sh packaging/linux/cargo-sources.sh
+
+  # The workspace's rust-version (Cargo.toml) must stay true. lune-app is
+  # excluded: it needs Qt, and its deps (cxx-qt) set their own MSRV.
+  msrv:
+    name: MSRV (Rust 1.89)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install ALSA headers (cpal)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.89"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: check
+        run: cargo +1.89 check --locked --workspace --exclude lune-app --all-targets --all-features
