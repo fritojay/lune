@@ -2,6 +2,8 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use lune_core::SCROLL_SPEEDS;
+
 use super::*;
 use crate::test_util::{TempDir, wav_bytes};
 
@@ -203,6 +205,7 @@ fn startup_drops_tracks_outside_the_configured_folders() {
     prescanned(&dir, &["a", "b"]);
     Settings {
         library_folders: vec![dir.path().join("a")],
+        ..Settings::default()
     }
     .save(&Harness::config(&dir))
     .unwrap();
@@ -217,6 +220,7 @@ fn startup_picks_up_changes_made_while_the_app_was_closed() {
     prescanned(&dir, &["a"]);
     Settings {
         library_folders: vec![dir.path().join("a")],
+        ..Settings::default()
     }
     .save(&Harness::config(&dir))
     .unwrap();
@@ -224,6 +228,44 @@ fn startup_picks_up_changes_made_while_the_app_was_closed() {
     let h = Harness::start(dir);
     assert_eq!(h.loaded_size(), 2);
     assert_eq!(h.library_size(), 3);
+}
+
+#[test]
+fn startup_publishes_the_saved_scroll_speed() {
+    let dir = TempDir::new();
+    Settings {
+        scroll_speed: 6,
+        ..Settings::default()
+    }
+    .save(&Harness::config(&dir))
+    .unwrap();
+    let h = Harness::start(dir);
+    let speed = h.wait_for(|u| match u {
+        Update::ScrollSpeed(speed) => Some(speed),
+        _ => None,
+    });
+    assert_eq!(speed, 6);
+}
+
+#[test]
+fn setting_the_scroll_speed_saves_it_clamped_and_keeps_the_folders() {
+    let dir = two_folders();
+    let a = dir.path().join("a");
+    let h = Harness::start(dir);
+    h.idle();
+    h.service.send(Job::AddFolder(a.clone()));
+    assert_eq!(h.library_size(), 2);
+    h.idle();
+    h.service.send(Job::SetScrollSpeed(u32::MAX));
+    let speed = h.wait_for(|u| match u {
+        Update::ScrollSpeed(speed) => Some(speed),
+        Update::Library(_) => panic!("the library should not change"),
+        _ => None,
+    });
+    assert_eq!(speed, *SCROLL_SPEEDS.end());
+    let saved = Settings::load(&Harness::config(&h.dir)).unwrap().unwrap();
+    assert_eq!(saved.scroll_speed, *SCROLL_SPEEDS.end());
+    assert_eq!(saved.library_folders, [a]);
 }
 
 #[test]
@@ -239,6 +281,60 @@ fn a_broken_settings_file_is_reported_and_drops_nothing() {
         _ => None,
     });
     h.idle();
+}
+
+#[test]
+fn a_broken_settings_file_is_not_saved_over_and_drops_nothing_after_a_restart() {
+    let dir = two_folders();
+    prescanned(&dir, &["a", "b"]);
+    let broken = b"library_folders = [";
+    dir.write("config/config.toml", broken);
+    let h = Harness::start(dir);
+    h.idle();
+    for job in [
+        Job::SetScrollSpeed(7),
+        Job::AddFolder(h.dir.path().join("a")),
+    ] {
+        h.service.send(job);
+        h.wait_for(|u| matches!(u, Update::Error(_)).then_some(()));
+        h.idle();
+    }
+    assert_eq!(std::fs::read(Harness::config(&h.dir)).unwrap(), broken);
+
+    let Harness { dir, service, .. } = h;
+    drop(service);
+    let h = Harness::start(dir);
+    assert_eq!(h.loaded_size(), 3);
+    h.wait_for(|u| match u {
+        Update::Library(_) => panic!("nothing should have been dropped"),
+        _ => matches!(u, Update::Status(None)).then_some(()),
+    });
+}
+
+#[test]
+fn when_the_library_cannot_open_the_saved_settings_still_load_and_are_kept() {
+    let dir = TempDir::new();
+    // A directory where the DB file should be.
+    dir.write("data/library.sqlite3/x", b"");
+    let a = dir.path().join("a");
+    Settings {
+        library_folders: vec![a.clone()],
+        scroll_speed: 6,
+    }
+    .save(&Harness::config(&dir))
+    .unwrap();
+    let h = Harness::start(dir);
+    let speed = h.wait_for(|u| match u {
+        Update::ScrollSpeed(speed) => Some(speed),
+        _ => None,
+    });
+    assert_eq!(speed, 6);
+    h.idle();
+    h.service.send(Job::SetScrollSpeed(2));
+    h.idle();
+    let saved = Settings::load(&Harness::config(&h.dir)).unwrap().unwrap();
+    assert_eq!(saved.scroll_speed, 2);
+    assert_eq!(saved.library_folders, [a]);
 }
 
 #[test]
@@ -348,6 +444,7 @@ fn startup_rereads_a_file_rewritten_in_place_while_the_app_was_closed() {
     prescanned(&dir, &["a"]);
     Settings {
         library_folders: vec![dir.path().join("a")],
+        ..Settings::default()
     }
     .save(&Harness::config(&dir))
     .unwrap();
@@ -577,6 +674,7 @@ fn a_rescan_all_updates_every_folder_and_survives_a_restart() {
     let (a, b) = (dir.path().join("a"), dir.path().join("b"));
     Settings {
         library_folders: vec![a.clone(), b.clone()],
+        ..Settings::default()
     }
     .save(&Harness::config(&dir))
     .unwrap();
@@ -627,6 +725,7 @@ fn an_unavailable_folder_stays_unscanned() {
     let (a, gone) = (dir.path().join("a"), dir.path().join("unmounted"));
     Settings {
         library_folders: vec![a.clone(), gone.clone()],
+        ..Settings::default()
     }
     .save(&Harness::config(&dir))
     .unwrap();

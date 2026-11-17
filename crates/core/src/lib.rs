@@ -28,7 +28,7 @@ pub use paths::{default_config_path, default_db_path, default_thumbnail_dir, win
 pub use query::{AlbumRow, LibraryStats, ListTrack, MissingTrack, TrackRow};
 pub use queue::{Queue, QueueItem, SlotId};
 pub use scan::{ScanMode, ScanProgress, ScanReport};
-pub use settings::Settings;
+pub use settings::{DEFAULT_SCROLL_SPEED, SCROLL_SPEEDS, Settings, clamp_scroll_speed};
 pub use tags::{EmbeddedArt, TrackMeta, is_audio_path, read_track_meta};
 pub use watch::FolderWatcher;
 pub use window_state::{BrowseState, WindowState};

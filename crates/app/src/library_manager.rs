@@ -15,6 +15,9 @@ use std::time::SystemTime;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QMap, QMapPair_QString_QVariant, QString, QUrl, QVariant};
 
+use lune_core::{DEFAULT_SCROLL_SPEED, SCROLL_SPEEDS, clamp_scroll_speed};
+
+use crate::format::qml_int;
 use crate::library_service::{Folder, Job, LibraryService, RESCAN_EVERY, Update};
 use crate::{covers, format, session};
 
@@ -39,6 +42,9 @@ pub mod qobject {
         #[qproperty(QString, status, READ, NOTIFY)]
         #[qproperty(QString, error, READ, NOTIFY)]
         #[qproperty(i32, missing_count, cxx_name = "missingCount", READ, NOTIFY)]
+        #[qproperty(i32, scroll_speed, cxx_name = "scrollSpeed", READ, NOTIFY)]
+        #[qproperty(i32, min_scroll_speed, cxx_name = "minScrollSpeed", READ, CONSTANT)]
+        #[qproperty(i32, max_scroll_speed, cxx_name = "maxScrollSpeed", READ, CONSTANT)]
         #[qproperty(
             bool,
             native_folder_dialog,
@@ -85,6 +91,11 @@ pub mod qobject {
         #[cxx_name = "forgetAllMissing"]
         fn forget_all_missing(self: Pin<&mut LibraryManager>);
 
+        /// Clamped to `minScrollSpeed`..=`maxScrollSpeed`.
+        #[qinvokable]
+        #[cxx_name = "setScrollSpeed"]
+        fn set_scroll_speed(self: Pin<&mut LibraryManager>, speed: i32);
+
         #[qinvokable]
         #[cxx_name = "clearError"]
         fn clear_error(self: Pin<&mut LibraryManager>);
@@ -101,6 +112,9 @@ pub struct LibraryManagerRust {
     status: QString,
     error: QString,
     missing_count: i32,
+    scroll_speed: i32,
+    min_scroll_speed: i32,
+    max_scroll_speed: i32,
     native_folder_dialog: bool,
     folder_paths: Vec<PathBuf>,
     service: Option<LibraryService>,
@@ -123,6 +137,9 @@ impl cxx_qt::Initialize for qobject::LibraryManager {
         );
         self.as_mut().rust_mut().service = Some(service);
         self.as_mut().rust_mut().busy = true;
+        self.as_mut().rust_mut().scroll_speed = qml_int(DEFAULT_SCROLL_SPEED);
+        self.as_mut().rust_mut().min_scroll_speed = qml_int(*SCROLL_SPEEDS.start());
+        self.as_mut().rust_mut().max_scroll_speed = qml_int(*SCROLL_SPEEDS.end());
         self.as_mut().rust_mut().native_folder_dialog = !in_flatpak(Path::new("/.flatpak-info"));
     }
 }
@@ -156,6 +173,7 @@ impl qobject::LibraryManager {
                 self.as_mut().rust_mut().folders = list;
                 self.folders_changed();
             }
+            Update::ScrollSpeed(speed) => self.show_scroll_speed(speed),
             Update::Status(status) => {
                 let busy = status.is_some();
                 if self.busy != busy {
@@ -209,10 +227,29 @@ impl qobject::LibraryManager {
         self.send(Job::ForgetAllMissing);
     }
 
+    fn set_scroll_speed(mut self: Pin<&mut Self>, speed: i32) {
+        let speed = scroll_speed_from_qml(speed);
+        // Shown now: the library thread saves it only once a running scan ends.
+        self.as_mut().show_scroll_speed(speed);
+        self.send(Job::SetScrollSpeed(speed));
+    }
+
+    fn show_scroll_speed(mut self: Pin<&mut Self>, speed: u32) {
+        let speed = qml_int(speed);
+        if self.scroll_speed != speed {
+            self.as_mut().rust_mut().scroll_speed = speed;
+            self.scroll_speed_changed();
+        }
+    }
+
     fn clear_error(mut self: Pin<&mut Self>) {
         self.as_mut().rust_mut().error = QString::default();
         self.error_changed();
     }
+}
+
+fn scroll_speed_from_qml(speed: i32) -> u32 {
+    clamp_scroll_speed(u32::try_from(speed).unwrap_or(0))
 }
 
 fn folder_entry(folder: &Folder) -> QVariant {

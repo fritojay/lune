@@ -7,6 +7,7 @@ Dialog {
     id: unavailable
     required property var model
     required property int count
+    required property int scrollSpeed
 
     signal forgetRequested(real trackId)
     signal forgetAllRequested()
@@ -38,6 +39,10 @@ Dialog {
                 clip: true
                 model: unavailable.model
                 ScrollBar.vertical: ListScrollBar {}
+                WheelScroller {
+                    view: trackList
+                    speed: unavailable.scrollSpeed
+                }
 
                 Label {
                     anchors.centerIn: parent

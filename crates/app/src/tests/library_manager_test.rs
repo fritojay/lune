@@ -14,6 +14,14 @@ fn without_the_info_file_it_is_not_a_flatpak() {
     assert!(!in_flatpak(&dir.path().join(".flatpak-info")));
 }
 
+#[test]
+fn a_scroll_speed_from_qml_is_clamped_even_when_negative() {
+    assert_eq!(scroll_speed_from_qml(4), 4);
+    assert_eq!(scroll_speed_from_qml(-5), *SCROLL_SPEEDS.start());
+    assert_eq!(scroll_speed_from_qml(0), *SCROLL_SPEEDS.start());
+    assert_eq!(scroll_speed_from_qml(i32::MAX), *SCROLL_SPEEDS.end());
+}
+
 fn entry_value(entry: &QVariant, key: &str) -> Option<QVariant> {
     entry
         .value::<QMap<QMapPair_QString_QVariant>>()

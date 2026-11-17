@@ -52,6 +52,11 @@ pub fn epoch_ms(ns: i64) -> f64 {
     (ns / 1_000_000) as f64
 }
 
+/// Capped for QML, whose ints are 32-bit.
+pub fn qml_int(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
+}
+
 fn or(text: &str, placeholder: &str) -> String {
     if text.trim().is_empty() {
         placeholder.to_owned()

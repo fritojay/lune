@@ -38,6 +38,7 @@ pub enum Job {
     /// Deletes these tracks if they are missing.
     ForgetMissing(Vec<i64>),
     ForgetAllMissing,
+    SetScrollSpeed(u32),
 }
 
 pub enum Update {
@@ -48,6 +49,7 @@ pub enum Update {
     /// The tracks whose files are missing; sent with every `Loaded` and `Library`.
     Missing(Vec<MissingTrack>),
     Folders(Vec<Folder>),
+    ScrollSpeed(u32),
     /// What the thread is doing, or `None` when idle.
     Status(Option<String>),
     Error(String),
@@ -85,6 +87,7 @@ impl LibraryService {
                     config_path,
                     thumbnail_dir,
                     settings: Settings::default(),
+                    settings_unreadable: false,
                     rescan_every,
                     now: Box::new(now),
                     watcher: None,
@@ -110,6 +113,9 @@ struct Worker {
     config_path: PathBuf,
     thumbnail_dir: Option<PathBuf>,
     settings: Settings,
+    /// The settings file exists but couldn't be read, so `settings` are the
+    /// defaults and saving them would replace the user's folders with none.
+    settings_unreadable: bool,
     rescan_every: Duration,
     now: Box<dyn Fn() -> SystemTime + Send>,
     watcher: Option<FolderWatcher>,
@@ -152,6 +158,7 @@ impl Worker {
                     Job::Rescan(dirs) => rescan.extend(dirs),
                     Job::ForgetMissing(ids) => forgot |= self.forget_missing(Some(&ids)),
                     Job::ForgetAllMissing => forgot |= self.forget_missing(None),
+                    Job::SetScrollSpeed(speed) => self.set_scroll_speed(speed),
                 }
             }
             // Both are thorough: a watched change may be a file rewritten in
@@ -167,6 +174,9 @@ impl Worker {
     }
 
     fn startup(&mut self) {
+        // Read even if the library fails to open, so the folders are known
+        // before anything could save over them.
+        let settings = Settings::load(&self.config_path);
         let opened = Library::open(&self.db_path).and_then(|library| {
             let catalog = Catalog::new(library.track_list()?);
             let queue = library.load_queue()?;
@@ -186,22 +196,29 @@ impl Worker {
             Err(err) => {
                 self.error(format!("Could not open the library: {err}"));
                 (self.notify)(Update::Loaded(Catalog::new(Vec::new()), Queue::default()));
-                return;
             }
         }
 
         // Without a settings file the DB may hold a library built with
         // lune-cli; only a file the user (or the app) wrote decides what to drop.
         let mut changed = false;
-        match Settings::load(&self.config_path) {
+        match settings {
             Ok(Some(settings)) => {
                 self.settings = settings;
                 changed |= self.prune();
             }
             Ok(None) => {}
-            Err(err) => self.error(format!("{err}. The library folders are not loaded.")),
+            Err(err) => {
+                self.settings_unreadable = true;
+                self.error(format!("{err}. The library folders are not loaded."));
+            }
         }
         self.publish_folders();
+        (self.notify)(Update::ScrollSpeed(self.settings.scroll_speed));
+        if self.library.is_none() {
+            (self.notify)(Update::Status(None));
+            return;
+        }
         self.watch();
         // Thorough: files retagged in place while the app was closed leave
         // their directories' mtimes alone.
@@ -232,6 +249,7 @@ impl Worker {
             return false;
         }
         self.save_settings();
+        self.publish_folders();
         self.watch();
         // A folder that replaced folders inside it rescans them too; that's
         // incremental, so it's cheap.
@@ -243,6 +261,7 @@ impl Worker {
             return false;
         }
         self.save_settings();
+        self.publish_folders();
         self.watch();
         self.prune()
     }
@@ -267,10 +286,23 @@ impl Worker {
     }
 
     fn save_settings(&mut self) {
+        if self.settings_unreadable {
+            self.error(format!(
+                "The settings were not saved, because {} could not be read. Fix it and restart Lune.",
+                self.config_path.display()
+            ));
+            return;
+        }
         if let Err(err) = self.settings.save(&self.config_path) {
             self.error(format!("Could not save the settings: {err}"));
         }
-        self.publish_folders();
+    }
+
+    fn set_scroll_speed(&mut self, speed: u32) {
+        if self.settings.set_scroll_speed(speed) {
+            self.save_settings();
+        }
+        (self.notify)(Update::ScrollSpeed(self.settings.scroll_speed));
     }
 
     fn publish_folders(&self) {

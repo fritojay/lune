@@ -9,6 +9,7 @@ ColumnLayout {
     required property var model
     required property int currentRow
     required property url cover
+    required property int scrollSpeed
     signal searchEdited(string text)
     signal rowChosen(int row)
 
@@ -48,6 +49,10 @@ ColumnLayout {
         onCurrentIndexChanged: filterPane.rowChosen(currentIndex)
         ScrollBar.vertical: ListScrollBar {
             id: filterScroll
+        }
+        WheelScroller {
+            view: filterList
+            speed: filterPane.scrollSpeed
         }
 
         delegate: Rectangle {

@@ -16,6 +16,7 @@ ColumnLayout {
     required property bool sortDescending
     required property bool hasFolders
     required property string scanStatus
+    required property int scrollSpeed
     required property real currentTrackId
     // A column sort shows a flat track list instead of albums with covers.
     readonly property bool sorted: sortColumn >= 0
@@ -189,6 +190,10 @@ ColumnLayout {
         maximumFlickVelocity: Theme.maxFlickVelocity
         ScrollBar.vertical: ListScrollBar {
             id: albumScroll
+        }
+        WheelScroller {
+            view: albumList
+            speed: trackPane.scrollSpeed
         }
         property int selectedIndex: -1
 

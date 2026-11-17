@@ -11,7 +11,7 @@ use std::pin::Pin;
 use cxx_qt::CxxQtType;
 use lune_core::WindowState;
 
-use crate::session;
+use crate::{format::qml_int, session};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -128,10 +128,6 @@ impl qobject::WindowLayout {
             tracing::warn!(%err, "the window layout was not saved");
         }
     }
-}
-
-fn qml_int(value: u32) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 /// QML sizes are reals. The cast saturates, and NaN becomes 0.

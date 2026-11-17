@@ -24,6 +24,7 @@ fn settings_survive_a_save_and_load_and_create_the_folder() {
     let path = dir.path().join("nested/config.toml");
     let settings = Settings {
         library_folders: vec![PathBuf::from("/music"), PathBuf::from("/mnt/Ünïcode dir")],
+        scroll_speed: 7,
     };
     settings.save(&path).unwrap();
     assert_eq!(Settings::load(&path).unwrap(), Some(settings));
@@ -57,6 +58,7 @@ fn a_malformed_or_misspelled_file_is_an_error() {
     for (name, text) in [
         ("broken.toml", "library_folders = [".as_bytes()),
         ("wrong-type.toml", b"library_folders = \"/a\""),
+        ("negative-speed.toml", b"scroll_speed = -1"),
         // A typo must not silently mean "no folders".
         ("typo.toml", b"library_folder = [\"/a\"]"),
         ("binary.toml", &[0xff, 0xfe, 0x00]),
@@ -92,8 +94,51 @@ fn adding_a_folder_skips_duplicates_and_folders_already_covered() {
 fn removing_a_folder() {
     let mut settings = Settings {
         library_folders: vec![PathBuf::from("/a"), PathBuf::from("/b")],
+        ..Settings::default()
     };
     assert!(settings.remove_folder(Path::new("/a")));
     assert!(!settings.remove_folder(Path::new("/a")));
     assert_eq!(folders(&settings), ["/b"]);
+}
+
+#[test]
+fn a_file_without_a_scroll_speed_gets_the_default() {
+    let dir = TempDir::new();
+    let path = dir.write("config.toml", b"library_folders = [\"/a\"]\n");
+    assert_eq!(
+        Settings::load(&path).unwrap().unwrap().scroll_speed,
+        Settings::default().scroll_speed
+    );
+}
+
+#[test]
+fn an_out_of_range_scroll_speed_in_the_file_is_clamped() {
+    let dir = TempDir::new();
+    for (text, expected) in [
+        ("scroll_speed = 0", *SCROLL_SPEEDS.start()),
+        ("scroll_speed = 1000", *SCROLL_SPEEDS.end()),
+    ] {
+        let path = dir.write("config.toml", text.as_bytes());
+        assert_eq!(
+            Settings::load(&path).unwrap().unwrap().scroll_speed,
+            expected,
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn setting_the_scroll_speed_clamps_it_and_reports_changes() {
+    let mut settings = Settings::default();
+    assert!(settings.set_scroll_speed(5));
+    assert!(!settings.set_scroll_speed(5));
+    assert_eq!(settings.scroll_speed, 5);
+    assert!(settings.set_scroll_speed(0));
+    assert_eq!(settings.scroll_speed, *SCROLL_SPEEDS.start());
+    assert!(settings.set_scroll_speed(u32::MAX));
+    assert_eq!(settings.scroll_speed, *SCROLL_SPEEDS.end());
+    assert!(
+        !settings.set_scroll_speed(u32::MAX),
+        "already at the maximum"
+    );
 }

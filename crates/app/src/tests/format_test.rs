@@ -74,3 +74,9 @@ fn epoch_times_are_in_whole_milliseconds() {
 fn a_time_before_the_epoch_stays_negative() {
     assert_eq!(epoch_ms(-5_000_000), -5.0);
 }
+
+#[test]
+fn numbers_too_big_for_qml_are_capped() {
+    assert_eq!(qml_int(1280), 1280);
+    assert_eq!(qml_int(u32::MAX), i32::MAX);
+}
