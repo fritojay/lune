@@ -5,7 +5,7 @@ import QtQuick.Layouts
 
 Dialog {
     id: preferences
-    required property list<string> folders
+    required property list<var> folders
     required property bool busy
     required property string status
 
@@ -55,14 +55,20 @@ Dialog {
                 delegate: ItemDelegate {
                     id: folderRow
                     required property int index
-                    required property string modelData
+                    required property var modelData
                     width: ListView.view.width
                     contentItem: RowLayout {
                         Label {
                             Layout.fillWidth: true
-                            text: folderRow.modelData
+                            text: folderRow.modelData.path
                             textFormat: Text.PlainText
                             elide: Text.ElideMiddle
+                        }
+                        Label {
+                            readonly property var scanned: folderRow.modelData.lastScanned
+                            text: scanned === undefined ? qsTr("Not scanned yet")
+                                                        : qsTr("Scanned %1").arg(new Date(scanned).toLocaleString(Qt.locale(), Locale.ShortFormat))
+                            opacity: 0.7
                         }
                         Button {
                             text: qsTr("Remove")

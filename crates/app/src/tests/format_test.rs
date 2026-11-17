@@ -63,3 +63,14 @@ fn filter_labels_depend_on_the_value() {
         "2001"
     );
 }
+
+#[test]
+fn epoch_times_are_in_whole_milliseconds() {
+    assert_eq!(epoch_ms(1_700_000_000_123_456_789), 1_700_000_000_123.0);
+    assert_eq!(epoch_ms(0), 0.0);
+}
+
+#[test]
+fn a_time_before_the_epoch_stays_negative() {
+    assert_eq!(epoch_ms(-5_000_000), -5.0);
+}

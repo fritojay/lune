@@ -506,6 +506,70 @@ fn prune_matches_a_folder_given_through_a_symlink() {
     assert_eq!(prune(&mut conn, &[link]).unwrap(), Some(2));
 }
 
+#[test]
+fn folder_scans_are_none_until_recorded_and_keep_the_latest() {
+    let conn = db::open_in_memory().unwrap();
+    let (a, b) = (PathBuf::from("/music/a"), PathBuf::from("/music/b"));
+    assert_eq!(folder_scans(&conn, &[]).unwrap(), []);
+    assert_eq!(
+        folder_scans(&conn, std::slice::from_ref(&a)).unwrap(),
+        [None]
+    );
+
+    let first = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let second = first + Duration::from_nanos(1);
+    record_folder_scan(&conn, &a, first).unwrap();
+    assert_eq!(
+        folder_scans(&conn, &[b.clone(), a.clone()]).unwrap(),
+        [None, Some(1_700_000_000_000_000_000)]
+    );
+    record_folder_scan(&conn, &a, second).unwrap();
+    assert_eq!(
+        folder_scans(&conn, &[a]).unwrap(),
+        [Some(1_700_000_000_000_000_001)]
+    );
+}
+
+#[test]
+fn a_folder_scan_before_the_epoch_round_trips() {
+    let conn = db::open_in_memory().unwrap();
+    let folder = PathBuf::from("/music");
+    let at = UNIX_EPOCH - Duration::from_secs(5);
+    record_folder_scan(&conn, &folder, at).unwrap();
+    assert_eq!(
+        folder_scans(&conn, &[folder]).unwrap(),
+        [Some(-5_000_000_000)]
+    );
+}
+
+// Making a non-UTF-8 path needs `std::os::unix`; the code under test is portable.
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_folder_scan_is_not_recorded() {
+    use std::os::unix::ffi::OsStrExt;
+    let conn = db::open_in_memory().unwrap();
+    let folder = PathBuf::from(std::ffi::OsStr::from_bytes(b"/music/\xff"));
+    record_folder_scan(&conn, &folder, UNIX_EPOCH).unwrap();
+    assert_eq!(folder_scans(&conn, &[folder]).unwrap(), [None]);
+}
+
+#[test]
+fn prune_forgets_the_scans_of_removed_folders_only() {
+    let dir = TempDir::new();
+    let mut conn = db::open_in_memory().unwrap();
+    scan_two_folders(&mut conn, &dir);
+    let (keep, drop) = (dir.path().join("keep"), dir.path().join("drop"));
+    let keeper = dir.path().join("keeper");
+    for folder in [&keep, &drop, &keeper] {
+        record_folder_scan(&conn, folder, UNIX_EPOCH).unwrap();
+    }
+    prune(&mut conn, std::slice::from_ref(&keep)).unwrap();
+    assert_eq!(
+        folder_scans(&conn, &[keep, drop, keeper]).unwrap(),
+        [Some(0), None, None]
+    );
+}
+
 fn art(hash: &str) -> Option<crate::EmbeddedArt> {
     Some(crate::EmbeddedArt {
         hash: hash.into(),

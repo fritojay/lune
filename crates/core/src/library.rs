@@ -48,6 +48,17 @@ impl Library {
         scan::prune(&mut self.conn, folders)
     }
 
+    /// `folder` is the path as configured, not canonicalized; one that isn't
+    /// UTF-8 is not recorded. [`Library::prune`] forgets removed folders.
+    pub fn record_folder_scan(&self, folder: &Path, at: SystemTime) -> Result<()> {
+        scan::record_folder_scan(&self.conn, folder, at)
+    }
+
+    /// Unix nanoseconds; `None` if never scanned.
+    pub fn folder_scans(&self, folders: &[PathBuf]) -> Result<Vec<Option<i64>>> {
+        scan::folder_scans(&self.conn, folders)
+    }
+
     /// Deletes the missing tracks among `ids`; the others are left alone.
     /// Returns how many were deleted. A file that comes back is added anew.
     pub fn forget_missing(&mut self, ids: &[i64]) -> Result<usize> {

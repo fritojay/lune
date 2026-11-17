@@ -93,7 +93,7 @@ impl qobject::MissingModel {
             LABEL_ROLE => label(track),
             PATH_ROLE => track.path.display().to_string(),
             // A JavaScript time, so QML can show it as a local date.
-            MISSING_SINCE_ROLE => return QVariant::from(&epoch_ms(track.missing_ns)),
+            MISSING_SINCE_ROLE => return QVariant::from(&format::epoch_ms(track.missing_ns)),
             ID_ROLE => return QVariant::from(&track.id),
             _ => return QVariant::default(),
         };
@@ -126,11 +126,6 @@ fn label(track: &MissingTrack) -> String {
         format::artist(track.artist.as_deref().unwrap_or_default()),
         format::album(&track.album)
     )
-}
-
-/// Nanoseconds since the Unix epoch, as milliseconds.
-fn epoch_ms(ns: i64) -> f64 {
-    (ns / 1_000_000) as f64
 }
 
 #[cfg(test)]

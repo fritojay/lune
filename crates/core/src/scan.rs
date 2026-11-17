@@ -299,6 +299,16 @@ pub(crate) fn prune(conn: &mut Connection, folders: &[PathBuf]) -> Result<Option
             delete.execute([dir])?;
         }
     }
+    {
+        let mut stmt = tx.prepare("SELECT path FROM folder_scans")?;
+        let folders: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut delete = tx.prepare_cached("DELETE FROM folder_scans WHERE path = ?1")?;
+        for folder in folders.iter().filter(|folder| !inside(folder)) {
+            delete.execute([folder])?;
+        }
+    }
     refresh_albums(&tx, &touched)?;
     tx.commit()?;
     if !outside.is_empty() {
@@ -308,6 +318,27 @@ pub(crate) fn prune(conn: &mut Connection, folders: &[PathBuf]) -> Result<Option
         );
     }
     Ok(Some(outside.len()))
+}
+
+pub(crate) fn record_folder_scan(conn: &Connection, folder: &Path, at: SystemTime) -> Result<()> {
+    let Some(folder) = folder.to_str() else {
+        return Ok(());
+    };
+    conn.prepare_cached("INSERT OR REPLACE INTO folder_scans (path, scanned_ns) VALUES (?1, ?2)")?
+        .execute(params![folder, unix_ns(at)])?;
+    Ok(())
+}
+
+pub(crate) fn folder_scans(conn: &Connection, folders: &[PathBuf]) -> Result<Vec<Option<i64>>> {
+    let mut stmt = conn.prepare_cached("SELECT scanned_ns FROM folder_scans WHERE path = ?1")?;
+    let mut scans = Vec::with_capacity(folders.len());
+    for folder in folders {
+        scans.push(match folder.to_str() {
+            Some(path) => stmt.query_row([path], |row| row.get(0)).optional()?,
+            None => None,
+        });
+    }
+    Ok(scans)
 }
 
 /// Deletes the missing tracks in `ids`, or every missing track for `None`.

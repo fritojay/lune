@@ -47,10 +47,15 @@ pub enum Update {
     Library(Catalog),
     /// The tracks whose files are missing; sent with every `Loaded` and `Library`.
     Missing(Vec<MissingTrack>),
-    Folders(Vec<PathBuf>),
+    Folders(Vec<Folder>),
     /// What the thread is doing, or `None` when idle.
     Status(Option<String>),
     Error(String),
+}
+
+pub struct Folder {
+    pub path: PathBuf,
+    pub last_scanned_ns: Option<i64>,
 }
 
 pub struct LibraryService {
@@ -196,7 +201,7 @@ impl Worker {
             Ok(None) => {}
             Err(err) => self.error(format!("{err}. The library folders are not loaded.")),
         }
-        (self.notify)(Update::Folders(self.settings.library_folders.clone()));
+        self.publish_folders();
         self.watch();
         // Thorough: files retagged in place while the app was closed leave
         // their directories' mtimes alone.
@@ -265,7 +270,27 @@ impl Worker {
         if let Err(err) = self.settings.save(&self.config_path) {
             self.error(format!("Could not save the settings: {err}"));
         }
-        (self.notify)(Update::Folders(self.settings.library_folders.clone()));
+        self.publish_folders();
+    }
+
+    fn publish_folders(&self) {
+        let folders = &self.settings.library_folders;
+        let scans = match &self.library {
+            Some(library) => library.folder_scans(folders).unwrap_or_else(|err| {
+                tracing::warn!(%err, "could not read when the folders were last scanned");
+                vec![None; folders.len()]
+            }),
+            None => vec![None; folders.len()],
+        };
+        let folders = folders
+            .iter()
+            .zip(scans)
+            .map(|(path, last_scanned_ns)| Folder {
+                path: path.clone(),
+                last_scanned_ns,
+            })
+            .collect();
+        (self.notify)(Update::Folders(folders));
     }
 
     fn prune(&mut self) -> bool {
@@ -315,6 +340,7 @@ impl Worker {
                 .collect(),
         );
         let mut changed = false;
+        let mut recorded = false;
         for dir in dirs {
             let Some(library) = &mut self.library else {
                 return false;
@@ -345,11 +371,22 @@ impl Worker {
                         + report.restored
                         + report.dated
                         > 0;
+                    if self.settings.library_folders.contains(&dir) {
+                        match library.record_folder_scan(&dir, (self.now)()) {
+                            Ok(()) => recorded = true,
+                            Err(err) => {
+                                tracing::warn!(%err, dir = %dir.display(), "could not record the scan")
+                            }
+                        }
+                    }
                 }
                 // A folder that is gone (e.g. an unmounted drive) keeps its
                 // tracks until it is removed from the list.
                 Err(err) => tracing::warn!(%err, dir = %dir.display(), "could not scan"),
             }
+        }
+        if recorded {
+            self.publish_folders();
         }
         changed
     }

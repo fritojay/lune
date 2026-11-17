@@ -539,3 +539,142 @@ fn adding_a_folder_reports_how_many_tags_are_left_to_read() {
     });
     h.idle();
 }
+
+impl Harness {
+    fn folders(&self) -> Vec<(PathBuf, Option<i64>)> {
+        self.wait_for(|u| match u {
+            Update::Folders(folders) => Some(
+                folders
+                    .into_iter()
+                    .map(|f| (f.path, f.last_scanned_ns))
+                    .collect(),
+            ),
+            _ => None,
+        })
+    }
+}
+
+fn at(secs: i64) -> i64 {
+    secs * 1_000_000_000
+}
+
+#[test]
+fn adding_a_folder_lists_it_unscanned_then_scanned() {
+    let dir = two_folders();
+    let a = dir.path().join("a");
+    let clock = FakeClock::default();
+    clock.advance(Duration::from_secs(100));
+    let h = Harness::start_with_clock(dir, &clock);
+    h.idle();
+    h.service.send(Job::AddFolder(a.clone()));
+    assert_eq!(h.folders(), [(a.clone(), None)]);
+    assert_eq!(h.folders(), [(a, Some(at(100)))]);
+}
+
+#[test]
+fn a_rescan_all_updates_every_folder_and_survives_a_restart() {
+    let dir = two_folders();
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    Settings {
+        library_folders: vec![a.clone(), b.clone()],
+    }
+    .save(&Harness::config(&dir))
+    .unwrap();
+    let clock = FakeClock::default();
+    clock.advance(Duration::from_secs(100));
+    let h = Harness::start_with_clock(dir, &clock);
+    assert_eq!(h.folders(), [(a.clone(), None), (b.clone(), None)]);
+    h.idle();
+
+    clock.advance(Duration::from_secs(50));
+    h.service.send(Job::RescanAll);
+    let scanned = [(a.clone(), Some(at(150))), (b.clone(), Some(at(150)))];
+    assert_eq!(h.folders(), scanned);
+    h.idle();
+
+    let Harness { dir, service, .. } = h;
+    drop(service);
+    let h = Harness::start_with_clock(dir, &clock);
+    assert_eq!(h.folders(), scanned, "listed before the startup scan");
+    h.idle();
+}
+
+#[test]
+fn rescanning_a_directory_inside_a_folder_leaves_its_time_alone() {
+    let dir = two_folders();
+    let a = dir.path().join("a");
+    let clock = FakeClock::default();
+    let h = Harness::start_with_clock(dir, &clock);
+    h.idle();
+    h.service.send(Job::AddFolder(a.clone()));
+    h.idle();
+
+    let inside = a.join("Artist");
+    // A missing directory would be rescanned through its folder instead.
+    assert!(inside.is_dir());
+    clock.advance(Duration::from_secs(10));
+    h.service.send(Job::Rescan(vec![inside]));
+    h.wait_for(|u| match u {
+        Update::Folders(_) => panic!("only a scan of the whole folder counts"),
+        Update::Status(None) => Some(()),
+        _ => None,
+    });
+}
+
+#[test]
+fn an_unavailable_folder_stays_unscanned() {
+    let dir = two_folders();
+    let (a, gone) = (dir.path().join("a"), dir.path().join("unmounted"));
+    Settings {
+        library_folders: vec![a.clone(), gone.clone()],
+    }
+    .save(&Harness::config(&dir))
+    .unwrap();
+    let clock = FakeClock::default();
+    clock.advance(Duration::from_secs(100));
+    let h = Harness::start_with_clock(dir, &clock);
+    assert_eq!(h.folders(), [(a.clone(), None), (gone.clone(), None)]);
+    assert_eq!(h.folders(), [(a, Some(at(100))), (gone, None)]);
+}
+
+#[test]
+fn a_removed_folder_added_again_starts_unscanned() {
+    let dir = two_folders();
+    let a = dir.path().join("a");
+    let clock = FakeClock::default();
+    clock.advance(Duration::from_secs(100));
+    let h = Harness::start_with_clock(dir, &clock);
+    h.idle();
+    h.service.send(Job::AddFolder(a.clone()));
+    assert_eq!(h.folders(), [(a.clone(), None)]);
+    assert_eq!(h.folders(), [(a.clone(), Some(at(100)))]);
+    h.idle();
+
+    h.service.send(Job::RemoveFolder(a.clone()));
+    assert_eq!(h.folders(), []);
+    h.idle();
+    clock.advance(Duration::from_secs(50));
+    h.service.send(Job::AddFolder(a.clone()));
+    assert_eq!(h.folders(), [(a.clone(), None)]);
+    assert_eq!(h.folders(), [(a, Some(at(150)))]);
+}
+
+#[test]
+fn the_periodic_rescan_updates_the_folder_times() {
+    let dir = two_folders();
+    let a = dir.path().join("a");
+    let clock = FakeClock::default();
+    let h = Harness::start_with_clock(dir, &clock);
+    h.idle();
+    h.service.send(Job::AddFolder(a.clone()));
+    h.idle();
+
+    clock.advance(RESCAN_EVERY);
+    let due = at(i64::try_from(RESCAN_EVERY.as_secs()).unwrap());
+    // Only wakes the thread, which may already have started the rescan.
+    h.service.send(Job::Rescan(Vec::new()));
+    h.wait_for(|u| match u {
+        Update::Folders(folders) => (folders[0].last_scanned_ns == Some(due)).then_some(()),
+        _ => None,
+    });
+}

@@ -1,16 +1,5 @@
 use super::*;
 
-#[test]
-fn missing_since_is_in_whole_milliseconds() {
-    assert_eq!(epoch_ms(1_700_000_000_123_456_789), 1_700_000_000_123.0);
-    assert_eq!(epoch_ms(0), 0.0);
-}
-
-#[test]
-fn a_time_before_the_epoch_stays_negative() {
-    assert_eq!(epoch_ms(-5_000_000), -5.0);
-}
-
 fn track(title: &str, artist: Option<&str>, album: &str) -> MissingTrack {
     MissingTrack {
         id: 1,

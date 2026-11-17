@@ -114,6 +114,13 @@ const MIGRATIONS: &[&str] = &[
         mtime_ns INTEGER NOT NULL                  -- 0 = never skip
     ) WITHOUT ROWID;
     "#,
+    // v7: when each library folder was last scanned.
+    r#"
+    CREATE TABLE folder_scans (
+        path       TEXT PRIMARY KEY,
+        scanned_ns INTEGER NOT NULL
+    ) WITHOUT ROWID;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

@@ -13,26 +13,28 @@ use std::pin::Pin;
 use std::time::SystemTime;
 
 use cxx_qt::{CxxQtType, Threading};
-use cxx_qt_lib::{QString, QStringList, QUrl};
+use cxx_qt_lib::{QList, QMap, QMapPair_QString_QVariant, QString, QUrl, QVariant};
 
-use crate::library_service::{Job, LibraryService, RESCAN_EVERY, Update};
-use crate::{covers, session};
+use crate::library_service::{Folder, Job, LibraryService, RESCAN_EVERY, Update};
+use crate::{covers, format, session};
 
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
-        include!("cxx-qt-lib/qstringlist.h");
-        type QStringList = cxx_qt_lib::QStringList;
         include!("cxx-qt-lib/qurl.h");
         type QUrl = cxx_qt_lib::QUrl;
+        include!("cxx-qt-lib/qlist.h");
+        type QList_QVariant = cxx_qt_lib::QList<cxx_qt_lib::QVariant>;
     }
 
     extern "RustQt" {
         #[qobject]
         #[qml_element]
-        #[qproperty(QStringList, folders, READ, NOTIFY)]
+        /// `{ path, lastScanned }` per folder; `lastScanned` is epoch ms,
+        /// absent if never scanned.
+        #[qproperty(QList_QVariant, folders, READ, NOTIFY)]
         #[qproperty(bool, busy, READ, NOTIFY)]
         #[qproperty(QString, status, READ, NOTIFY)]
         #[qproperty(QString, error, READ, NOTIFY)]
@@ -94,7 +96,7 @@ pub mod qobject {
 
 #[derive(Default)]
 pub struct LibraryManagerRust {
-    folders: QStringList,
+    folders: QList<QVariant>,
     busy: bool,
     status: QString,
     error: QString,
@@ -148,11 +150,9 @@ impl qobject::LibraryManager {
                 self.missing_changed();
             }
             Update::Folders(folders) => {
-                let list: QStringList = folders
-                    .iter()
-                    .map(|f| QString::from(&f.display().to_string()))
-                    .collect();
-                self.as_mut().rust_mut().folder_paths = folders;
+                let list: QList<QVariant> = folders.iter().map(folder_entry).collect();
+                self.as_mut().rust_mut().folder_paths =
+                    folders.into_iter().map(|f| f.path).collect();
                 self.as_mut().rust_mut().folders = list;
                 self.folders_changed();
             }
@@ -213,6 +213,21 @@ impl qobject::LibraryManager {
         self.as_mut().rust_mut().error = QString::default();
         self.error_changed();
     }
+}
+
+fn folder_entry(folder: &Folder) -> QVariant {
+    let mut entry = QMap::<QMapPair_QString_QVariant>::default();
+    entry.insert(
+        QString::from("path"),
+        QVariant::from(&QString::from(&folder.path.display().to_string())),
+    );
+    if let Some(ns) = folder.last_scanned_ns {
+        entry.insert(
+            QString::from("lastScanned"),
+            QVariant::from(&format::epoch_ms(ns)),
+        );
+    }
+    QVariant::from(&entry)
 }
 
 // In a Flatpak the native picker is the portal's, which hands back a
