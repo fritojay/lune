@@ -2,14 +2,16 @@ import QtQuick
 
 // Flickable moves a fixed wheelScrollLines × 24 px per wheel notch, and Qt 6.11
 // has no way to change that, so mouse wheels scroll here instead, `speed` times
-// as far. Touchpads aren't PointerDevice.Mouse, so they keep Flickable's scrolling.
-WheelHandler {
+// as far. Touchpad events are passed on, so they keep Flickable's scrolling.
+MouseArea {
     id: wheel
     required property Flickable view
     required property int speed
+    readonly property bool wayland: Qt.platform.pluginName.startsWith("wayland")
 
-    acceptedDevices: PointerDevice.Mouse
-    target: null
+    parent: view
+    anchors.fill: parent
+    acceptedButtons: Qt.NoButton
 
     readonly property NumberAnimation scroll: NumberAnimation {
         target: wheel.view
@@ -22,6 +24,12 @@ WheelHandler {
     }
 
     onWheel: event => {
+        const fromWheel = wheel.wayland ? event.pixelDelta.x === 0 && event.pixelDelta.y === 0
+                                        : event.device.type === PointerDevice.Mouse
+        if (!fromWheel || event.angleDelta.y === 0) {
+            event.accepted = false
+            return
+        }
         const view = wheel.view
         const step = -event.angleDelta.y / 120 * Application.styleHints.wheelScrollLines * 24 * wheel.speed
         const from = scroll.running ? scroll.to : view.contentY
