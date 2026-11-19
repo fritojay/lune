@@ -1,19 +1,38 @@
 //! State shared by the QML-facing objects. QML creates those objects without
 //! constructor arguments, so what they share lives here: the catalog and
 //! current view (UI thread only), and the queue (shared with the decoder
-//! thread through [`EngineQueue`]).
+//! thread through [`EngineQueue`]). Objects that show it subscribe to its
+//! [`Change`]s with [`on_change`].
 
 use std::cell::RefCell;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::JoinHandle;
 use std::time::SystemTime;
 
+use cxx_qt::{CxxQtThread, Threading};
 use lune_core::{
     BrowseState, Catalog, Library, MissingTrack, Queue, QueueItem, SlotId, View, WindowState,
 };
 use lune_engine::{EntryId, PlayQueue, QueueEntry};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change {
+    /// The library loaded or changed.
+    Catalog,
+    /// `reset` is false when only the library changed underneath (a
+    /// rescan), so the list keeps its position.
+    View {
+        reset: bool,
+    },
+    Missing,
+    /// Its contents, order, or shuffle. The current item is `PlayerController.queueIndex`.
+    Queue,
+    /// Playback of a track started.
+    Played,
+}
 
 #[derive(Default)]
 struct UiState {
@@ -21,6 +40,7 @@ struct UiState {
     view: Rc<View>,
     missing: Rc<Vec<MissingTrack>>,
     browse: Option<BrowseState>,
+    listeners: Vec<Rc<dyn Fn(Change)>>,
 }
 
 thread_local! {
@@ -35,6 +55,7 @@ pub fn catalog() -> Option<Rc<Catalog>> {
 
 pub fn set_catalog(catalog: Catalog) {
     UI.with_borrow_mut(|ui| ui.catalog = Some(Rc::new(catalog)));
+    notify(Change::Catalog);
 }
 
 /// The tracks whose files are missing.
@@ -44,6 +65,7 @@ pub fn missing() -> Rc<Vec<MissingTrack>> {
 
 pub fn set_missing(tracks: Vec<MissingTrack>) {
     UI.with_borrow_mut(|ui| ui.missing = Rc::new(tracks));
+    notify(Change::Missing);
 }
 
 /// The main pane's track list: what a double-click puts in the queue.
@@ -51,8 +73,9 @@ pub fn view() -> Rc<View> {
     UI.with_borrow(|ui| Rc::clone(&ui.view))
 }
 
-pub fn set_view(view: View) {
+pub fn set_view(view: View, reset: bool) {
     UI.with_borrow_mut(|ui| ui.view = Rc::new(view));
+    notify(Change::View { reset });
 }
 
 /// The window as the last run left it. `--bench` always starts from the
@@ -92,6 +115,7 @@ pub fn record_play(track_id: i64) {
         }
     });
     save(Save::Play(track_id, at));
+    notify(Change::Played);
 }
 
 pub fn queue() -> &'static Arc<Mutex<Queue>> {
@@ -102,6 +126,35 @@ pub fn queue() -> &'static Arc<Mutex<Queue>> {
 pub fn lock_queue() -> MutexGuard<'static, Queue> {
     // Every edit leaves the queue consistent before it can panic.
     queue().lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Call after editing the queue through [`lock_queue`].
+pub fn queue_edited() {
+    notify(Change::Queue);
+}
+
+pub fn subscribe(listener: impl Fn(Change) + 'static) {
+    UI.with_borrow_mut(|ui| ui.listeners.push(Rc::new(listener)));
+}
+
+/// Calls `changed` on `qt_thread`'s object with each change. It is queued, so
+/// it never runs inside another object's update.
+pub fn on_change<T: Threading + 'static>(
+    qt_thread: CxxQtThread<T>,
+    changed: fn(Pin<&mut T>, Change),
+) {
+    subscribe(move |change| {
+        // An error means the object is gone (the app is quitting).
+        let _ = qt_thread.queue(move |object| changed(object, change));
+    });
+}
+
+fn notify(change: Change) {
+    // Cloned so a listener can use the state, or subscribe, while it runs.
+    let listeners = UI.with_borrow(|ui| ui.listeners.clone());
+    for listener in listeners {
+        listener(change);
+    }
 }
 
 /// The engine's view of the queue.
@@ -203,3 +256,7 @@ pub fn finish_saving() {
         let _ = thread.join();
     }
 }
+
+#[cfg(test)]
+#[path = "tests/session_test.rs"]
+mod tests;

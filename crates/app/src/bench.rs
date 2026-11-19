@@ -1,5 +1,6 @@
-//! `--bench` measurements of list scrolling. QML drives the scroll
-//! and reports events here; the numbers are printed to stdout.
+//! `--bench` measurements of list scrolling. Once the list is filled, QML
+//! drives the scroll and reports events here; the numbers are printed to
+//! stdout.
 
 #![expect(
     unsafe_code,
@@ -8,7 +9,9 @@
 
 use std::pin::Pin;
 
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtType, Threading};
+
+use crate::session::{self, Change};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -24,9 +27,10 @@ pub mod qobject {
         #[cxx_name = "firstFrame"]
         fn first_frame(self: Pin<&mut BenchProbe>);
 
-        #[qinvokable]
-        #[cxx_name = "listLoaded"]
-        fn list_loaded(self: Pin<&mut BenchProbe>, rows: i32);
+        /// The library's first view is shown; time to start scrolling.
+        #[qsignal]
+        #[cxx_name = "listFilled"]
+        fn list_filled(self: Pin<&mut BenchProbe>);
 
         #[qinvokable]
         #[cxx_name = "beginPhase"]
@@ -44,11 +48,15 @@ pub mod qobject {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
     }
+
+    impl cxx_qt::Threading for BenchProbe {}
+    impl cxx_qt::Initialize for BenchProbe {}
 }
 
 pub struct BenchProbeRust {
     enabled: bool,
     first_frame_seen: bool,
+    list_seen: bool,
     phase: Option<Phase>,
     phases: Vec<Phase>,
 }
@@ -63,9 +71,23 @@ impl Default for BenchProbeRust {
         Self {
             enabled: crate::config().bench,
             first_frame_seen: false,
+            list_seen: false,
             phase: None,
             phases: Vec::new(),
         }
+    }
+}
+
+impl cxx_qt::Initialize for qobject::BenchProbe {
+    fn initialize(self: Pin<&mut Self>) {
+        if !self.enabled {
+            return;
+        }
+        session::on_change(self.qt_thread(), |probe, change| {
+            if matches!(change, Change::View { .. }) {
+                probe.view_shown();
+            }
+        });
     }
 }
 
@@ -79,15 +101,18 @@ impl qobject::BenchProbe {
         print_rss("rss at first frame");
     }
 
-    fn list_loaded(self: Pin<&mut Self>, rows: i32) {
-        if !self.enabled {
+    fn view_shown(mut self: Pin<&mut Self>) {
+        if self.list_seen {
             return;
         }
+        self.as_mut().rust_mut().list_seen = true;
         println!(
-            "list filled:      {:>8.1} ms ({rows} rows)",
-            since_start_ms()
+            "list filled:      {:>8.1} ms ({} rows)",
+            since_start_ms(),
+            session::view().len()
         );
         print_rss("rss with the list");
+        self.list_filled();
     }
 
     fn begin_phase(mut self: Pin<&mut Self>, name: &cxx_qt_lib::QString) {

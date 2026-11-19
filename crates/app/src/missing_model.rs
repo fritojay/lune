@@ -1,5 +1,5 @@
 //! The Unavailable Tracks list: tracks whose files a scan no longer finds.
-//! It shows a copy of the list, taken on `refresh()` after each change.
+//! It shows a copy of the list, taken after each change.
 
 #![expect(
     unsafe_code,
@@ -9,12 +9,13 @@
 use std::pin::Pin;
 use std::rc::Rc;
 
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QVariant};
 use lune_core::MissingTrack;
 
+use crate::format;
 use crate::list_model::{self, Role, text};
-use crate::{format, session};
+use crate::session::{self, Change};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -39,9 +40,6 @@ pub mod qobject {
 
     unsafe extern "RustQt" {
         #[qinvokable]
-        fn refresh(self: Pin<&mut MissingModel>);
-
-        #[qinvokable]
         #[cxx_override]
         fn data(self: &MissingModel, index: &QModelIndex, role: i32) -> QVariant;
 
@@ -63,6 +61,9 @@ pub mod qobject {
         #[cxx_name = "endResetModel"]
         fn end_reset_model(self: Pin<&mut MissingModel>);
     }
+
+    impl cxx_qt::Threading for MissingModel {}
+    impl cxx_qt::Initialize for MissingModel {}
 }
 
 const ROLES: &[Role<MissingTrack>] = &[
@@ -78,6 +79,16 @@ const ROLES: &[Role<MissingTrack>] = &[
 #[derive(Default)]
 pub struct MissingModelRust {
     tracks: Rc<Vec<MissingTrack>>,
+}
+
+impl cxx_qt::Initialize for qobject::MissingModel {
+    fn initialize(self: Pin<&mut Self>) {
+        session::on_change(self.qt_thread(), |model, change| {
+            if change == Change::Missing {
+                model.refresh();
+            }
+        });
+    }
 }
 
 impl qobject::MissingModel {

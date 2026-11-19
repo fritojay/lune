@@ -1,8 +1,7 @@
 //! The settings dialog's object: the library folders, scan status,
 //! unavailable tracks, and errors. It runs the library thread
-//! ([`LibraryService`]) and applies its updates on the Qt thread: the first
-//! load (`loaded`), every later change to the library (`libraryChanged`), and
-//! the folder list, which it saves.
+//! ([`LibraryService`]) and applies its updates on the Qt thread: the library
+//! and missing tracks go to `session`, and the folder list is saved.
 
 #![expect(
     unsafe_code,
@@ -53,20 +52,6 @@ pub mod qobject {
     }
 
     unsafe extern "RustQt" {
-        /// The library and saved queue are loaded (once, at startup).
-        #[qsignal]
-        fn loaded(self: Pin<&mut LibraryManager>);
-
-        /// The library changed after startup.
-        #[qsignal]
-        #[cxx_name = "libraryChanged"]
-        fn library_changed(self: Pin<&mut LibraryManager>);
-
-        /// The list of tracks whose files are missing changed.
-        #[qsignal]
-        #[cxx_name = "missingChanged"]
-        fn missing_changed(self: Pin<&mut LibraryManager>);
-
         /// `folder` is a local `file:` URL, as a folder picker returns.
         #[qinvokable]
         #[cxx_name = "addFolder"]
@@ -138,18 +123,15 @@ impl qobject::LibraryManager {
             Update::Loaded(catalog, queue) => {
                 *session::lock_queue() = queue;
                 session::set_catalog(catalog);
-                self.loaded();
             }
             Update::Library(catalog) => {
                 session::set_catalog(catalog);
                 covers::covers().forget();
-                self.library_changed();
             }
             Update::Missing(tracks) => {
                 let count = i32::try_from(tracks.len()).unwrap_or(i32::MAX);
                 session::set_missing(tracks);
                 set!(self, missing_count, missing_count_changed, count);
-                self.missing_changed();
             }
             Update::Folders(folders) => {
                 let list: QList<QVariant> = folders.iter().map(folder_entry).collect();

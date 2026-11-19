@@ -19,7 +19,7 @@ use lune_engine::{EntryId, PlaybackState, Player, PlayerConfig};
 
 use crate::media_controls::{self, MediaCommand, MediaControls, NowPlaying, Playback};
 use crate::property::set;
-use crate::session::{self, Save};
+use crate::session::{self, Change, Save};
 use crate::{covers, format};
 
 #[cxx_qt::bridge]
@@ -53,15 +53,6 @@ pub mod qobject {
     }
 
     unsafe extern "RustQt" {
-        #[qsignal]
-        #[cxx_name = "queueEdited"]
-        fn queue_edited(self: Pin<&mut PlayerController>);
-
-        /// Playback of a track started, so Recently Played changed.
-        #[qsignal]
-        #[cxx_name = "trackStarted"]
-        fn track_started(self: Pin<&mut PlayerController>);
-
         /// Replaces the queue with the whole main-pane view and plays from
         /// view index `index`.
         #[qinvokable]
@@ -132,10 +123,6 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "clearError"]
         fn clear_error(self: Pin<&mut PlayerController>);
-
-        /// Re-reads the queue and now playing (after the library loads).
-        #[qinvokable]
-        fn refresh(self: Pin<&mut PlayerController>);
     }
 
     impl cxx_qt::Threading for PlayerController {}
@@ -217,6 +204,11 @@ impl cxx_qt::Initialize for qobject::PlayerController {
             let _ = qt_thread.queue(move |controller| controller.media_command(command));
         });
         self.as_mut().rust_mut().media = media;
+        session::on_change(self.qt_thread(), |controller, change| {
+            if change == Change::Catalog {
+                controller.refresh();
+            }
+        });
     }
 }
 
@@ -478,7 +470,6 @@ impl qobject::PlayerController {
                 session::save(Save::Cursor);
                 if let Some(track_id) = track_id {
                     session::record_play(track_id);
-                    self.as_mut().track_started();
                 }
             }
             self.as_mut().update_now_playing();
@@ -508,11 +499,12 @@ impl qobject::PlayerController {
         set!(self, error, error_changed, QString::default());
     }
 
+    /// Re-reads the queue and now playing (after the library loads or
+    /// changes).
     fn refresh(mut self: Pin<&mut Self>) {
         let shuffle = session::lock_queue().shuffle();
         set!(self, shuffle, shuffle_changed, shuffle);
-        self.as_mut().update_now_playing();
-        self.queue_edited();
+        self.update_now_playing();
     }
 
     /// After a queue edit: the engine re-checks what's next, and it's saved.
@@ -524,7 +516,7 @@ impl qobject::PlayerController {
         let shuffle = session::lock_queue().shuffle();
         set!(self, shuffle, shuffle_changed, shuffle);
         self.as_mut().update_now_playing();
-        self.queue_edited();
+        session::queue_edited();
     }
 
     /// Shows the queue's current track, whether or not it is playing.

@@ -19,7 +19,8 @@ use lune_core::{Catalog, ListTrack, MissingTrack};
 
 use crate::list_model::{self, text};
 use crate::property::set;
-use crate::{covers, format, session};
+use crate::session::{self, Change};
+use crate::{covers, format};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -48,9 +49,6 @@ pub mod qobject {
     }
 
     unsafe extern "RustQt" {
-        #[qinvokable]
-        fn refresh(self: Pin<&mut QueueModel>);
-
         #[qinvokable]
         #[cxx_override]
         fn data(self: &QueueModel, index: &QModelIndex, role: i32) -> QVariant;
@@ -145,6 +143,11 @@ impl Default for QueueModelRust {
 impl cxx_qt::Initialize for qobject::QueueModel {
     fn initialize(self: Pin<&mut Self>) {
         covers::on_ready(self.qt_thread(), Self::cover_ready);
+        session::on_change(self.qt_thread(), |model, change| {
+            if matches!(change, Change::Catalog | Change::Missing | Change::Queue) {
+                model.refresh();
+            }
+        });
     }
 }
 

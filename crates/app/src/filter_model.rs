@@ -1,6 +1,6 @@
 //! The search/filter object: the grouping, the filter pane's values, the
 //! selected value, the search text, and the column sort. Each change
-//! recomputes the main pane's view (`session::view`) and emits `viewChanged`.
+//! recomputes the main pane's view (`session::set_view`).
 
 #![expect(
     unsafe_code,
@@ -15,9 +15,10 @@ use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use lune_core::{BrowseState, Filter, FilterValue, Grouping, Library, Sort, SortColumn};
 
+use crate::format;
 use crate::list_model::{self, Role, text};
 use crate::property::set;
-use crate::{format, session};
+use crate::session::{self, Change};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -50,17 +51,6 @@ pub mod qobject {
     }
 
     unsafe extern "RustQt" {
-        /// Rebuilds from `session::catalog`, keeping the selection if it
-        /// still exists (after the library loads or changes).
-        #[qinvokable]
-        fn reload(self: Pin<&mut FilterModel>);
-
-        /// `session::view` changed. `reset` is false when only the library
-        /// changed underneath (a rescan), so the list keeps its position.
-        #[qsignal]
-        #[cxx_name = "viewChanged"]
-        fn view_changed(self: Pin<&mut FilterModel>, reset: bool);
-
         /// Groupings go by `Grouping::name`.
         #[qinvokable]
         #[cxx_name = "setGrouping"]
@@ -68,10 +58,6 @@ pub mod qobject {
 
         #[qinvokable]
         fn select(self: Pin<&mut FilterModel>, row: i32);
-
-        /// A track started playing (`session::record_play`).
-        #[qinvokable]
-        fn played(self: Pin<&mut FilterModel>);
 
         /// A click on column `column`'s heading. Columns go by
         /// `SortColumn::name`; `sortColumn` is empty in album order.
@@ -229,10 +215,17 @@ impl cxx_qt::Initialize for qobject::FilterModel {
             }
         });
         self.as_mut().rust_mut().searches = Some(tx);
+        session::on_change(self.qt_thread(), |model, change| match change {
+            Change::Catalog => model.reload(),
+            Change::Played => model.played(),
+            Change::View { .. } | Change::Missing | Change::Queue => {}
+        });
     }
 }
 
 impl qobject::FilterModel {
+    /// Rebuilds from `session::catalog`, keeping the selection if it still
+    /// exists.
     fn reload(mut self: Pin<&mut Self>) {
         let first = self.loading;
         let selected = if first {
@@ -368,10 +361,9 @@ impl qobject::FilterModel {
             sort: self.sort(),
         });
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
-        session::set_view(view);
+        session::set_view(view, reset);
         set!(self, title, title_changed, QString::from(&title));
         set!(self, track_count, track_count_changed, count);
-        self.view_changed(reset);
     }
 
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {

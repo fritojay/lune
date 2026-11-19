@@ -22,7 +22,8 @@ use lune_core::{Catalog, ListTrack, SortColumn, View};
 
 use crate::list_model::{self, text};
 use crate::property::set;
-use crate::{covers, format, session};
+use crate::session::{self, Change};
+use crate::{covers, format};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -47,9 +48,10 @@ pub mod qobject {
     }
 
     unsafe extern "RustQt" {
-        /// Reloads from `session::view`.
-        #[qinvokable]
-        fn refresh(self: Pin<&mut AlbumListModel>);
+        /// Reloaded from `session::view`. `reset` is false when the list
+        /// should keep its position (a rescan).
+        #[qsignal]
+        fn refreshed(self: Pin<&mut AlbumListModel>, reset: bool);
 
         /// The row of the album holding view index `index`, or -1.
         #[qinvokable]
@@ -142,11 +144,16 @@ pub struct AlbumListModelRust {
 impl cxx_qt::Initialize for qobject::AlbumListModel {
     fn initialize(self: Pin<&mut Self>) {
         covers::on_ready(self.qt_thread(), Self::cover_ready);
+        session::on_change(self.qt_thread(), |model, change| {
+            if let Change::View { reset } = change {
+                model.refresh(reset);
+            }
+        });
     }
 }
 
 impl qobject::AlbumListModel {
-    fn refresh(mut self: Pin<&mut Self>) {
+    fn refresh(mut self: Pin<&mut Self>, reset: bool) {
         let view = session::view();
         let count = i32::try_from(view.albums.len()).unwrap_or(i32::MAX);
         let catalog = session::catalog();
@@ -163,6 +170,7 @@ impl qobject::AlbumListModel {
         }
         self.as_mut().end_reset_model();
         set!(self, album_count, album_count_changed, count);
+        self.refreshed(reset);
     }
 
     fn row_of(&self, index: i32) -> i32 {

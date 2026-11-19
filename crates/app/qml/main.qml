@@ -60,21 +60,6 @@ ApplicationWindow {
 
     LibraryManager {
         id: library
-        onLoaded: {
-            filters.reload()
-            player.refresh()
-            bench.listLoaded(filters.trackCount)
-            if (bench.enabled)
-                benchRun.start()
-        }
-        onLibraryChanged: {
-            filters.reload()
-            player.refresh()
-        }
-        onMissingChanged: {
-            missingTracks.refresh()
-            queueModel.refresh()
-        }
     }
 
     MissingModel {
@@ -83,16 +68,14 @@ ApplicationWindow {
 
     FilterModel {
         id: filters
-        onViewChanged: reset => {
-            // A rescan keeps the list where it was.
-            const y = trackPane.list.contentY
-            albums.refresh()
-            trackPane.resetView(reset, y)
-        }
     }
 
     AlbumListModel {
         id: albums
+        // A rescan keeps the list where it was.
+        property real keptY
+        onModelAboutToBeReset: keptY = trackPane.list.contentY
+        onRefreshed: reset => trackPane.resetView(reset, keptY)
     }
 
     QueueModel {
@@ -102,12 +85,11 @@ ApplicationWindow {
 
     PlayerController {
         id: player
-        onQueueEdited: queueModel.refresh()
-        onTrackStarted: filters.played()
     }
 
     BenchProbe {
         id: bench
+        onListFilled: benchRun.start()
     }
 
     onFrameSwapped: bench.firstFrame()
