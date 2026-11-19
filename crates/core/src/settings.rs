@@ -3,7 +3,7 @@
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{CoreError, Result};
 
@@ -14,13 +14,18 @@ pub fn clamp_scroll_speed(speed: u32) -> u32 {
     speed.clamp(*SCROLL_SPEEDS.start(), *SCROLL_SPEEDS.end())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub library_folders: Vec<PathBuf>,
     /// Multiplies how far one mouse wheel step scrolls a list. Always within
     /// [`SCROLL_SPEEDS`]; an out-of-range value in the file is clamped on load.
+    #[serde(deserialize_with = "scroll_speed_or_default")]
     pub scroll_speed: u32,
+    /// Keys this version doesn't know, such as a newer version's settings or
+    /// a typo, kept so saving writes them back.
+    #[serde(flatten)]
+    pub extra: toml::Table,
 }
 
 impl Default for Settings {
@@ -28,6 +33,7 @@ impl Default for Settings {
         Self {
             library_folders: Vec::new(),
             scroll_speed: DEFAULT_SCROLL_SPEED,
+            extra: toml::Table::new(),
         }
     }
 }
@@ -49,6 +55,9 @@ impl Settings {
             path: path.to_path_buf(),
             message: err.to_string(),
         })?;
+        for key in settings.extra.keys() {
+            tracing::warn!(key, "unknown setting is ignored");
+        }
         settings.set_scroll_speed(settings.scroll_speed);
         Ok(Some(settings))
     }
@@ -86,6 +95,19 @@ impl Settings {
         self.scroll_speed = speed;
         changed
     }
+}
+
+/// A speed this version can't read falls back to the default rather than
+/// making the whole file unreadable. Not done for `library_folders`: an
+/// unreadable list must block saving so it can't overwrite the user's folders.
+fn scroll_speed_or_default<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<u32, D::Error> {
+    let value = toml::Value::deserialize(deserializer)?;
+    Ok(value.try_into().unwrap_or_else(|err| {
+        tracing::warn!(%err, "the scroll speed is ignored");
+        DEFAULT_SCROLL_SPEED
+    }))
 }
 
 #[cfg(test)]

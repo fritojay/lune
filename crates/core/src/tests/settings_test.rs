@@ -25,6 +25,7 @@ fn settings_survive_a_save_and_load_and_create_the_folder() {
     let settings = Settings {
         library_folders: vec![PathBuf::from("/music"), PathBuf::from("/mnt/Ünïcode dir")],
         scroll_speed: 7,
+        ..Settings::default()
     };
     settings.save(&path).unwrap();
     assert_eq!(Settings::load(&path).unwrap(), Some(settings));
@@ -53,14 +54,11 @@ fn an_empty_file_has_no_folders() {
 }
 
 #[test]
-fn a_malformed_or_misspelled_file_is_an_error() {
+fn a_malformed_file_or_folder_list_is_an_error() {
     let dir = TempDir::new();
     for (name, text) in [
         ("broken.toml", "library_folders = [".as_bytes()),
         ("wrong-type.toml", b"library_folders = \"/a\""),
-        ("negative-speed.toml", b"scroll_speed = -1"),
-        // A typo must not silently mean "no folders".
-        ("typo.toml", b"library_folder = [\"/a\"]"),
         ("binary.toml", &[0xff, 0xfe, 0x00]),
     ] {
         let path = dir.write(name, text);
@@ -72,6 +70,51 @@ fn a_malformed_or_misspelled_file_is_an_error() {
             ),
             "{name}: {result:?}"
         );
+    }
+}
+
+#[test]
+fn unknown_keys_are_kept_through_a_load_and_save() {
+    let dir = TempDir::new();
+    let path = dir.write(
+        "config.toml",
+        b"library_folders = [\"/a\"]\nscroll_speed = 5\nfuture_option = true\n\n[future_section]\nlevel = 2\n",
+    );
+    let mut settings = Settings::load(&path).unwrap().unwrap();
+    assert_eq!(folders(&settings), ["/a"]);
+    assert_eq!(settings.scroll_speed, 5);
+
+    settings.set_scroll_speed(6);
+    settings.save(&path).unwrap();
+    let saved = Settings::load(&path).unwrap().unwrap();
+    assert_eq!(saved.scroll_speed, 6);
+    assert_eq!(saved.extra, settings.extra);
+    assert_eq!(saved.extra["future_option"].as_bool(), Some(true));
+    assert_eq!(saved.extra["future_section"]["level"].as_integer(), Some(2));
+}
+
+#[test]
+fn a_misspelled_key_gets_the_default_and_is_kept() {
+    let dir = TempDir::new();
+    let path = dir.write("config.toml", b"scrol_speed = 9\n");
+    let settings = Settings::load(&path).unwrap().unwrap();
+    assert_eq!(settings.scroll_speed, DEFAULT_SCROLL_SPEED);
+    settings.save(&path).unwrap();
+    let saved = Settings::load(&path).unwrap().unwrap();
+    assert_eq!(saved.extra["scrol_speed"].as_integer(), Some(9));
+}
+
+#[test]
+fn an_unreadable_scroll_speed_gets_the_default_and_keeps_the_folders() {
+    let dir = TempDir::new();
+    for text in ["scroll_speed = -1", "scroll_speed = \"fast\""] {
+        let path = dir.write(
+            "config.toml",
+            format!("library_folders = [\"/a\"]\n{text}\n").as_bytes(),
+        );
+        let settings = Settings::load(&path).unwrap().unwrap();
+        assert_eq!(settings.scroll_speed, DEFAULT_SCROLL_SPEED, "{text}");
+        assert_eq!(folders(&settings), ["/a"], "{text}");
     }
 }
 

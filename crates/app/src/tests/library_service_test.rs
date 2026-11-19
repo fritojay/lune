@@ -320,6 +320,7 @@ fn when_the_library_cannot_open_the_saved_settings_still_load_and_are_kept() {
     Settings {
         library_folders: vec![a.clone()],
         scroll_speed: 6,
+        ..Settings::default()
     }
     .save(&Harness::config(&dir))
     .unwrap();
