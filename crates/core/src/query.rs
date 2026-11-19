@@ -56,7 +56,7 @@ pub struct TrackRow {
 
 /// One row of a flat track list: what the browser displays, groups by, and
 /// hands to the queue.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ListTrack {
     pub id: i64,
     pub path: PathBuf,

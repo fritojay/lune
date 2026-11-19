@@ -1,29 +1,7 @@
-use lune_core::{Grouping, ListTrack};
+use lune_core::Grouping;
 
 use super::*;
-
-fn track(id: i64, album_id: i64) -> ListTrack {
-    ListTrack {
-        id,
-        path: PathBuf::from(format!("{id}.flac")),
-        title: format!("Track {id}"),
-        artist: None,
-        album_id,
-        album: String::new(),
-        album_key: String::new(),
-        album_artist: "A".to_owned(),
-        album_artist_key: "a".to_owned(),
-        art_id: None,
-        album_year: None,
-        disc_no: None,
-        track_no: None,
-        duration_ms: 0,
-        codec: "flac".to_owned(),
-        bitrate_kbps: None,
-        added_ns: None,
-        played_ns: None,
-    }
-}
+use crate::test_util::list_track;
 
 fn ids(tracks: &[(i64, PathBuf)]) -> Vec<i64> {
     tracks.iter().map(|(id, _)| *id).collect()
@@ -31,7 +9,12 @@ fn ids(tracks: &[(i64, PathBuf)]) -> Vec<i64> {
 
 #[test]
 fn view_tracks_takes_a_range_of_the_view_in_order() {
-    let catalog = Catalog::new(vec![track(1, 1), track(2, 1), track(3, 2), track(4, 2)]);
+    let catalog = Catalog::new(vec![
+        list_track(1, 1, None),
+        list_track(2, 1, None),
+        list_track(3, 2, None),
+        list_track(4, 2, None),
+    ]);
     let view = catalog.view(Grouping::AlbumArtist, &lune_core::FilterValue::All, None);
     assert_eq!(
         ids(&view_tracks(&catalog, &view, 0, usize::MAX)),
@@ -47,7 +30,7 @@ fn view_tracks_takes_a_range_of_the_view_in_order() {
 
 #[test]
 fn view_tracks_clamps_to_the_view() {
-    let catalog = Catalog::new(vec![track(1, 1), track(2, 1)]);
+    let catalog = Catalog::new(vec![list_track(1, 1, None), list_track(2, 1, None)]);
     let view = catalog.view(Grouping::AlbumArtist, &lune_core::FilterValue::All, None);
     assert_eq!(ids(&view_tracks(&catalog, &view, 1, 10)), [2]);
     assert!(view_tracks(&catalog, &view, 5, 1).is_empty());

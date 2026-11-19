@@ -82,13 +82,11 @@ pub fn meta(album_artist: &str, album: &str, track_no: u32) -> TrackMeta {
         album_artist: Some(album_artist.to_owned()),
         album: Some(album.to_owned()),
         track_no: Some(track_no),
-        disc_no: None,
-        year: None,
         duration_ms: 1000,
         codec: "mp3".to_owned(),
         sample_rate: Some(44_100),
         bitrate_kbps: Some(320),
-        art: None,
+        ..Default::default()
     }
 }
 

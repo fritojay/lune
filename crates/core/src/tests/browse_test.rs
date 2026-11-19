@@ -14,15 +14,12 @@ fn track(id: i64, album_artist: &str, album_id: i64, album: &str, year: Option<i
         album_key: normalize::key(album),
         album_artist: album_artist.to_owned(),
         album_artist_key: normalize::key(album_artist),
-        art_id: None,
         album_year: year,
-        disc_no: None,
         track_no: Some(id as u32),
         duration_ms: 1000,
         codec: "mp3".to_owned(),
         bitrate_kbps: Some(320),
-        added_ns: None,
-        played_ns: None,
+        ..Default::default()
     }
 }
 

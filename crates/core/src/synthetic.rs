@@ -132,7 +132,7 @@ fn rows(tracks: usize) -> Vec<(FoundFile, TrackMeta)> {
                         codec: "flac".to_owned(),
                         sample_rate: Some(44_100),
                         bitrate_kbps: Some(900 + rng.below(300) as u32),
-                        art: None,
+                        ..Default::default()
                     };
                     let path = PathBuf::from("synthetic")
                         .join(format!("artist-{artist}"))

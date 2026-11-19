@@ -30,7 +30,7 @@ pub fn is_audio_path(path: &Path) -> bool {
         })
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrackMeta {
     pub title: Option<String>,
     pub artist: Option<String>,

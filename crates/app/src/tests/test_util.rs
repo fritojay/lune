@@ -96,21 +96,14 @@ pub fn list_track(id: i64, album_id: i64, art_id: Option<i64>) -> ListTrack {
         id,
         path: PathBuf::from(format!("{id}.flac")),
         title: format!("Track {id}"),
-        artist: None,
         album_id,
         album: format!("Album {album_id}"),
         album_key: format!("album {album_id}"),
         album_artist: "A".to_owned(),
         album_artist_key: "a".to_owned(),
         art_id,
-        album_year: None,
-        disc_no: None,
-        track_no: None,
-        duration_ms: 0,
         codec: "flac".to_owned(),
-        bitrate_kbps: None,
-        added_ns: None,
-        played_ns: None,
+        ..Default::default()
     }
 }
 
