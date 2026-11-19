@@ -13,6 +13,7 @@ use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QString, QStringList};
 use lune_core::{SortColumn, WindowState};
 
+use crate::property::set;
 use crate::{format::qml_int, session};
 
 #[cxx_qt::bridge]
@@ -110,14 +111,20 @@ impl qobject::WindowLayout {
             pixels(main_pane_width),
         );
         let layout = WindowLayoutRust::from(&fitted);
-        self.as_mut().rust_mut().width = layout.width;
-        self.as_mut().width_changed();
-        self.as_mut().rust_mut().height = layout.height;
-        self.as_mut().height_changed();
-        self.as_mut().rust_mut().filter_pane_width = layout.filter_pane_width;
-        self.as_mut().filter_pane_width_changed();
-        self.as_mut().rust_mut().queue_pane_width = layout.queue_pane_width;
-        self.queue_pane_width_changed();
+        set!(self, width, width_changed, layout.width);
+        set!(self, height, height_changed, layout.height);
+        set!(
+            self,
+            filter_pane_width,
+            filter_pane_width_changed,
+            layout.filter_pane_width
+        );
+        set!(
+            self,
+            queue_pane_width,
+            queue_pane_width_changed,
+            layout.queue_pane_width
+        );
     }
 
     fn save(
@@ -150,8 +157,7 @@ impl qobject::WindowLayout {
 
     fn set_column_shown(mut self: Pin<&mut Self>, column: &QString, shown: bool) {
         if let Some(hidden) = with_column_shown(self.hidden(), &column.to_string(), shown) {
-            self.as_mut().rust_mut().hidden_columns = names(&hidden);
-            self.hidden_columns_changed();
+            set!(self, hidden_columns, hidden_columns_changed, names(&hidden));
         }
     }
 

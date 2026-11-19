@@ -15,11 +15,13 @@ use std::rc::Rc;
 use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{
-    QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QStringList, QVariant,
+    QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QStringList, QVariant,
 };
 use lune_core::{Catalog, ListTrack, View};
 
-use crate::{covers, format, list_model, session};
+use crate::list_model::{self, text};
+use crate::property::set;
+use crate::{covers, format, session};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -81,41 +83,77 @@ pub mod qobject {
     impl cxx_qt::Initialize for AlbumListModel {}
 }
 
-#[derive(Clone, Copy)]
-#[repr(i32)]
-enum Role {
-    Title = 0x0100, // Qt::UserRole
-    Artist,
-    Year,
-    Duration,
-    Cover,
-    FirstIndex,
-    TrackCount,
-    TrackNumbers,
-    TrackTitles,
-    TrackArtists,
-    TrackDurations,
-    TrackIds,
-    TrackFileTypes,
-    TrackBitRates,
+/// An album of the view, as its roles read it.
+struct Album<'a> {
+    catalog: &'a Catalog,
+    view: &'a View,
+    range: Range<usize>,
+    first: &'a ListTrack,
 }
 
-const ROLES: [(Role, &str); 14] = [
-    (Role::Title, "albumTitle"),
-    (Role::Artist, "albumArtist"),
-    (Role::Year, "year"),
-    (Role::Duration, "duration"),
-    (Role::Cover, "cover"),
-    (Role::FirstIndex, "firstIndex"),
-    (Role::TrackCount, "trackCount"),
-    (Role::TrackNumbers, "trackNumbers"),
-    (Role::TrackTitles, "trackTitles"),
-    (Role::TrackArtists, "trackArtists"),
-    (Role::TrackDurations, "trackDurations"),
-    (Role::TrackIds, "trackIds"),
-    (Role::TrackFileTypes, "trackFileTypes"),
-    (Role::TrackBitRates, "trackBitRates"),
+impl Album<'_> {
+    fn tracks(&self) -> Vec<&ListTrack> {
+        self.view.tracks[self.range.clone()]
+            .iter()
+            .filter_map(|&i| self.catalog.track(i))
+            .collect()
+    }
+
+    /// One string per track.
+    fn strings(&self, f: impl Fn(&ListTrack) -> String) -> QVariant {
+        let list: QStringList = self
+            .tracks()
+            .into_iter()
+            .map(|t| QString::from(&f(t)))
+            .collect();
+        QVariant::from(&list)
+    }
+}
+
+/// Not [`list_model::Role`], whose row type can't borrow for any lifetime.
+type Role = (&'static str, fn(&Album<'_>) -> QVariant);
+
+const ROLES: &[Role] = &[
+    ("albumTitle", |a| text(&format::album(&a.first.album))),
+    ("albumArtist", |a| {
+        text(&format::artist(&a.first.album_artist))
+    }),
+    ("year", |a| text(&format::year(a.first.album_year))),
+    ("duration", |a| text(&total_duration(&a.tracks()))),
+    ("cover", |a| covers::url(shown_cover(a.view, a.first))),
+    ("firstIndex", |a| {
+        QVariant::from(&i32::try_from(a.range.start).unwrap_or(i32::MAX))
+    }),
+    ("trackCount", |a| {
+        QVariant::from(&i32::try_from(a.range.len()).unwrap_or(i32::MAX))
+    }),
+    ("trackNumbers", |a| {
+        a.strings(|t| {
+            let multi_disc = a.catalog.is_multi_disc(t.album_id);
+            format::track_number(t.disc_no, t.track_no, multi_disc)
+        })
+    }),
+    ("trackTitles", |a| a.strings(|t| t.title.clone())),
+    ("trackArtists", |a| a.strings(track_artist)),
+    ("trackDurations", |a| {
+        a.strings(|t| format::duration(t.duration_ms))
+    }),
+    ("trackIds", |a| {
+        let mut ids = QList::<i64>::default();
+        for t in a.tracks() {
+            ids.append(t.id);
+        }
+        QVariant::from(&ids)
+    }),
+    ("trackFileTypes", |a| {
+        a.strings(|t| format::file_type(&t.codec))
+    }),
+    ("trackBitRates", |a| {
+        a.strings(|t| format::bit_rate(t.bitrate_kbps))
+    }),
 ];
+
+const COVER_ROLE: i32 = list_model::role_id(ROLES, "cover");
 
 #[derive(Default)]
 pub struct AlbumListModelRust {
@@ -149,8 +187,7 @@ impl qobject::AlbumListModel {
             rust.cover_rows = cover_rows;
         }
         self.as_mut().end_reset_model();
-        self.as_mut().rust_mut().album_count = count;
-        self.album_count_changed();
+        set!(self, album_count, album_count_changed, count);
     }
 
     fn row_of(&self, index: i32) -> i32 {
@@ -169,86 +206,33 @@ impl qobject::AlbumListModel {
 
     fn cover_ready(self: Pin<&mut Self>, art_id: i64) {
         if let Some(rows) = self.cover_rows.get(&art_id).cloned() {
-            list_model::role_changed(self.upcast_pin(), &rows, Role::Cover as i32);
+            list_model::role_changed(self.upcast_pin(), &rows, COVER_ROLE);
         }
     }
 
-    fn album(&self, row: usize) -> Vec<&ListTrack> {
-        let (Some(catalog), Some(range)) = (&self.catalog, self.view.albums.get(row)) else {
-            return Vec::new();
-        };
-        let Range { start, end } = range.clone();
-        self.view.tracks[start..end]
-            .iter()
-            .filter_map(|&i| catalog.track(i))
-            .collect()
+    fn album(&self, row: usize) -> Option<Album<'_>> {
+        let catalog = self.catalog.as_deref()?;
+        Some(Album {
+            catalog,
+            view: &self.view,
+            range: self.view.albums.get(row)?.clone(),
+            first: first_track(Some(catalog), &self.view, row)?,
+        })
     }
 
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
-        let Ok(row) = usize::try_from(index.row()) else {
-            return QVariant::default();
-        };
-        let Some(range) = self.view.albums.get(row) else {
-            return QVariant::default();
-        };
-        let Some(first) = first_track(self.catalog.as_deref(), &self.view, row) else {
-            return QVariant::default();
-        };
-        // Only the per-track roles need the whole album.
-        let strings = |f: &dyn Fn(&ListTrack) -> String| -> QVariant {
-            let list: QStringList = self
-                .album(row)
-                .iter()
-                .map(|t| QString::from(&f(t)))
-                .collect();
-            QVariant::from(&list)
-        };
-        let Some(&(role, _)) = ROLES.iter().find(|(r, _)| *r as i32 == role) else {
-            return QVariant::default();
-        };
-        match role {
-            Role::Title => QVariant::from(&QString::from(&format::album(&first.album))),
-            Role::Artist => QVariant::from(&QString::from(&format::artist(&first.album_artist))),
-            Role::Year => QVariant::from(&QString::from(&format::year(first.album_year))),
-            Role::Duration => QVariant::from(&QString::from(&total_duration(&self.album(row)))),
-            Role::Cover => covers::url(shown_cover(&self.view, first)),
-            Role::FirstIndex => QVariant::from(&i32::try_from(range.start).unwrap_or(i32::MAX)),
-            Role::TrackCount => QVariant::from(&i32::try_from(range.len()).unwrap_or(i32::MAX)),
-            Role::TrackNumbers => strings(&|t| {
-                let multi_disc = self
-                    .catalog
-                    .as_deref()
-                    .is_some_and(|c| c.is_multi_disc(t.album_id));
-                format::track_number(t.disc_no, t.track_no, multi_disc)
-            }),
-            Role::TrackTitles => strings(&|t| t.title.clone()),
-            Role::TrackArtists => strings(&track_artist),
-            Role::TrackDurations => strings(&|t| format::duration(t.duration_ms)),
-            Role::TrackFileTypes => strings(&|t| format::file_type(&t.codec)),
-            Role::TrackBitRates => strings(&|t| format::bit_rate(t.bitrate_kbps)),
-            Role::TrackIds => {
-                let mut ids = QList::<i64>::default();
-                for t in self.album(row) {
-                    ids.append(t.id);
-                }
-                QVariant::from(&ids)
-            }
-        }
+        let album = usize::try_from(index.row())
+            .ok()
+            .and_then(|row| self.album(row));
+        list_model::data(ROLES, album.as_ref(), role)
     }
 
     fn row_count(&self, parent: &QModelIndex) -> i32 {
-        if parent.is_valid() {
-            return 0;
-        }
-        i32::try_from(self.view.albums.len()).unwrap_or(i32::MAX)
+        list_model::row_count(self.view.albums.len(), parent)
     }
 
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
-        let mut roles = QHash::<QHashPair_i32_QByteArray>::default();
-        for (role, name) in ROLES {
-            roles.insert(role as i32, QByteArray::from(name));
-        }
-        roles
+        list_model::role_names(ROLES)
     }
 }
 

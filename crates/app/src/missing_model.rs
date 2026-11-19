@@ -10,9 +10,10 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use cxx_qt::CxxQtType;
-use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
+use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QVariant};
 use lune_core::MissingTrack;
 
+use crate::list_model::{self, Role, text};
 use crate::{format, session};
 
 #[cxx_qt::bridge]
@@ -64,10 +65,15 @@ pub mod qobject {
     }
 }
 
-const LABEL_ROLE: i32 = 0x0100; // Qt::UserRole
-const PATH_ROLE: i32 = LABEL_ROLE + 1;
-const MISSING_SINCE_ROLE: i32 = LABEL_ROLE + 2;
-const ID_ROLE: i32 = LABEL_ROLE + 3;
+const ROLES: &[Role<MissingTrack>] = &[
+    ("label", |t| text(&label(t))),
+    ("path", |t| text(&t.path.display().to_string())),
+    // A JavaScript time, so QML can show it as a local date.
+    ("missingSince", |t| {
+        QVariant::from(&format::epoch_ms(t.missing_ns))
+    }),
+    ("trackId", |t| QVariant::from(&t.id)),
+];
 
 #[derive(Default)]
 pub struct MissingModelRust {
@@ -86,34 +92,15 @@ impl qobject::MissingModel {
         let track = usize::try_from(index.row())
             .ok()
             .and_then(|row| self.tracks.get(row));
-        let Some(track) = track else {
-            return QVariant::default();
-        };
-        let text = match role {
-            LABEL_ROLE => label(track),
-            PATH_ROLE => track.path.display().to_string(),
-            // A JavaScript time, so QML can show it as a local date.
-            MISSING_SINCE_ROLE => return QVariant::from(&format::epoch_ms(track.missing_ns)),
-            ID_ROLE => return QVariant::from(&track.id),
-            _ => return QVariant::default(),
-        };
-        QVariant::from(&QString::from(&text))
+        list_model::data(ROLES, track, role)
     }
 
     fn row_count(&self, parent: &QModelIndex) -> i32 {
-        if parent.is_valid() {
-            return 0;
-        }
-        i32::try_from(self.tracks.len()).unwrap_or(i32::MAX)
+        list_model::row_count(self.tracks.len(), parent)
     }
 
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
-        let mut roles = QHash::<QHashPair_i32_QByteArray>::default();
-        roles.insert(LABEL_ROLE, QByteArray::from("label"));
-        roles.insert(PATH_ROLE, QByteArray::from("path"));
-        roles.insert(MISSING_SINCE_ROLE, QByteArray::from("missingSince"));
-        roles.insert(ID_ROLE, QByteArray::from("trackId"));
-        roles
+        list_model::role_names(ROLES)
     }
 }
 

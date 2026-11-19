@@ -12,9 +12,11 @@ use std::pin::Pin;
 use std::sync::mpsc::{self, Sender};
 
 use cxx_qt::{CxxQtType, Threading};
-use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
+use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use lune_core::{BrowseState, Filter, FilterValue, Grouping, Library, Sort, SortColumn};
 
+use crate::list_model::{self, Role, text};
+use crate::property::set;
 use crate::{format, session};
 
 #[cxx_qt::bridge]
@@ -114,9 +116,15 @@ pub mod qobject {
     impl cxx_qt::Initialize for FilterModel {}
 }
 
-const LABEL_ROLE: i32 = 0x0100; // Qt::UserRole
-const DETAIL_ROLE: i32 = LABEL_ROLE + 1;
-const COUNT_ROLE: i32 = LABEL_ROLE + 2;
+const ROLES: &[Role<Filter>] = &[
+    ("label", |f| text(&format::filter_label(f))),
+    ("detail", |f| {
+        text(&f.detail.as_deref().map(format::artist).unwrap_or_default())
+    }),
+    ("count", |f| {
+        QVariant::from(&i32::try_from(f.tracks).unwrap_or(i32::MAX))
+    }),
+];
 
 const GROUPINGS: [Grouping; 6] = [
     Grouping::AlbumArtist,
@@ -270,10 +278,7 @@ impl qobject::FilterModel {
         if !valid {
             return;
         }
-        if grouping != self.grouping {
-            self.as_mut().rust_mut().grouping = grouping;
-            self.as_mut().grouping_changed();
-        }
+        set!(self, grouping, grouping_changed, grouping);
         self.recompute(None, true);
     }
 
@@ -281,8 +286,7 @@ impl qobject::FilterModel {
         if row == self.current_row || self.filter(row).is_none() {
             return;
         }
-        self.as_mut().rust_mut().current_row = row;
-        self.as_mut().current_row_changed();
+        set!(self, current_row, current_row_changed, row);
         self.update_view(true);
     }
 
@@ -308,10 +312,13 @@ impl qobject::FilterModel {
             return;
         };
         let (column, descending) = sort_state(sort);
-        self.as_mut().rust_mut().sort_column = QString::from(column);
-        self.as_mut().sort_column_changed();
-        self.as_mut().rust_mut().sort_descending = descending;
-        self.as_mut().sort_descending_changed();
+        set!(
+            self,
+            sort_column,
+            sort_column_changed,
+            QString::from(column)
+        );
+        set!(self, sort_descending, sort_descending_changed, descending);
         self.update_view(true);
     }
 
@@ -356,6 +363,8 @@ impl qobject::FilterModel {
         self.as_mut().begin_reset_model();
         self.as_mut().rust_mut().rows = rows;
         self.as_mut().end_reset_model();
+        // Sent even when unchanged: the model reset can move the ListView's
+        // current index, and this puts it back.
         self.as_mut().rust_mut().current_row = i32::try_from(row).unwrap_or(0);
         self.as_mut().current_row_changed();
         self.update_view(reset);
@@ -380,44 +389,21 @@ impl qobject::FilterModel {
         });
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
         session::set_view(view);
-        self.as_mut().rust_mut().title = QString::from(&title);
-        self.as_mut().title_changed();
-        self.as_mut().rust_mut().track_count = count;
-        self.as_mut().track_count_changed();
+        set!(self, title, title_changed, QString::from(&title));
+        set!(self, track_count, track_count_changed, count);
         self.view_changed(reset);
     }
 
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
-        let Some(filter) = self.filter(index.row()) else {
-            return QVariant::default();
-        };
-        match role {
-            LABEL_ROLE => QVariant::from(&QString::from(&format::filter_label(filter))),
-            DETAIL_ROLE => QVariant::from(&QString::from(
-                &filter
-                    .detail
-                    .as_deref()
-                    .map(format::artist)
-                    .unwrap_or_default(),
-            )),
-            COUNT_ROLE => QVariant::from(&i32::try_from(filter.tracks).unwrap_or(i32::MAX)),
-            _ => QVariant::default(),
-        }
+        list_model::data(ROLES, self.filter(index.row()), role)
     }
 
     fn row_count(&self, parent: &QModelIndex) -> i32 {
-        if parent.is_valid() {
-            return 0;
-        }
-        i32::try_from(self.rows.len()).unwrap_or(i32::MAX)
+        list_model::row_count(self.rows.len(), parent)
     }
 
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
-        let mut roles = QHash::<QHashPair_i32_QByteArray>::default();
-        roles.insert(LABEL_ROLE, QByteArray::from("label"));
-        roles.insert(DETAIL_ROLE, QByteArray::from("detail"));
-        roles.insert(COUNT_ROLE, QByteArray::from("count"));
-        roles
+        list_model::role_names(ROLES)
     }
 }
 

@@ -18,19 +18,9 @@ use lune_core::{Catalog, SlotId, View};
 use lune_engine::{EntryId, PlaybackState, Player, PlayerConfig};
 
 use crate::media_controls::{self, MediaCommand, MediaControls, NowPlaying, Playback};
+use crate::property::set;
 use crate::session::{self, Save};
 use crate::{covers, format};
-
-/// Sets a read-only property, notifying QML only when the value changes.
-macro_rules! set {
-    ($self:ident, $field:ident, $changed:ident, $value:expr) => {{
-        let value = $value;
-        if $self.$field != value {
-            $self.as_mut().rust_mut().$field = value;
-            $self.as_mut().$changed();
-        }
-    }};
-}
 
 #[cxx_qt::bridge]
 pub mod qobject {

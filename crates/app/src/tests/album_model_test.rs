@@ -135,7 +135,7 @@ fn columns_qml_has_every_column_once_with_a_role_that_exists() {
     assert_eq!(roles.len(), ids.len());
     for role in roles {
         assert!(
-            ROLES.iter().any(|&(_, name)| name == role),
+            ROLES.iter().any(|&(name, _)| name == role),
             "no role {role:?}"
         );
     }

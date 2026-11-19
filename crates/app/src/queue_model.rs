@@ -14,10 +14,12 @@ use std::rc::Rc;
 
 use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
-use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use lune_core::{Catalog, MissingTrack};
+use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
+use lune_core::{Catalog, ListTrack, MissingTrack};
 
-use crate::{covers, format, list_model, session};
+use crate::list_model::{self, text};
+use crate::property::set;
+use crate::{covers, format, session};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -76,11 +78,43 @@ pub mod qobject {
     impl cxx_qt::Initialize for QueueModel {}
 }
 
-const TITLE_ROLE: i32 = 0x0100; // Qt::UserRole
-const ARTIST_ROLE: i32 = TITLE_ROLE + 1;
-const DURATION_ROLE: i32 = TITLE_ROLE + 2;
-const COVER_ROLE: i32 = TITLE_ROLE + 3;
-const MISSING_ROLE: i32 = TITLE_ROLE + 4;
+/// A queued track: in the library, missing its file, or removed from the
+/// library (still listed until the queue is loaded again).
+enum Queued<'a> {
+    Listed(&'a ListTrack),
+    Missing(&'a MissingTrack),
+    Removed,
+}
+
+/// Not [`list_model::Role`], whose row type can't borrow for any lifetime.
+type Role = (&'static str, fn(&Queued<'_>) -> QVariant);
+
+const ROLES: &[Role] = &[
+    ("title", |q| match q {
+        Queued::Listed(t) => text(&t.title),
+        Queued::Missing(t) => text(&t.title),
+        Queued::Removed => text("(missing)"),
+    }),
+    ("artist", |q| match q {
+        Queued::Listed(ListTrack { artist, .. }) | Queued::Missing(MissingTrack { artist, .. }) => {
+            text(&format::artist(artist.as_deref().unwrap_or_default()))
+        }
+        Queued::Removed => QVariant::default(),
+    }),
+    ("duration", |q| match q {
+        Queued::Listed(t) => text(&format::duration(t.duration_ms)),
+        _ => QVariant::default(),
+    }),
+    ("cover", |q| match q {
+        Queued::Listed(t) => covers::url(t.art_id),
+        _ => QVariant::default(),
+    }),
+    ("missing", |q| {
+        QVariant::from(&matches!(q, Queued::Missing(_)))
+    }),
+];
+
+const COVER_ROLE: i32 = list_model::role_id(ROLES, "cover");
 
 pub struct QueueModelRust {
     current_row: i32,
@@ -141,10 +175,13 @@ impl qobject::QueueModel {
             rust.cover_rows = cover_rows;
         }
         self.as_mut().end_reset_model();
-        self.as_mut().rust_mut().count = count;
-        self.as_mut().count_changed();
-        self.as_mut().rust_mut().total_duration = QString::from(&format::long_duration(total));
-        self.total_duration_changed();
+        set!(self, count, count_changed, count);
+        set!(
+            self,
+            total_duration,
+            total_duration_changed,
+            QString::from(&format::long_duration(total))
+        );
     }
 
     fn cover_ready(self: Pin<&mut Self>, art_id: i64) {
@@ -153,56 +190,29 @@ impl qobject::QueueModel {
         }
     }
 
+    fn queued(&self, row: i32) -> Option<Queued<'_>> {
+        let &id = self.track_ids.get(usize::try_from(row).ok()?)?;
+        Some(
+            if let Some(track) = self.catalog.as_ref().and_then(|c| c.by_id(id)) {
+                Queued::Listed(track)
+            } else if let Some(track) = self.missing.get(&id) {
+                Queued::Missing(track)
+            } else {
+                Queued::Removed
+            },
+        )
+    }
+
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
-        let Some(&id) = usize::try_from(index.row())
-            .ok()
-            .and_then(|row| self.track_ids.get(row))
-        else {
-            return QVariant::default();
-        };
-        if let Some(track) = self.catalog.as_ref().and_then(|c| c.by_id(id)) {
-            let text = match role {
-                TITLE_ROLE => track.title.clone(),
-                ARTIST_ROLE => format::artist(track.artist.as_deref().unwrap_or_default()),
-                DURATION_ROLE => format::duration(track.duration_ms),
-                COVER_ROLE => return covers::url(track.art_id),
-                MISSING_ROLE => return QVariant::from(&false),
-                _ => return QVariant::default(),
-            };
-            return QVariant::from(&QString::from(&text));
-        }
-        if let Some(track) = self.missing.get(&id) {
-            let text = match role {
-                TITLE_ROLE => track.title.clone(),
-                ARTIST_ROLE => format::artist(track.artist.as_deref().unwrap_or_default()),
-                MISSING_ROLE => return QVariant::from(&true),
-                _ => return QVariant::default(),
-            };
-            return QVariant::from(&QString::from(&text));
-        }
-        // A queued track removed from the library is still listed until loaded again.
-        match role {
-            TITLE_ROLE => QVariant::from(&QString::from("(missing)")),
-            MISSING_ROLE => QVariant::from(&false),
-            _ => QVariant::default(),
-        }
+        list_model::data(ROLES, self.queued(index.row()).as_ref(), role)
     }
 
     fn row_count(&self, parent: &QModelIndex) -> i32 {
-        if parent.is_valid() {
-            return 0;
-        }
-        i32::try_from(self.track_ids.len()).unwrap_or(i32::MAX)
+        list_model::row_count(self.track_ids.len(), parent)
     }
 
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
-        let mut roles = QHash::<QHashPair_i32_QByteArray>::default();
-        roles.insert(TITLE_ROLE, QByteArray::from("title"));
-        roles.insert(ARTIST_ROLE, QByteArray::from("artist"));
-        roles.insert(DURATION_ROLE, QByteArray::from("duration"));
-        roles.insert(COVER_ROLE, QByteArray::from("cover"));
-        roles.insert(MISSING_ROLE, QByteArray::from("missing"));
-        roles
+        list_model::role_names(ROLES)
     }
 }
 

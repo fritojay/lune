@@ -19,6 +19,7 @@ use lune_core::{DEFAULT_SCROLL_SPEED, SCROLL_SPEEDS, clamp_scroll_speed};
 
 use crate::format::qml_int;
 use crate::library_service::{Folder, Job, LibraryService, RESCAN_EVERY, Update};
+use crate::property::set;
 use crate::{covers, format, session};
 
 #[cxx_qt::bridge]
@@ -160,33 +161,26 @@ impl qobject::LibraryManager {
             Update::Missing(tracks) => {
                 let count = i32::try_from(tracks.len()).unwrap_or(i32::MAX);
                 session::set_missing(tracks);
-                if self.missing_count != count {
-                    self.as_mut().rust_mut().missing_count = count;
-                    self.as_mut().missing_count_changed();
-                }
+                set!(self, missing_count, missing_count_changed, count);
                 self.missing_changed();
             }
             Update::Folders(folders) => {
                 let list: QList<QVariant> = folders.iter().map(folder_entry).collect();
                 self.as_mut().rust_mut().folder_paths =
                     folders.into_iter().map(|f| f.path).collect();
-                self.as_mut().rust_mut().folders = list;
-                self.folders_changed();
+                set!(self, folders, folders_changed, list);
             }
             Update::ScrollSpeed(speed) => self.show_scroll_speed(speed),
             Update::Status(status) => {
-                let busy = status.is_some();
-                if self.busy != busy {
-                    self.as_mut().rust_mut().busy = busy;
-                    self.as_mut().busy_changed();
-                }
-                self.as_mut().rust_mut().status = QString::from(&status.unwrap_or_default());
-                self.status_changed();
+                set!(self, busy, busy_changed, status.is_some());
+                set!(
+                    self,
+                    status,
+                    status_changed,
+                    QString::from(&status.unwrap_or_default())
+                );
             }
-            Update::Error(message) => {
-                self.as_mut().rust_mut().error = QString::from(&message);
-                self.error_changed();
-            }
+            Update::Error(message) => set!(self, error, error_changed, QString::from(&message)),
         }
     }
 
@@ -235,16 +229,11 @@ impl qobject::LibraryManager {
     }
 
     fn show_scroll_speed(mut self: Pin<&mut Self>, speed: u32) {
-        let speed = qml_int(speed);
-        if self.scroll_speed != speed {
-            self.as_mut().rust_mut().scroll_speed = speed;
-            self.scroll_speed_changed();
-        }
+        set!(self, scroll_speed, scroll_speed_changed, qml_int(speed));
     }
 
     fn clear_error(mut self: Pin<&mut Self>) {
-        self.as_mut().rust_mut().error = QString::default();
-        self.error_changed();
+        set!(self, error, error_changed, QString::default());
     }
 }
 
