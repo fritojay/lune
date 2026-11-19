@@ -18,6 +18,8 @@ fn track(id: i64, album_id: i64) -> ListTrack {
         disc_no: None,
         track_no: None,
         duration_ms: 0,
+        codec: "flac".to_owned(),
+        bitrate_kbps: None,
         added_ns: None,
         played_ns: None,
     }

@@ -42,7 +42,7 @@ pub mod qobject {
         #[qproperty(i32, current_row, cxx_name = "currentRow", READ, NOTIFY)]
         #[qproperty(QString, title, READ, NOTIFY)]
         #[qproperty(i32, track_count, cxx_name = "trackCount", READ, NOTIFY)]
-        #[qproperty(i32, sort_column, cxx_name = "sortColumn", READ, NOTIFY)]
+        #[qproperty(QString, sort_column, cxx_name = "sortColumn", READ, NOTIFY)]
         #[qproperty(bool, sort_descending, cxx_name = "sortDescending", READ, NOTIFY)]
         type FilterModel = super::FilterModelRust;
     }
@@ -72,16 +72,16 @@ pub mod qobject {
         #[qinvokable]
         fn played(self: Pin<&mut FilterModel>);
 
-        /// A click on column `column`'s heading (0 #, 1 Title, 2 Artist,
-        /// 3 Time). `sortColumn` is -1 in album order.
+        /// A click on column `column`'s heading. Columns go by
+        /// `SortColumn::name`; `sortColumn` is empty in album order.
         #[qinvokable]
         #[cxx_name = "sortBy"]
-        fn sort_by(self: Pin<&mut FilterModel>, column: i32);
+        fn sort_by(self: Pin<&mut FilterModel>, column: &QString);
 
-        /// Sorts by `column`, or restores album order for -1.
+        /// Sorts by `column`, or restores album order for "".
         #[qinvokable]
         #[cxx_name = "setSort"]
-        fn set_sort(self: Pin<&mut FilterModel>, column: i32, descending: bool);
+        fn set_sort(self: Pin<&mut FilterModel>, column: &QString, descending: bool);
 
         #[qinvokable]
         #[cxx_name = "setSearch"]
@@ -127,21 +127,6 @@ const GROUPINGS: [Grouping; 6] = [
     Grouping::RecentlyPlayed,
 ];
 
-const SORT_COLUMNS: [SortColumn; 4] = [
-    SortColumn::TrackNumber,
-    SortColumn::Title,
-    SortColumn::Artist,
-    SortColumn::Duration,
-];
-
-/// The sort that `sortColumn` and `sortDescending` describe.
-fn sort_of(column: i32, descending: bool) -> Option<Sort> {
-    let column = *usize::try_from(column)
-        .ok()
-        .and_then(|c| SORT_COLUMNS.get(c))?;
-    Some(Sort { column, descending })
-}
-
 fn grouping_index(grouping: Grouping) -> i32 {
     GROUPINGS
         .iter()
@@ -150,36 +135,32 @@ fn grouping_index(grouping: Grouping) -> i32 {
         .unwrap_or(0)
 }
 
+/// The sort that `sortColumn` and `sortDescending` describe.
+fn sort_of(column: &str, descending: bool) -> Option<Sort> {
+    let column = SortColumn::from_name(column)?;
+    Some(Sort { column, descending })
+}
+
 /// `sortColumn` and `sortDescending` for `sort`.
-fn sort_state(sort: Option<Sort>) -> (i32, bool) {
-    sort.and_then(|sort| {
-        let column = SORT_COLUMNS.iter().position(|c| *c == sort.column)?;
-        Some((i32::try_from(column).ok()?, sort.descending))
-    })
-    .unwrap_or((-1, false))
+fn sort_state(sort: Option<Sort>) -> (&'static str, bool) {
+    sort.map_or(("", false), |sort| (sort.column.name(), sort.descending))
 }
 
-/// `sortColumn` and `sortDescending` after a click on heading `clicked`, or
-/// `None` for a heading that doesn't exist.
-fn after_click(column: i32, descending: bool, clicked: i32) -> Option<(i32, bool)> {
-    let clicked_column = sort_of(clicked, false)?.column;
-    Some(
-        match Sort::after_click(sort_of(column, descending), clicked_column) {
-            Some(sort) => (clicked, sort.descending),
-            None => (-1, false),
-        },
-    )
+/// The sort after a click on heading `clicked`, or `None` for a heading
+/// that doesn't exist.
+fn after_click(current: Option<Sort>, clicked: &str) -> Option<Option<Sort>> {
+    Some(Sort::after_click(current, SortColumn::from_name(clicked)?))
 }
 
-/// `sortColumn` and `sortDescending` for a sort picked from the menu, or
-/// `None` for a column that doesn't exist or the sort already in effect.
-fn chosen(current: (i32, bool), column: i32, descending: bool) -> Option<(i32, bool)> {
-    let state = if column == -1 {
-        (-1, false)
+/// The sort picked from the menu, or `None` for a column that doesn't exist
+/// or the sort already in effect.
+fn chosen(current: Option<Sort>, column: &str, descending: bool) -> Option<Option<Sort>> {
+    let sort = if column.is_empty() {
+        None
     } else {
-        sort_of(column, descending).map(|_| (column, descending))?
+        Some(sort_of(column, descending)?)
     };
-    (state != current).then_some(state)
+    (sort != current).then_some(sort)
 }
 
 pub struct FilterModelRust {
@@ -188,7 +169,7 @@ pub struct FilterModelRust {
     current_row: i32,
     title: QString,
     track_count: i32,
-    sort_column: i32,
+    sort_column: QString,
     sort_descending: bool,
     rows: Vec<Filter>,
     /// Track ids matching the search; `None` without a search.
@@ -209,7 +190,7 @@ impl Default for FilterModelRust {
             current_row: 0,
             title: QString::default(),
             track_count: 0,
-            sort_column,
+            sort_column: QString::from(sort_column),
             sort_descending,
             rows: Vec::new(),
             matches: None,
@@ -312,21 +293,22 @@ impl qobject::FilterModel {
         }
     }
 
-    fn sort_by(self: Pin<&mut Self>, column: i32) {
-        let state = after_click(self.sort_column, self.sort_descending, column);
-        self.apply_sort(state);
+    fn sort_by(self: Pin<&mut Self>, column: &QString) {
+        let sort = after_click(self.sort(), &column.to_string());
+        self.apply_sort(sort);
     }
 
-    fn set_sort(self: Pin<&mut Self>, column: i32, descending: bool) {
-        let state = chosen((self.sort_column, self.sort_descending), column, descending);
-        self.apply_sort(state);
+    fn set_sort(self: Pin<&mut Self>, column: &QString, descending: bool) {
+        let sort = chosen(self.sort(), &column.to_string(), descending);
+        self.apply_sort(sort);
     }
 
-    fn apply_sort(mut self: Pin<&mut Self>, state: Option<(i32, bool)>) {
-        let Some((column, descending)) = state else {
+    fn apply_sort(mut self: Pin<&mut Self>, sort: Option<Option<Sort>>) {
+        let Some(sort) = sort else {
             return;
         };
-        self.as_mut().rust_mut().sort_column = column;
+        let (column, descending) = sort_state(sort);
+        self.as_mut().rust_mut().sort_column = QString::from(column);
         self.as_mut().sort_column_changed();
         self.as_mut().rust_mut().sort_descending = descending;
         self.as_mut().sort_descending_changed();
@@ -334,7 +316,7 @@ impl qobject::FilterModel {
     }
 
     fn sort(&self) -> Option<Sort> {
-        sort_of(self.sort_column, self.sort_descending)
+        sort_of(&self.sort_column.to_string(), self.sort_descending)
     }
 
     fn set_search(mut self: Pin<&mut Self>, text: &QString) {

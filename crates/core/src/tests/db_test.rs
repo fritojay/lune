@@ -119,3 +119,30 @@ fn a_v5_database_keeps_its_tracks_present() {
     assert_eq!(crate::query::track_list(&conn).unwrap().len(), 1);
     assert!(crate::query::missing_tracks(&conn).unwrap().is_empty());
 }
+
+#[test]
+fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
+    let dir = crate::test_util::TempDir::new();
+    dir.write("1.wav", &crate::test_util::wav_bytes(1000));
+    let mut conn = open_in_memory().unwrap();
+    let quick = |conn: &mut Connection| {
+        crate::scan::scan(conn, dir.path(), crate::ScanMode::Quick, &mut |_| {}).unwrap()
+    };
+    quick(&mut conn);
+    let before = crate::query::track_list(&conn).unwrap()[0].clone();
+    conn.execute_batch("ALTER TABLE tracks DROP COLUMN bitrate_kbps; PRAGMA user_version = 7;")
+        .unwrap();
+
+    migrate(&conn).unwrap();
+    assert_eq!(
+        crate::query::track_list(&conn).unwrap()[0].bitrate_kbps,
+        None
+    );
+    let report = quick(&mut conn);
+    assert_eq!((report.updated, report.dirs_skipped), (1, 0), "{report:?}");
+    let after = crate::query::track_list(&conn).unwrap()[0].clone();
+    assert_eq!(after, before);
+
+    let report = quick(&mut conn);
+    assert_eq!(report.updated, 0, "{report:?}");
+}

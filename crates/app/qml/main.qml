@@ -294,8 +294,10 @@ ApplicationWindow {
                     scanStatus: library.busy ? library.status : ""
                     scrollSpeed: library.scrollSpeed
                     currentTrackId: player.currentTrackId
+                    hiddenColumns: layout.hiddenColumns
                     onSortClicked: column => filters.sortBy(column)
                     onSortChosen: (column, descending) => filters.setSort(column, descending)
+                    onColumnToggled: (column, shown) => layout.setColumnShown(column, shown)
                     onPlayRequested: start => window.playView(start)
                     onPlayNextRequested: (start, tracks) => player.playNextFromView(start, tracks)
                     onAddToQueueRequested: (start, tracks) => player.addFromView(start, tracks)

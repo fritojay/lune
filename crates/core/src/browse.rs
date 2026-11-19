@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::time::SystemTime;
 
+use serde::de::IntoDeserializer;
 use serde::{Deserialize, Serialize};
 
 use crate::normalize;
@@ -53,13 +54,33 @@ pub struct Filter {
     pub tracks: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SortColumn {
     TrackNumber,
     Title,
     Artist,
     Duration,
+    FileType,
+    BitRate,
+}
+
+impl SortColumn {
+    /// The name it's saved under, which QML also uses for the column.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::TrackNumber => "track_number",
+            Self::Title => "title",
+            Self::Artist => "artist",
+            Self::Duration => "duration",
+            Self::FileType => "file_type",
+            Self::BitRate => "bit_rate",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::deserialize(IntoDeserializer::<serde::de::value::Error>::into_deserializer(name)).ok()
+    }
 }
 
 /// A column sort of the main pane, which replaces album order.
@@ -286,7 +307,7 @@ impl Catalog {
 
     /// `view` reordered by `sort`. Track numbers sort by disc, then track.
     /// Ties keep `view`'s order, and tracks without a track number, an artist,
-    /// or a known length come last in both directions.
+    /// a known length, or a known bit rate come last in both directions.
     pub fn sorted(&self, mut view: View, sort: Sort) -> View {
         view.tracks.sort_by(|&a, &b| {
             let (x, y) = (&self.tracks[a], &self.tracks[b]);
@@ -312,6 +333,12 @@ impl Catalog {
                     (y.duration_ms > 0).then_some(y.duration_ms),
                     sort.descending,
                 ),
+                SortColumn::FileType => {
+                    missing_last(Some(&x.codec), Some(&y.codec), sort.descending)
+                }
+                SortColumn::BitRate => {
+                    missing_last(x.bitrate_kbps, y.bitrate_kbps, sort.descending)
+                }
             }
         });
         view.albums = (0..view.tracks.len()).map(|i| i..i + 1).collect();

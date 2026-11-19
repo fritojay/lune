@@ -10,6 +10,7 @@ fn custom() -> WindowState {
         filter_pane_width: 320,
         queue_pane_width: 410,
         queue_shown: false,
+        hidden_columns: [SortColumn::FileType, SortColumn::BitRate].into(),
         browse: BrowseState {
             grouping: Grouping::Artist,
             selected: FilterValue::Artist("radiohead".into()),
@@ -82,6 +83,32 @@ fn missing_fields_keep_their_defaults_and_unknown_ones_are_ignored() {
             ..WindowState::default()
         }
     );
+}
+
+#[test]
+fn every_column_is_shown_by_default() {
+    assert!(WindowState::default().hidden_columns.is_empty());
+}
+
+#[test]
+fn a_hidden_column_this_version_lacks_is_dropped_and_the_rest_kept() {
+    let dir = TempDir::new();
+    let path = dir.write(
+        "window.toml",
+        b"width = 900\nhidden_columns = [\"bit_rate\", \"from_a_newer_version\", 3]\n",
+    );
+    let state = WindowState::load(&path).unwrap();
+    assert_eq!(state.hidden_columns, [SortColumn::BitRate].into());
+    assert_eq!(state.width, 900);
+}
+
+#[test]
+fn unreadable_hidden_columns_show_every_column_without_losing_the_rest() {
+    let dir = TempDir::new();
+    let path = dir.write("window.toml", b"width = 900\nhidden_columns = \"artist\"\n");
+    let state = WindowState::load(&path).unwrap();
+    assert!(state.hidden_columns.is_empty());
+    assert_eq!(state.width, 900);
 }
 
 #[test]
@@ -182,6 +209,8 @@ fn every_grouping_and_sort_survives_a_save_and_load() {
         SortColumn::Title,
         SortColumn::Artist,
         SortColumn::Duration,
+        SortColumn::FileType,
+        SortColumn::BitRate,
     ];
     for grouping in groupings {
         for sort in columns

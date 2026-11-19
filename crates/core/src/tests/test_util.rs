@@ -87,6 +87,7 @@ pub fn meta(album_artist: &str, album: &str, track_no: u32) -> TrackMeta {
         duration_ms: 1000,
         codec: "mp3".to_owned(),
         sample_rate: Some(44_100),
+        bitrate_kbps: Some(320),
         art: None,
     }
 }

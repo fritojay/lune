@@ -96,9 +96,11 @@ enum Role {
     TrackArtists,
     TrackDurations,
     TrackIds,
+    TrackFileTypes,
+    TrackBitRates,
 }
 
-const ROLES: [(Role, &str); 12] = [
+const ROLES: [(Role, &str); 14] = [
     (Role::Title, "albumTitle"),
     (Role::Artist, "albumArtist"),
     (Role::Year, "year"),
@@ -111,6 +113,8 @@ const ROLES: [(Role, &str); 12] = [
     (Role::TrackArtists, "trackArtists"),
     (Role::TrackDurations, "trackDurations"),
     (Role::TrackIds, "trackIds"),
+    (Role::TrackFileTypes, "trackFileTypes"),
+    (Role::TrackBitRates, "trackBitRates"),
 ];
 
 #[derive(Default)]
@@ -218,16 +222,10 @@ impl qobject::AlbumListModel {
                 format::track_number(t.disc_no, t.track_no, multi_disc)
             }),
             Role::TrackTitles => strings(&|t| t.title.clone()),
-            Role::TrackArtists => strings(&|t| {
-                // Only shown where it differs from the album artist.
-                let artist = t.artist.as_deref().unwrap_or_default();
-                if lune_core::normalize::key(artist) == t.album_artist_key {
-                    String::new()
-                } else {
-                    format::artist(artist)
-                }
-            }),
+            Role::TrackArtists => strings(&track_artist),
             Role::TrackDurations => strings(&|t| format::duration(t.duration_ms)),
+            Role::TrackFileTypes => strings(&|t| format::file_type(&t.codec)),
+            Role::TrackBitRates => strings(&|t| format::bit_rate(t.bitrate_kbps)),
             Role::TrackIds => {
                 let mut ids = QList::<i64>::default();
                 for t in self.album(row) {
@@ -258,6 +256,14 @@ impl qobject::AlbumListModel {
 fn first_track<'a>(catalog: Option<&'a Catalog>, view: &View, row: usize) -> Option<&'a ListTrack> {
     let start = view.albums.get(row)?.start;
     catalog?.track(*view.tracks.get(start)?)
+}
+
+/// The track's artist, else its album's.
+fn track_artist(track: &ListTrack) -> String {
+    match track.artist.as_deref() {
+        Some(artist) if !artist.trim().is_empty() => format::artist(artist),
+        _ => format::artist(&track.album_artist),
+    }
 }
 
 /// The length of the tracks shown, or empty when none of them has a known

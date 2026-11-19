@@ -131,6 +131,7 @@ fn rows(tracks: usize) -> Vec<(FoundFile, TrackMeta)> {
                         duration_ms: 60_000 + rng.below(480_000),
                         codec: "flac".to_owned(),
                         sample_rate: Some(44_100),
+                        bitrate_kbps: Some(900 + rng.below(300) as u32),
                         art: None,
                     };
                     let path = PathBuf::from("synthetic")

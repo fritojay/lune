@@ -43,6 +43,7 @@ pub struct TrackMeta {
     /// Lowercase codec name, e.g. `mp3`, `flac`, `aac`, `alac`, `vorbis`.
     pub codec: String,
     pub sample_rate: Option<u32>,
+    pub bitrate_kbps: Option<u32>,
     pub art: Option<EmbeddedArt>,
 }
 
@@ -105,6 +106,7 @@ pub fn read_track_meta(path: &Path) -> Result<TrackMeta> {
         duration_ms: u64::try_from(props.duration().as_millis()).unwrap_or(u64::MAX),
         codec: codec_name(tagged.file_type(), mp4_codec),
         sample_rate: props.sample_rate(),
+        bitrate_kbps: props.audio_bitrate().filter(|&kbps| kbps > 0),
         art: tag.and_then(embedded_art),
     })
 }

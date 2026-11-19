@@ -75,6 +75,9 @@ pub struct ListTrack {
     pub disc_no: Option<u32>,
     pub track_no: Option<u32>,
     pub duration_ms: u64,
+    /// Lowercase codec name, as in [`TrackMeta::codec`](crate::TrackMeta::codec).
+    pub codec: String,
+    pub bitrate_kbps: Option<u32>,
     /// Nanoseconds since the Unix epoch; `None` until a scan dates it.
     pub added_ns: Option<i64>,
     /// When playback of it last started, in nanoseconds since the Unix
@@ -178,7 +181,8 @@ pub(crate) fn track_list(conn: &Connection) -> Result<Vec<ListTrack>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT t.id, t.path, t.title, t.artist, a.id, a.title, a.title_key,
                 a.album_artist, a.album_artist_key, a.art_id, a.year_max,
-                t.disc_no, t.track_no, t.duration_ms, t.added_ns, t.played_ns
+                t.disc_no, t.track_no, t.duration_ms, t.added_ns, t.played_ns,
+                t.codec, t.bitrate_kbps
          FROM tracks t JOIN albums a ON a.id = t.album_id
          WHERE t.missing_ns IS NULL
          ORDER BY a.album_artist_key, a.year_max IS NULL, a.year_max, a.title_key, a.id,
@@ -207,6 +211,8 @@ pub(crate) fn track_list(conn: &Connection) -> Result<Vec<ListTrack>> {
             duration_ms: get_u64(row, 13)?,
             added_ns: row.get(14)?,
             played_ns: row.get(15)?,
+            codec: row.get(16)?,
+            bitrate_kbps: row.get(17)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)

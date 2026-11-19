@@ -4,14 +4,16 @@ import QtQuick.Controls
 
 Menu {
     id: sortMenu
-    required property int sortColumn
+    required property string sortColumn
     required property bool sortDescending
-    readonly property bool sorted: sortColumn >= 0
-    signal sortChosen(int column, bool descending)
+    required property var hiddenColumns
+    readonly property bool sorted: sortColumn !== ""
+    signal sortChosen(string column, bool descending)
+    signal columnToggled(string column, bool shown)
 
     component SortMenuItem: MenuItem {
         id: sortItem
-        required property int column
+        required property string column
         required property bool descending
         required property bool selected
         checkable: true
@@ -23,36 +25,34 @@ Menu {
         }
     }
 
+    component ColumnMenuItem: MenuItem {
+        id: columnItem
+        required property string column
+        required property bool shown
+        checkable: true
+        checked: shown
+        onTriggered: {
+            (menu as SortMenu).columnToggled(columnItem.column, !columnItem.shown)
+            checked = Qt.binding(() => columnItem.shown)
+        }
+    }
+
     SortMenuItem {
         text: qsTr("Album Order")
-        column: -1
+        column: ""
         descending: false
         selected: !sortMenu.sorted
     }
     MenuSeparator {}
-    SortMenuItem {
-        text: qsTr("Track Number")
-        column: 0
-        descending: sortMenu.sortDescending
-        selected: sortMenu.sortColumn === column
-    }
-    SortMenuItem {
-        text: qsTr("Title")
-        column: 1
-        descending: sortMenu.sortDescending
-        selected: sortMenu.sortColumn === column
-    }
-    SortMenuItem {
-        text: qsTr("Artist")
-        column: 2
-        descending: sortMenu.sortDescending
-        selected: sortMenu.sortColumn === column
-    }
-    SortMenuItem {
-        text: qsTr("Time")
-        column: 3
-        descending: sortMenu.sortDescending
-        selected: sortMenu.sortColumn === column
+    Repeater {
+        model: Columns.all
+        SortMenuItem {
+            required property var modelData
+            text: modelData.menuTitle ?? modelData.title
+            column: modelData.id
+            descending: sortMenu.sortDescending
+            selected: sortMenu.sortColumn === column
+        }
     }
     MenuSeparator {}
     SortMenuItem {
@@ -68,5 +68,15 @@ Menu {
         column: sortMenu.sortColumn
         descending: true
         selected: sortMenu.sorted && sortMenu.sortDescending
+    }
+    MenuSeparator {}
+    Repeater {
+        model: Columns.hideable
+        ColumnMenuItem {
+            required property var modelData
+            text: qsTr("Show %1").arg(modelData.title)
+            column: modelData.id
+            shown: !sortMenu.hiddenColumns.includes(modelData.id)
+        }
     }
 }

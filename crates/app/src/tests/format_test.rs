@@ -80,3 +80,15 @@ fn numbers_too_big_for_qml_are_capped() {
     assert_eq!(qml_int(1280), 1280);
     assert_eq!(qml_int(u32::MAX), i32::MAX);
 }
+
+#[test]
+fn file_types_are_upper_case_codec_names() {
+    assert_eq!(file_type("flac"), "FLAC");
+    assert_eq!(file_type("mp3"), "MP3");
+}
+
+#[test]
+fn bit_rates_are_in_kbps_and_empty_when_unknown() {
+    assert_eq!(bit_rate(Some(320)), "320 kbps");
+    assert_eq!(bit_rate(None), "");
+}

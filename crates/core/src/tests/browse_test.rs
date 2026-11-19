@@ -19,6 +19,8 @@ fn track(id: i64, album_artist: &str, album_id: i64, album: &str, year: Option<i
         disc_no: None,
         track_no: Some(id as u32),
         duration_ms: 1000,
+        codec: "mp3".to_owned(),
+        bitrate_kbps: Some(320),
         added_ns: None,
         played_ns: None,
     }
@@ -521,6 +523,42 @@ fn tracks_of_unknown_length_sort_last_in_both_directions() {
 }
 
 #[test]
+fn sorting_by_bit_rate_puts_tracks_of_unknown_rate_last_in_both_directions() {
+    let catalog = Catalog::new(
+        [(1, Some(256)), (2, None), (3, Some(1411)), (4, Some(128))]
+            .into_iter()
+            .map(|(id, kbps)| ListTrack {
+                bitrate_kbps: kbps,
+                ..track(id, "A", 10, "One", None)
+            })
+            .collect(),
+    );
+    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.sorted(all.clone(), sort(SortColumn::BitRate, false));
+    assert_eq!(ids(&catalog, &view), [4, 1, 3, 2]);
+    let view = catalog.sorted(all, sort(SortColumn::BitRate, true));
+    assert_eq!(ids(&catalog, &view), [3, 1, 4, 2]);
+}
+
+#[test]
+fn sorting_by_file_type_groups_each_codec_keeping_album_order_within_it() {
+    let catalog = Catalog::new(
+        [(1, "mp3"), (2, "flac"), (3, "mp3"), (4, "aac")]
+            .into_iter()
+            .map(|(id, codec)| ListTrack {
+                codec: codec.to_owned(),
+                ..track(id, "A", 10, "One", None)
+            })
+            .collect(),
+    );
+    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.sorted(all.clone(), sort(SortColumn::FileType, false));
+    assert_eq!(ids(&catalog, &view), [4, 2, 1, 3]);
+    let view = catalog.sorted(all, sort(SortColumn::FileType, true));
+    assert_eq!(ids(&catalog, &view), [1, 3, 2, 4]);
+}
+
+#[test]
 fn an_album_view_has_no_sort() {
     let catalog = library();
     let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
@@ -566,4 +604,29 @@ fn sorting_an_empty_view_gives_an_empty_view() {
     let view = catalog.sorted(View::default(), sort(SortColumn::Title, false));
     assert!(view.is_empty());
     assert!(view.albums.is_empty());
+}
+
+#[test]
+fn a_columns_name_is_the_one_it_is_saved_under() {
+    for column in [
+        SortColumn::TrackNumber,
+        SortColumn::Title,
+        SortColumn::Artist,
+        SortColumn::Duration,
+        SortColumn::FileType,
+        SortColumn::BitRate,
+    ] {
+        assert_eq!(
+            toml::Value::try_from(column).unwrap().as_str(),
+            Some(column.name())
+        );
+        assert_eq!(SortColumn::from_name(column.name()), Some(column));
+    }
+}
+
+#[test]
+fn an_unknown_column_name_is_no_column() {
+    assert_eq!(SortColumn::from_name(""), None);
+    assert_eq!(SortColumn::from_name("BitRate"), None);
+    assert_eq!(SortColumn::from_name("bit_rate "), None);
 }

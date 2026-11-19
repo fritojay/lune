@@ -38,6 +38,15 @@ pub fn album(title: &str) -> String {
     or(title, "Unknown Album")
 }
 
+pub fn file_type(codec: &str) -> String {
+    codec.to_uppercase()
+}
+
+/// Empty when unknown.
+pub fn bit_rate(kbps: Option<u32>) -> String {
+    kbps.map_or_else(String::new, |kbps| format!("{kbps} kbps"))
+}
+
 pub fn filter_label(filter: &Filter) -> String {
     match &filter.value {
         FilterValue::All => "All".to_owned(),

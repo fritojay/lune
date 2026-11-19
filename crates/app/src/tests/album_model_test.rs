@@ -77,3 +77,66 @@ fn an_album_with_no_known_length_shows_no_duration() {
     assert_eq!(total_duration(&[&a]), "");
     assert_eq!(total_duration(&[]), "");
 }
+
+#[test]
+fn a_track_shows_its_own_artist_even_when_it_is_the_album_artist() {
+    let mut t = track(1, 1, None);
+    t.artist = Some("A".to_owned());
+    assert_eq!(track_artist(&t), "A");
+    t.artist = Some("Guest".to_owned());
+    assert_eq!(track_artist(&t), "Guest");
+}
+
+#[test]
+fn a_track_without_an_artist_shows_the_album_artist_or_unknown() {
+    let mut t = track(1, 1, None);
+    for blank in [None, Some("  ".to_owned())] {
+        t.artist = blank;
+        assert_eq!(track_artist(&t), "A");
+    }
+    t.album_artist = String::new();
+    assert_eq!(track_artist(&t), "Unknown Artist");
+}
+
+/// Each column's `key: "value"` in `Columns.qml`, in order.
+fn qml_columns(key: &str) -> Vec<&'static str> {
+    const QML: &str = include_str!("../../qml/Columns.qml");
+    let pattern = format!("{key}: \"");
+    QML.match_indices(&pattern)
+        .map(|(at, _)| {
+            let value = &QML[at + pattern.len()..];
+            &value[..value.find('"').unwrap()]
+        })
+        .collect()
+}
+
+#[test]
+fn columns_qml_has_every_column_once_with_a_role_that_exists() {
+    let ids = qml_columns("id");
+    let columns: Vec<_> = ids
+        .iter()
+        .map(|id| SortColumn::from_name(id).unwrap_or_else(|| panic!("no column {id:?}")))
+        .collect();
+    let mut sorted = columns.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(
+        sorted,
+        [
+            SortColumn::TrackNumber,
+            SortColumn::Title,
+            SortColumn::Artist,
+            SortColumn::Duration,
+            SortColumn::FileType,
+            SortColumn::BitRate,
+        ]
+    );
+    let roles = qml_columns("role");
+    assert_eq!(roles.len(), ids.len());
+    for role in roles {
+        assert!(
+            ROLES.iter().any(|&(_, name)| name == role),
+            "no role {role:?}"
+        );
+    }
+}

@@ -19,10 +19,13 @@ Item {
     required property var trackArtists
     required property var trackDurations
     required property var trackIds
+    required property var trackFileTypes
+    required property var trackBitRates
 
     required property bool sorted
     required property int selectedIndex
     required property real currentTrackId
+    required property var hiddenColumns
     required property real gutter
     required property int tracksLeft
     required property int tracksRight
@@ -110,37 +113,20 @@ Item {
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6 + album.gutter
                     spacing: 10
-                    Text {
-                        Layout.preferredWidth: 32
-                        horizontalAlignment: Text.AlignRight
-                        text: trackRow.nowPlaying ? "▶" : trackRow.field(album.trackNumbers)
-                        color: trackRow.textColor
-                        opacity: 0.7
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: trackRow.field(album.trackTitles)
-                        textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                        color: trackRow.textColor
-                        font.bold: trackRow.nowPlaying
-                    }
-                    Text {
-                        Layout.preferredWidth: Math.min(220, trackRow.width / 4)
-                        visible: text !== ""
-                        // Album rows show only artists that differ from the album artist.
-                        text: trackRow.field(album.trackArtists) || (album.sorted ? album.albumArtist : "")
-                        textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                        color: trackRow.textColor
-                        opacity: 0.7
-                    }
-                    Text {
-                        Layout.preferredWidth: Theme.timeWidth
-                        horizontalAlignment: Text.AlignRight
-                        text: trackRow.field(album.trackDurations)
-                        color: trackRow.textColor
-                        opacity: 0.7
+                    Repeater {
+                        model: Columns.shown(album.hiddenColumns)
+                        Text {
+                            required property var modelData
+                            Layout.fillWidth: modelData.fill ?? false
+                            Layout.preferredWidth: Columns.width(modelData, tracks.width)
+                            horizontalAlignment: modelData.alignRight ? Text.AlignRight : Text.AlignLeft
+                            text: modelData.marksPlaying && trackRow.nowPlaying ? "▶" : trackRow.field(album[modelData.role])
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            color: trackRow.textColor
+                            opacity: modelData.primary ? 1 : 0.7
+                            font.bold: (modelData.primary ?? false) && trackRow.nowPlaying
+                        }
                     }
                 }
 

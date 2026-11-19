@@ -12,20 +12,22 @@ ColumnLayout {
     required property int trackCount
     required property string title
     required property bool loading
-    required property int sortColumn
+    required property string sortColumn
     required property bool sortDescending
     required property bool hasFolders
     required property string scanStatus
     required property int scrollSpeed
     required property real currentTrackId
+    required property var hiddenColumns
     // A column sort shows a flat track list instead of albums with covers.
-    readonly property bool sorted: sortColumn >= 0
+    readonly property bool sorted: sortColumn !== ""
     readonly property int tracksLeft: sorted ? 0 : 2 * Theme.albumPadding + Theme.coverSize
     readonly property int tracksRight: sorted ? 0 : Theme.albumPadding
     readonly property ListView list: albumList
 
-    signal sortClicked(int column)
-    signal sortChosen(int column, bool descending)
+    signal sortClicked(string column)
+    signal sortChosen(string column, bool descending)
+    signal columnToggled(string column, bool shown)
     signal playRequested(int start)
     signal playNextRequested(int start, int tracks)
     signal addToQueueRequested(int start, int tracks)
@@ -39,7 +41,7 @@ ColumnLayout {
             albumList.contentY = Math.min(contentY, Math.max(0, albumList.contentHeight - albumList.height))
     }
 
-    function heading(text: string, column: int): string {
+    function heading(text: string, column: string): string {
         return text + (sortColumn === column ? (sortDescending ? " ▼" : " ▲") : "")
     }
 
@@ -79,7 +81,9 @@ ColumnLayout {
         id: sortMenu
         sortColumn: trackPane.sortColumn
         sortDescending: trackPane.sortDescending
+        hiddenColumns: trackPane.hiddenColumns
         onSortChosen: (column, descending) => trackPane.sortChosen(column, descending)
+        onColumnToggled: (column, shown) => trackPane.columnToggled(column, shown)
     }
 
     Label {
@@ -144,29 +148,16 @@ ColumnLayout {
             anchors.leftMargin: trackPane.tracksLeft + 6
             anchors.rightMargin: trackPane.tracksRight + 6 + albumScroll.gutter
             spacing: 10
-            SortHeading {
-                Layout.preferredWidth: 32
-                horizontalAlignment: Text.AlignRight
-                text: trackPane.heading(qsTr("#"), 0)
-                onClicked: trackPane.sortClicked(0)
-            }
-            SortHeading {
-                Layout.fillWidth: true
-                text: trackPane.heading(qsTr("Title"), 1)
-                onClicked: trackPane.sortClicked(1)
-            }
-            SortHeading {
-                Layout.preferredWidth: Math.min(220, headings.width / 4)
-                // Album rows show an artist only where it differs, so there is no column to head.
-                visible: trackPane.sorted
-                text: trackPane.heading(qsTr("Artist"), 2)
-                onClicked: trackPane.sortClicked(2)
-            }
-            SortHeading {
-                Layout.preferredWidth: Theme.timeWidth
-                horizontalAlignment: Text.AlignRight
-                text: trackPane.heading(qsTr("Time"), 3)
-                onClicked: trackPane.sortClicked(3)
+            Repeater {
+                model: Columns.shown(trackPane.hiddenColumns)
+                SortHeading {
+                    required property var modelData
+                    Layout.fillWidth: modelData.fill ?? false
+                    Layout.preferredWidth: Columns.width(modelData, headings.width - trackPane.tracksLeft - trackPane.tracksRight)
+                    horizontalAlignment: modelData.alignRight ? Text.AlignRight : Text.AlignLeft
+                    text: trackPane.heading(modelData.title, modelData.id)
+                    onClicked: trackPane.sortClicked(modelData.id)
+                }
             }
         }
 
@@ -204,6 +195,7 @@ ColumnLayout {
             tracksRight: trackPane.tracksRight
             selectedIndex: albumList.selectedIndex
             currentTrackId: trackPane.currentTrackId
+            hiddenColumns: trackPane.hiddenColumns
             gutter: albumScroll.gutter
             onTrackClicked: viewIndex => albumList.selectedIndex = viewIndex
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)

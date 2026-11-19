@@ -830,8 +830,8 @@ pub(crate) fn upsert_track(
     tx.prepare_cached(
         "INSERT INTO tracks (path, mtime_ns, size, title, artist, album_artist, album_id,
                              disc_no, track_no, year, duration_ms, codec, sample_rate, art_id,
-                             album, added_ns)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                             album, added_ns, bitrate_kbps)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
          ON CONFLICT (path) DO UPDATE SET
              mtime_ns = excluded.mtime_ns, size = excluded.size, title = excluded.title,
              artist = excluded.artist, album_artist = excluded.album_artist,
@@ -839,7 +839,7 @@ pub(crate) fn upsert_track(
              track_no = excluded.track_no, year = excluded.year,
              duration_ms = excluded.duration_ms, codec = excluded.codec,
              sample_rate = excluded.sample_rate, art_id = excluded.art_id,
-             album = excluded.album,
+             album = excluded.album, bitrate_kbps = excluded.bitrate_kbps,
              added_ns = COALESCE(tracks.added_ns, excluded.added_ns),
              missing_ns = NULL",
     )?
@@ -860,6 +860,7 @@ pub(crate) fn upsert_track(
         art_id,
         meta.album,
         file.added_ns,
+        meta.bitrate_kbps,
     ])?;
     Ok(())
 }

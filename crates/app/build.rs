@@ -3,17 +3,20 @@ use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 fn main() -> std::io::Result<()> {
     // Every QML file in `qml/` is in the module, so a new component can't be left out.
     println!("cargo::rerun-if-changed=qml");
+    const SINGLETONS: [&str; 2] = ["qml/Columns.qml", "qml/Theme.qml"];
     let mut components = Vec::new();
     for entry in std::fs::read_dir("qml")? {
         let path = entry?.path();
-        if path.extension().is_some_and(|ext| ext == "qml") && !path.ends_with("Theme.qml") {
+        if path.extension().is_some_and(|ext| ext == "qml")
+            && !SINGLETONS.iter().any(|singleton| path.ends_with(singleton))
+        {
             components.push(path);
         }
     }
     components.sort();
     let module = QmlModule::new("com.lune.player")
         .qml_files(components)
-        .qml_file(QmlFile::from("qml/Theme.qml").singleton(true));
+        .qml_files(SINGLETONS.map(|path| QmlFile::from(path).singleton(true)));
     // Qt is found via `qmake`; the QMAKE env var picks which one (DEVELOPMENT.md).
     CxxQtBuilder::new_qml_module(module)
         .files([

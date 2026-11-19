@@ -2,11 +2,12 @@
 //! so the next run opens the same way. Unlike [`Settings`](crate::Settings), the app rewrites
 //! this file on every quit, so it lives apart from the hand-edited config.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{CoreError, FilterValue, Grouping, Result, Sort};
+use crate::{CoreError, FilterValue, Grouping, Result, Sort, SortColumn};
 
 /// Smallest window a saved size can restore, so a bad value can't leave the
 /// window too small to find and resize.
@@ -23,6 +24,10 @@ pub struct WindowState {
     pub filter_pane_width: u32,
     pub queue_pane_width: u32,
     pub queue_shown: bool,
+    /// The main pane's columns the user turned off. Stored as the hidden
+    /// ones so a column added in a later version starts out shown.
+    #[serde(deserialize_with = "columns_or_default")]
+    pub hidden_columns: BTreeSet<SortColumn>,
     #[serde(deserialize_with = "browse_or_default")]
     pub browse: BrowseState,
 }
@@ -50,6 +55,7 @@ impl Default for WindowState {
             filter_pane_width: 250,
             queue_pane_width: 300,
             queue_shown: true,
+            hidden_columns: BTreeSet::new(),
             browse: BrowseState::default(),
         }
     }
@@ -133,6 +139,27 @@ fn browse_or_default<'de, D: Deserializer<'de>>(
         tracing::warn!(%err, "the saved browse position is ignored");
         BrowseState::default()
     }))
+}
+
+/// A column this version doesn't have, such as one from a newer version, is
+/// left out rather than losing the others.
+fn columns_or_default<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<BTreeSet<SortColumn>, D::Error> {
+    let value = toml::Value::deserialize(deserializer)?;
+    let values: Vec<toml::Value> = value.try_into().unwrap_or_else(|err| {
+        tracing::warn!(%err, "the saved hidden columns are ignored");
+        Vec::new()
+    });
+    Ok(values
+        .into_iter()
+        .filter_map(|value| {
+            value
+                .try_into()
+                .inspect_err(|err| tracing::warn!(%err, "a saved hidden column is ignored"))
+                .ok()
+        })
+        .collect())
 }
 
 /// [`FilterValue`] as written to the file. TOML has no null, so an unknown

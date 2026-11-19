@@ -788,6 +788,20 @@ fn a_play_of_a_removed_track_is_ignored() {
     query::record_play(&conn, 42, SystemTime::now()).unwrap();
 }
 
+#[test]
+fn the_track_list_has_each_files_codec_and_bit_rate() {
+    let dir = TempDir::new();
+    dir.write("1.wav", &wav_bytes(1000));
+    let mut conn = db::open_in_memory().unwrap();
+    scan(&mut conn, dir.path(), ScanMode::Thorough, &mut |_| {}).unwrap();
+    let track = &query::track_list(&conn).unwrap()[0];
+    // 44.1 kHz 16-bit mono is 705.6 kbps.
+    assert_eq!(
+        (track.codec.as_str(), track.bitrate_kbps),
+        ("wav", Some(706))
+    );
+}
+
 /// Scans `root`, tagging each file with its name as the title. Returns the
 /// report and how many files had their tags read.
 fn scan_counting(conn: &mut Connection, root: &Path, mode: ScanMode) -> (ScanReport, usize) {

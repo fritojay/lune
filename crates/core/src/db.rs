@@ -121,6 +121,14 @@ const MIGRATIONS: &[&str] = &[
         scanned_ns INTEGER NOT NULL
     ) WITHOUT ROWID;
     "#,
+    // v8: bit rates. An mtime no file has (an unreadable one is stored as 0)
+    // makes the next scan re-read every file to fill them in; the upsert keeps
+    // each track's id and dates.
+    r#"
+    ALTER TABLE tracks ADD COLUMN bitrate_kbps INTEGER;
+    UPDATE tracks SET mtime_ns = -1;
+    UPDATE dirs SET mtime_ns = 0;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
