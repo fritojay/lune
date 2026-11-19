@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::time::SystemTime;
 
 use rusqlite::{Connection, Row};
@@ -13,8 +14,51 @@ use crate::scan::unix_ns;
 pub(crate) const ALBUM_TRACK_ORDER: &str =
     "COALESCE(t.disc_no, 1), t.track_no IS NULL, t.track_no, t.path";
 
-const TRACK_COLUMNS: &str = "t.id, t.path, t.title, t.artist, t.album_id, a.title, a.album_artist,
-     t.disc_no, t.track_no, t.year, a.year_max, t.duration_ms, t.codec, t.sample_rate";
+/// What [`ListTrack::from_row`] reads, as `(expression, name)`. Queries
+/// alias `tracks` as `t` and `albums` as `a`.
+const LIST_TRACK_COLUMNS: [(&str, &str); 19] = [
+    ("t.id", "id"),
+    ("t.path", "path"),
+    ("t.title", "title"),
+    ("t.artist", "artist"),
+    ("a.id", "album_id"),
+    ("a.title", "album"),
+    ("a.title_key", "album_key"),
+    ("a.album_artist", "album_artist"),
+    ("a.album_artist_key", "album_artist_key"),
+    ("a.art_id", "art_id"),
+    ("a.year_max", "album_year"),
+    ("t.disc_no", "disc_no"),
+    ("t.track_no", "track_no"),
+    ("t.duration_ms", "duration_ms"),
+    ("t.codec", "codec"),
+    ("t.sample_rate", "sample_rate"),
+    ("t.bitrate_kbps", "bitrate_kbps"),
+    ("t.added_ns", "added_ns"),
+    ("t.played_ns", "played_ns"),
+];
+
+/// The `SELECT` list of [`LIST_TRACK_COLUMNS`].
+static LIST_TRACK_SELECT: LazyLock<String> = LazyLock::new(|| {
+    LIST_TRACK_COLUMNS
+        .map(|(expr, name)| format!("{expr} AS {name}"))
+        .join(", ")
+});
+
+/// The position of column `name` in [`LIST_TRACK_COLUMNS`]. Looking it up by
+/// name per row costs rusqlite a scan of the column names, which doubles the
+/// time to load a large library, so it's done at compile time: call it in a
+/// `const` block, where a name not in the list is a compile error.
+const fn list_column(name: &str) -> usize {
+    let mut i = 0;
+    while i < LIST_TRACK_COLUMNS.len() {
+        if LIST_TRACK_COLUMNS[i].1.eq_ignore_ascii_case(name) {
+            return i;
+        }
+        i += 1;
+    }
+    panic!("no such column");
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LibraryStats {
@@ -32,26 +76,6 @@ pub struct AlbumRow {
     /// Max year across the album's tracks; `None` = Unknown.
     pub year_max: Option<i32>,
     pub track_count: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrackRow {
-    pub id: i64,
-    pub path: PathBuf,
-    pub title: Option<String>,
-    pub artist: Option<String>,
-    pub album_id: i64,
-    pub album: String,
-    pub album_artist: String,
-    pub disc_no: Option<u32>,
-    pub track_no: Option<u32>,
-    /// The track's own year tag.
-    pub year: Option<i32>,
-    /// The album's max year, used for grouping.
-    pub album_year: Option<i32>,
-    pub duration_ms: u64,
-    pub codec: String,
-    pub sample_rate: Option<u32>,
 }
 
 /// One row of a flat track list: what the browser displays, groups by, and
@@ -77,6 +101,7 @@ pub struct ListTrack {
     pub duration_ms: u64,
     /// Lowercase codec name, as in [`TrackMeta::codec`](crate::TrackMeta::codec).
     pub codec: String,
+    pub sample_rate: Option<u32>,
     pub bitrate_kbps: Option<u32>,
     /// Nanoseconds since the Unix epoch; `None` until a scan dates it.
     pub added_ns: Option<i64>,
@@ -105,23 +130,39 @@ fn get_u64(row: &Row<'_>, idx: usize) -> rusqlite::Result<u64> {
     Ok(u64::try_from(row.get::<_, i64>(idx)?).unwrap_or(0))
 }
 
-impl TrackRow {
+impl ListTrack {
+    /// Reads a row of [`LIST_TRACK_SELECT`].
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+        macro_rules! col {
+            ($name:literal) => {
+                const { list_column($name) }
+            };
+        }
+        let path: String = row.get(col!("path"))?;
+        let title = match row.get::<_, Option<String>>(col!("title"))? {
+            Some(title) => title,
+            None => file_name(&path),
+        };
         Ok(Self {
-            id: row.get(0)?,
-            path: PathBuf::from(row.get::<_, String>(1)?),
-            title: row.get(2)?,
-            artist: row.get(3)?,
-            album_id: row.get(4)?,
-            album: row.get(5)?,
-            album_artist: row.get(6)?,
-            disc_no: row.get(7)?,
-            track_no: row.get(8)?,
-            year: row.get(9)?,
-            album_year: row.get(10)?,
-            duration_ms: get_u64(row, 11)?,
-            codec: row.get(12)?,
-            sample_rate: row.get(13)?,
+            id: row.get(col!("id"))?,
+            path: PathBuf::from(path),
+            title,
+            artist: row.get(col!("artist"))?,
+            album_id: row.get(col!("album_id"))?,
+            album: row.get(col!("album"))?,
+            album_key: row.get(col!("album_key"))?,
+            album_artist: row.get(col!("album_artist"))?,
+            album_artist_key: row.get(col!("album_artist_key"))?,
+            art_id: row.get(col!("art_id"))?,
+            album_year: row.get(col!("album_year"))?,
+            disc_no: row.get(col!("disc_no"))?,
+            track_no: row.get(col!("track_no"))?,
+            duration_ms: get_u64(row, col!("duration_ms"))?,
+            codec: row.get(col!("codec"))?,
+            sample_rate: row.get(col!("sample_rate"))?,
+            bitrate_kbps: row.get(col!("bitrate_kbps"))?,
+            added_ns: row.get(col!("added_ns"))?,
+            played_ns: row.get(col!("played_ns"))?,
         })
     }
 }
@@ -164,14 +205,15 @@ pub(crate) fn albums(conn: &Connection) -> Result<Vec<AlbumRow>> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-pub(crate) fn album_tracks(conn: &Connection, album_id: i64) -> Result<Vec<TrackRow>> {
+pub(crate) fn album_tracks(conn: &Connection, album_id: i64) -> Result<Vec<ListTrack>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {TRACK_COLUMNS}
+        "SELECT {}
          FROM tracks t JOIN albums a ON a.id = t.album_id
          WHERE t.album_id = ?1 AND t.missing_ns IS NULL
-         ORDER BY {ALBUM_TRACK_ORDER}"
+         ORDER BY {ALBUM_TRACK_ORDER}",
+        *LIST_TRACK_SELECT
     ))?;
-    let rows = stmt.query_map([album_id], TrackRow::from_row)?;
+    let rows = stmt.query_map([album_id], ListTrack::from_row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
@@ -179,42 +221,14 @@ pub(crate) fn album_tracks(conn: &Connection, album_id: i64) -> Result<Vec<Track
 /// are ordered by album artist (by key), then year (Unknown last), then title.
 pub(crate) fn track_list(conn: &Connection) -> Result<Vec<ListTrack>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT t.id, t.path, t.title, t.artist, a.id, a.title, a.title_key,
-                a.album_artist, a.album_artist_key, a.art_id, a.year_max,
-                t.disc_no, t.track_no, t.duration_ms, t.added_ns, t.played_ns,
-                t.codec, t.bitrate_kbps
+        "SELECT {}
          FROM tracks t JOIN albums a ON a.id = t.album_id
          WHERE t.missing_ns IS NULL
          ORDER BY a.album_artist_key, a.year_max IS NULL, a.year_max, a.title_key, a.id,
-                  {ALBUM_TRACK_ORDER}"
+                  {ALBUM_TRACK_ORDER}",
+        *LIST_TRACK_SELECT
     ))?;
-    let rows = stmt.query_map([], |row| {
-        let path: String = row.get(1)?;
-        let title = match row.get::<_, Option<String>>(2)? {
-            Some(title) => title,
-            None => file_name(&path),
-        };
-        Ok(ListTrack {
-            id: row.get(0)?,
-            path: PathBuf::from(path),
-            title,
-            artist: row.get(3)?,
-            album_id: row.get(4)?,
-            album: row.get(5)?,
-            album_key: row.get(6)?,
-            album_artist: row.get(7)?,
-            album_artist_key: row.get(8)?,
-            art_id: row.get(9)?,
-            album_year: row.get(10)?,
-            disc_no: row.get(11)?,
-            track_no: row.get(12)?,
-            duration_ms: get_u64(row, 13)?,
-            added_ns: row.get(14)?,
-            played_ns: row.get(15)?,
-            codec: row.get(16)?,
-            bitrate_kbps: row.get(17)?,
-        })
-    })?;
+    let rows = stmt.query_map([], ListTrack::from_row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
@@ -259,20 +273,21 @@ fn file_name(path: &str) -> String {
 
 /// Full-text search over title, artist, album artist, and album. Every word
 /// must match, as a prefix. Results are ordered by relevance.
-pub(crate) fn search(conn: &Connection, text: &str, limit: u32) -> Result<Vec<TrackRow>> {
+pub(crate) fn search(conn: &Connection, text: &str, limit: u32) -> Result<Vec<ListTrack>> {
     let Some(query) = fts_query(text) else {
         return Ok(Vec::new());
     };
     let mut stmt = conn.prepare(&format!(
-        "SELECT {TRACK_COLUMNS}
+        "SELECT {}
          FROM tracks_fts f
          JOIN tracks t ON t.id = f.rowid
          JOIN albums a ON a.id = t.album_id
          WHERE tracks_fts MATCH ?1 AND t.missing_ns IS NULL
          ORDER BY f.rank
-         LIMIT ?2"
+         LIMIT ?2",
+        *LIST_TRACK_SELECT
     ))?;
-    let rows = stmt.query_map(rusqlite::params![query, limit], TrackRow::from_row)?;
+    let rows = stmt.query_map(rusqlite::params![query, limit], ListTrack::from_row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 

@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use rusqlite::Connection;
 
 use crate::art;
-use crate::query::{self, AlbumRow, LibraryStats, ListTrack, MissingTrack, TrackRow};
+use crate::query::{self, AlbumRow, LibraryStats, ListTrack, MissingTrack};
 use crate::queue::{self, Queue};
 use crate::scan::{self, ScanMode, ScanProgress, ScanReport};
 use crate::{Result, db};
@@ -85,7 +85,7 @@ impl Library {
         query::albums(&self.conn)
     }
 
-    pub fn album_tracks(&self, album_id: i64) -> Result<Vec<TrackRow>> {
+    pub fn album_tracks(&self, album_id: i64) -> Result<Vec<ListTrack>> {
         query::album_tracks(&self.conn, album_id)
     }
 
@@ -97,7 +97,7 @@ impl Library {
         query::missing_tracks(&self.conn)
     }
 
-    pub fn search(&self, text: &str, limit: u32) -> Result<Vec<TrackRow>> {
+    pub fn search(&self, text: &str, limit: u32) -> Result<Vec<ListTrack>> {
         query::search(&self.conn, text, limit)
     }
 

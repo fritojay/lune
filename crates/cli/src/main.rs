@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use lune_core::{Library, ScanMode, TrackRow};
+use lune_core::{Library, ListTrack, ScanMode};
 
 /// Headless harness for the engine and library.
 #[derive(Parser, Debug)]
@@ -168,13 +168,8 @@ fn or_unknown(s: &str) -> &str {
     if s.is_empty() { "(unknown)" } else { s }
 }
 
-fn print_tracks(tracks: &[TrackRow]) {
+fn print_tracks(tracks: &[ListTrack]) {
     for t in tracks {
-        let title = t.title.clone().unwrap_or_else(|| {
-            t.path
-                .file_name()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
-        });
         let secs = t.duration_ms / 1000;
         println!(
             "{:>7}  {}-{:<3} {} - {}  [{} - {}, {}]  {}:{:02} {} {}",
@@ -182,7 +177,7 @@ fn print_tracks(tracks: &[TrackRow]) {
             t.disc_no.unwrap_or(1),
             t.track_no.map_or_else(|| "?".to_owned(), |n| n.to_string()),
             t.artist.as_deref().unwrap_or("(unknown)"),
-            title,
+            t.title,
             or_unknown(&t.album_artist),
             or_unknown(&t.album),
             year(t.album_year),

@@ -48,7 +48,7 @@ fn titles(conn: &Connection, album_id: i64) -> Vec<String> {
     query::album_tracks(conn, album_id)
         .unwrap()
         .into_iter()
-        .map(|t| t.title.unwrap())
+        .map(|t| t.title)
         .collect()
 }
 
@@ -299,6 +299,68 @@ fn album_display_strings_follow_the_tags_on_rescan() {
 fn an_empty_library_has_an_empty_track_list() {
     let conn = db::open_in_memory().unwrap();
     assert!(query::track_list(&conn).unwrap().is_empty());
+}
+
+#[test]
+fn every_tag_comes_back_in_its_own_field() {
+    let dir = TempDir::new();
+    dir.touch("1.flac");
+    let tags = TrackMeta {
+        title: Some("Title".to_owned()),
+        artist: Some("Artist".to_owned()),
+        album_artist: Some("Album Artist".to_owned()),
+        album: Some("Album".to_owned()),
+        track_no: Some(3),
+        disc_no: Some(2),
+        year: Some(1987),
+        duration_ms: 234_567,
+        codec: "flac".to_owned(),
+        sample_rate: Some(48_000),
+        bitrate_kbps: Some(912),
+        art: Some(crate::EmbeddedArt {
+            hash: "abc".into(),
+            mime: None,
+        }),
+    };
+    let mut conn = db::open_in_memory().unwrap();
+    scan_tags(&mut conn, &dir, &[("1.flac", tags)]);
+    let id = query::track_list(&conn).unwrap()[0].id;
+    let played = SystemTime::UNIX_EPOCH + Duration::from_secs(5);
+    query::record_play(&conn, id, played).unwrap();
+
+    let list = query::track_list(&conn).unwrap();
+    let [track] = list.as_slice() else {
+        panic!("{list:?}");
+    };
+    assert_eq!(
+        *track,
+        ListTrack {
+            id,
+            path: track.path.clone(),
+            title: "Title".to_owned(),
+            artist: Some("Artist".to_owned()),
+            album_id: track.album_id,
+            album: "Album".to_owned(),
+            album_key: "album".to_owned(),
+            album_artist: "Album Artist".to_owned(),
+            album_artist_key: "album artist".to_owned(),
+            art_id: track.art_id,
+            album_year: Some(1987),
+            disc_no: Some(2),
+            track_no: Some(3),
+            duration_ms: 234_567,
+            codec: "flac".to_owned(),
+            sample_rate: Some(48_000),
+            bitrate_kbps: Some(912),
+            added_ns: track.added_ns,
+            played_ns: Some(unix_ns(played)),
+        }
+    );
+    assert!(track.path.ends_with("1.flac"));
+    assert!(track.art_id.is_some());
+    assert!(track.added_ns.is_some_and(|added| added != unix_ns(played)));
+    assert_eq!(query::album_tracks(&conn, track.album_id).unwrap(), list);
+    assert_eq!(query::search(&conn, "title", 10).unwrap(), list);
 }
 
 #[test]

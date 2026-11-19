@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::sync_channel;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, named_params, params};
 
 use crate::normalize;
 use crate::query::ALBUM_TRACK_ORDER;
@@ -847,8 +847,9 @@ pub(crate) fn upsert_track(
         "INSERT INTO tracks (path, mtime_ns, size, title, artist, album_artist, album_id,
                              disc_no, track_no, year, duration_ms, codec, sample_rate, art_id,
                              album, added_ns, bitrate_kbps, reader_version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                 ?18)
+         VALUES (:path, :mtime_ns, :size, :title, :artist, :album_artist, :album_id,
+                 :disc_no, :track_no, :year, :duration_ms, :codec, :sample_rate, :art_id,
+                 :album, :added_ns, :bitrate_kbps, :reader_version)
          ON CONFLICT (path) DO UPDATE SET
              mtime_ns = excluded.mtime_ns, size = excluded.size, title = excluded.title,
              artist = excluded.artist, album_artist = excluded.album_artist,
@@ -861,26 +862,26 @@ pub(crate) fn upsert_track(
              added_ns = COALESCE(tracks.added_ns, excluded.added_ns),
              missing_ns = NULL",
     )?
-    .execute(params![
-        file.path,
-        file.mtime_ns,
-        file.size,
-        meta.title,
-        meta.artist,
-        meta.album_artist,
-        album_id,
-        meta.disc_no,
-        meta.track_no,
-        meta.year,
-        i64::try_from(meta.duration_ms).unwrap_or(i64::MAX),
-        meta.codec,
-        meta.sample_rate,
-        art_id,
-        meta.album,
-        file.added_ns,
-        meta.bitrate_kbps,
-        READER_VERSION,
-    ])?;
+    .execute(named_params! {
+        ":path": file.path,
+        ":mtime_ns": file.mtime_ns,
+        ":size": file.size,
+        ":title": meta.title,
+        ":artist": meta.artist,
+        ":album_artist": meta.album_artist,
+        ":album_id": album_id,
+        ":disc_no": meta.disc_no,
+        ":track_no": meta.track_no,
+        ":year": meta.year,
+        ":duration_ms": i64::try_from(meta.duration_ms).unwrap_or(i64::MAX),
+        ":codec": meta.codec,
+        ":sample_rate": meta.sample_rate,
+        ":art_id": art_id,
+        ":album": meta.album,
+        ":added_ns": file.added_ns,
+        ":bitrate_kbps": meta.bitrate_kbps,
+        ":reader_version": READER_VERSION,
+    })?;
     Ok(())
 }
 
