@@ -40,7 +40,7 @@ pub mod qobject {
         #[qml_element]
         #[base = QAbstractListModel]
         #[qproperty(bool, loading)]
-        #[qproperty(i32, grouping, READ, NOTIFY)]
+        #[qproperty(QString, grouping, READ, NOTIFY)]
         #[qproperty(i32, current_row, cxx_name = "currentRow", READ, NOTIFY)]
         #[qproperty(QString, title, READ, NOTIFY)]
         #[qproperty(i32, track_count, cxx_name = "trackCount", READ, NOTIFY)]
@@ -61,11 +61,10 @@ pub mod qobject {
         #[cxx_name = "viewChanged"]
         fn view_changed(self: Pin<&mut FilterModel>, reset: bool);
 
-        /// 0 Album Artist, 1 Artist, 2 Album, 3 Year, 4 Recently Added,
-        /// 5 Recently Played.
+        /// Groupings go by `Grouping::name`.
         #[qinvokable]
         #[cxx_name = "setGrouping"]
-        fn set_grouping_from_qml(self: Pin<&mut FilterModel>, grouping: i32);
+        fn set_grouping_from_qml(self: Pin<&mut FilterModel>, grouping: &QString);
 
         #[qinvokable]
         fn select(self: Pin<&mut FilterModel>, row: i32);
@@ -126,23 +125,6 @@ const ROLES: &[Role<Filter>] = &[
     }),
 ];
 
-const GROUPINGS: [Grouping; 6] = [
-    Grouping::AlbumArtist,
-    Grouping::Artist,
-    Grouping::Album,
-    Grouping::Year,
-    Grouping::RecentlyAdded,
-    Grouping::RecentlyPlayed,
-];
-
-fn grouping_index(grouping: Grouping) -> i32 {
-    GROUPINGS
-        .iter()
-        .position(|g| *g == grouping)
-        .and_then(|g| i32::try_from(g).ok())
-        .unwrap_or(0)
-}
-
 /// The sort that `sortColumn` and `sortDescending` describe.
 fn sort_of(column: &str, descending: bool) -> Option<Sort> {
     let column = SortColumn::from_name(column)?;
@@ -173,7 +155,7 @@ fn chosen(current: Option<Sort>, column: &str, descending: bool) -> Option<Optio
 
 pub struct FilterModelRust {
     loading: bool,
-    grouping: i32,
+    grouping: QString,
     current_row: i32,
     title: QString,
     track_count: i32,
@@ -194,7 +176,7 @@ impl Default for FilterModelRust {
         let (sort_column, sort_descending) = sort_state(saved.sort);
         Self {
             loading: true,
-            grouping: grouping_index(saved.grouping),
+            grouping: QString::from(saved.grouping.name()),
             current_row: 0,
             title: QString::default(),
             track_count: 0,
@@ -271,14 +253,16 @@ impl qobject::FilterModel {
         self.recompute(selected, true);
     }
 
-    fn set_grouping_from_qml(mut self: Pin<&mut Self>, grouping: i32) {
-        let valid = usize::try_from(grouping)
-            .ok()
-            .is_some_and(|g| g < GROUPINGS.len());
-        if !valid {
+    fn set_grouping_from_qml(mut self: Pin<&mut Self>, grouping: &QString) {
+        let Some(grouping) = Grouping::from_name(&grouping.to_string()) else {
             return;
-        }
-        set!(self, grouping, grouping_changed, grouping);
+        };
+        set!(
+            self,
+            grouping,
+            grouping_changed,
+            QString::from(grouping.name())
+        );
         self.recompute(None, true);
     }
 
@@ -335,11 +319,7 @@ impl qobject::FilterModel {
     }
 
     fn grouping_kind(&self) -> Grouping {
-        usize::try_from(self.grouping)
-            .ok()
-            .and_then(|g| GROUPINGS.get(g))
-            .copied()
-            .unwrap_or(Grouping::AlbumArtist)
+        Grouping::from_name(&self.grouping.to_string()).unwrap_or_default()
     }
 
     fn filter(&self, row: i32) -> Option<&Filter> {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_util::qml_values;
 
 fn sort(column: SortColumn, descending: bool) -> Option<Sort> {
     Some(Sort { column, descending })
@@ -80,10 +81,12 @@ fn the_menu_ignores_the_sort_already_in_effect() {
 }
 
 #[test]
-fn every_grouping_maps_back_to_its_index() {
-    for (index, grouping) in GROUPINGS.into_iter().enumerate() {
-        assert_eq!(grouping_index(grouping), i32::try_from(index).unwrap());
-    }
+fn groupings_qml_has_every_grouping_once() {
+    let mut ids = qml_values(include_str!("../../qml/Groupings.qml"), "id");
+    ids.sort_unstable();
+    let mut names = Grouping::ALL.map(Grouping::name);
+    names.sort_unstable();
+    assert_eq!(ids, names);
 }
 
 #[test]

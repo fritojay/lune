@@ -5,24 +5,22 @@ import QtQuick.Layouts
 
 RowLayout {
     id: groupingBar
-    required property int grouping
-    signal groupingChosen(int grouping)
+    required property string grouping
+    signal groupingChosen(string grouping)
 
     spacing: 4
 
     Repeater {
-        model: [qsTr("Album Artists"), qsTr("Artists"), qsTr("Albums"), qsTr("Years"),
-            qsTr("Recently Added"), qsTr("Recently Played")]
+        model: Groupings.all
         Button {
-            required property int index
-            required property string modelData
-            text: modelData
+            required property var modelData
+            text: modelData.title
             flat: !checked
             checkable: true
-            checked: groupingBar.grouping === index
+            checked: groupingBar.grouping === modelData.id
             onClicked: {
-                checked = Qt.binding(() => groupingBar.grouping === index)
-                groupingBar.groupingChosen(index)
+                checked = Qt.binding(() => groupingBar.grouping === modelData.id)
+                groupingBar.groupingChosen(modelData.id)
             }
         }
     }

@@ -107,5 +107,16 @@ pub fn list_track(id: i64, album_id: i64, art_id: Option<i64>) -> ListTrack {
     }
 }
 
+/// Each entry's `key: "value"` in the QML source `qml`, in order.
+pub fn qml_values(qml: &'static str, key: &str) -> Vec<&'static str> {
+    let pattern = format!("{key}: \"");
+    qml.match_indices(&pattern)
+        .map(|(at, _)| {
+            let value = &qml[at + pattern.len()..];
+            &value[..value.find('"').unwrap()]
+        })
+        .collect()
+}
+
 #[path = "test_util_test.rs"]
 mod tests;

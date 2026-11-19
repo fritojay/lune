@@ -7,6 +7,7 @@ use std::ops::Range;
 use std::sync::LazyLock;
 use std::time::SystemTime;
 
+use serde::de::DeserializeOwned;
 use serde::de::IntoDeserializer;
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,28 @@ pub enum Grouping {
     RecentlyAdded,
     /// Played albums by their latest played track, newest first.
     RecentlyPlayed,
+}
+
+impl Grouping {
+    /// In declaration order, so `name` can index by discriminant.
+    pub const ALL: [Self; 6] = [
+        Self::AlbumArtist,
+        Self::Artist,
+        Self::Album,
+        Self::Year,
+        Self::RecentlyAdded,
+        Self::RecentlyPlayed,
+    ];
+
+    /// The name it's saved under, which QML also uses for the grouping.
+    pub fn name(self) -> &'static str {
+        static NAMES: LazyLock<Vec<String>> = LazyLock::new(|| serde_names(&Grouping::ALL));
+        NAMES.get(self as usize).map_or("", String::as_str)
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        from_serde_name(name)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -79,22 +102,12 @@ impl SortColumn {
 
     /// The name it's saved under, which QML also uses for the column.
     pub fn name(self) -> &'static str {
-        static NAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
-            SortColumn::ALL
-                .iter()
-                .map(|column| {
-                    toml::Value::try_from(column)
-                        .ok()
-                        .and_then(|name| name.as_str().map(str::to_owned))
-                        .unwrap_or_default()
-                })
-                .collect()
-        });
+        static NAMES: LazyLock<Vec<String>> = LazyLock::new(|| serde_names(&SortColumn::ALL));
         NAMES.get(self as usize).map_or("", String::as_str)
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::deserialize(IntoDeserializer::<serde::de::value::Error>::into_deserializer(name)).ok()
+        from_serde_name(name)
     }
 
     /// The order of tracks `a` and `b` of `catalog`. Track numbers sort by
@@ -427,6 +440,22 @@ fn by_recency(tracks: &[ListTrack], date: impl Fn(&ListTrack) -> Option<i64>) ->
     // Albums are contiguous in catalog order, so they stay contiguous.
     order.sort_unstable();
     order.into_iter().map(|(_, i)| i).collect()
+}
+
+/// The names unit variants serialize as.
+fn serde_names<T: Serialize>(all: &[T]) -> Vec<String> {
+    all.iter()
+        .map(|value| {
+            toml::Value::try_from(value)
+                .ok()
+                .and_then(|name| name.as_str().map(str::to_owned))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+fn from_serde_name<T: DeserializeOwned>(name: &str) -> Option<T> {
+    T::deserialize(IntoDeserializer::<serde::de::value::Error>::into_deserializer(name)).ok()
 }
 
 fn missing_last<T: Ord>(a: Option<T>, b: Option<T>, descending: bool) -> Ordering {

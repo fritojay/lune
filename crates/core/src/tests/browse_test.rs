@@ -61,14 +61,7 @@ fn labels(filters: &[Filter]) -> Vec<(&str, usize)> {
 #[test]
 fn an_empty_catalog_has_only_the_all_filter_and_empty_views() {
     let catalog = Catalog::new(Vec::new());
-    for grouping in [
-        Grouping::AlbumArtist,
-        Grouping::Artist,
-        Grouping::Album,
-        Grouping::Year,
-        Grouping::RecentlyAdded,
-        Grouping::RecentlyPlayed,
-    ] {
+    for grouping in Grouping::ALL {
         let filters = catalog.filters(grouping, None);
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].value, FilterValue::All);
@@ -639,4 +632,43 @@ fn an_unknown_column_name_is_no_column() {
     assert_eq!(SortColumn::from_name(""), None);
     assert_eq!(SortColumn::from_name("BitRate"), None);
     assert_eq!(SortColumn::from_name("bit_rate "), None);
+}
+
+/// No wildcard arm, so a new grouping doesn't compile until it's counted here.
+fn grouping_count() -> usize {
+    match Grouping::AlbumArtist {
+        Grouping::AlbumArtist
+        | Grouping::Artist
+        | Grouping::Album
+        | Grouping::Year
+        | Grouping::RecentlyAdded
+        | Grouping::RecentlyPlayed => 6,
+    }
+}
+
+#[test]
+fn all_has_every_grouping_once_in_declaration_order() {
+    assert_eq!(Grouping::ALL.len(), grouping_count());
+    for (i, grouping) in Grouping::ALL.into_iter().enumerate() {
+        assert_eq!(grouping as usize, i, "{grouping:?}");
+    }
+}
+
+#[test]
+fn a_groupings_name_is_the_one_it_is_saved_under() {
+    for grouping in Grouping::ALL {
+        assert_eq!(
+            toml::Value::try_from(grouping).unwrap().as_str(),
+            Some(grouping.name())
+        );
+        assert_eq!(Grouping::from_name(grouping.name()), Some(grouping));
+    }
+}
+
+#[test]
+fn an_unknown_grouping_name_is_no_grouping() {
+    assert_eq!(Grouping::from_name(""), None);
+    assert_eq!(Grouping::from_name("AlbumArtist"), None);
+    assert_eq!(Grouping::from_name("album"), Some(Grouping::Album));
+    assert_eq!(Grouping::from_name("albums"), None);
 }

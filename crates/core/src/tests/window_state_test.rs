@@ -196,15 +196,7 @@ fn every_kind_of_selected_filter_survives_a_save_and_load() {
 
 #[test]
 fn every_grouping_and_sort_survives_a_save_and_load() {
-    let groupings = [
-        Grouping::AlbumArtist,
-        Grouping::Artist,
-        Grouping::Album,
-        Grouping::Year,
-        Grouping::RecentlyAdded,
-        Grouping::RecentlyPlayed,
-    ];
-    for grouping in groupings {
+    for grouping in Grouping::ALL {
         for sort in SortColumn::ALL
             .into_iter()
             .flat_map(|column| [false, true].map(|descending| Some(Sort { column, descending })))

@@ -1,7 +1,7 @@
 use lune_core::{FilterValue, Grouping, Sort, SortColumn};
 
 use super::*;
-use crate::test_util::list_track as track;
+use crate::test_util::{list_track as track, qml_values};
 
 #[test]
 fn cover_rows_lists_every_album_showing_each_cover() {
@@ -98,21 +98,9 @@ fn a_track_without_an_artist_shows_the_album_artist_or_unknown() {
     assert_eq!(track_artist(&t), "Unknown Artist");
 }
 
-/// Each column's `key: "value"` in `Columns.qml`, in order.
-fn qml_columns(key: &str) -> Vec<&'static str> {
-    const QML: &str = include_str!("../../qml/Columns.qml");
-    let pattern = format!("{key}: \"");
-    QML.match_indices(&pattern)
-        .map(|(at, _)| {
-            let value = &QML[at + pattern.len()..];
-            &value[..value.find('"').unwrap()]
-        })
-        .collect()
-}
-
 #[test]
 fn columns_qml_has_every_column_once() {
-    let mut ids = qml_columns("id");
+    let mut ids = qml_values(include_str!("../../qml/Columns.qml"), "id");
     ids.sort_unstable();
     let mut names = SortColumn::ALL.map(SortColumn::name);
     names.sort_unstable();
