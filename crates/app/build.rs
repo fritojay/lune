@@ -29,6 +29,7 @@ fn main() -> std::io::Result<()> {
             "src/window_layout.rs",
         ])
         .qrc_resources([
+            "qml/icons/clear.svg",
             "qml/icons/missing.svg",
             "qml/icons/queue.svg",
             "qml/icons/volume-high.svg",

@@ -27,10 +27,27 @@ ColumnLayout {
             id: search
             Layout.fillWidth: true
             placeholderText: qsTr("Search")
+            rightPadding: clearSearch.width
             onTextChanged: filterPane.searchEdited(text)
             Keys.onEscapePressed: {
                 text = ""
                 filterList.forceActiveFocus()
+            }
+
+            ToolButton {
+                id: clearSearch
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                height: parent.height
+                width: height
+                visible: search.text !== ""
+                // Esc already clears from the keyboard, and taking focus would end the typing.
+                focusPolicy: Qt.NoFocus
+                icon.source: "icons/clear.svg"
+                icon.color: palette.buttonText
+                icon.width: 12
+                icon.height: 12
+                onClicked: search.clear()
             }
         }
     }
