@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::normalize;
 use crate::query::ALBUM_TRACK_ORDER;
-use crate::tags::{TrackMeta, is_audio_path, read_track_meta};
+use crate::tags::{READER_VERSION, TrackMeta, is_audio_path, read_track_meta};
 use crate::{CoreError, Result};
 
 const BATCH_SIZE: usize = 500;
@@ -123,19 +123,32 @@ fn scan_using(
         ..ScanReport::default()
     };
 
-    let stored_dirs = stored_dirs(conn, &root)?;
+    let mut known = existing_tracks(conn, &root)?;
+    let mut stored_dirs = stored_dirs(conn, &root)?;
+    // A quick scan lists the directories of stale tracks, so they are re-read.
+    for (path, stored) in &known {
+        if stored.stale
+            && stored.missing_ns.is_none()
+            && let Some(mtime) = parent_str(path).and_then(|dir| stored_dirs.get_mut(dir))
+        {
+            *mtime = 0;
+        }
+    }
     let walked = walk(&root, &stored_dirs, mode, now, &mut report, progress);
     report.walk_time = started.elapsed();
     report.dirs_skipped = walked.skipped.len();
 
-    let mut known = existing_tracks(conn, &root)?;
     let mut to_read = Vec::new();
     let mut undated = Vec::new();
     let mut restored = Vec::new();
     let mut found = walked.files.len();
     for mut file in walked.files {
         match known.remove(&file.path) {
-            Some(stored) if stored.mtime_ns == file.mtime_ns && stored.size == file.size => {
+            Some(stored)
+                if !stored.stale
+                    && stored.mtime_ns == file.mtime_ns
+                    && stored.size == file.size =>
+            {
                 if stored.missing_ns.is_some() {
                     restored.push(file.path.clone());
                 } else {
@@ -597,6 +610,8 @@ struct Stored {
     /// Whether it has a date added.
     dated: bool,
     missing_ns: Option<i64>,
+    /// Read by an older [`READER_VERSION`].
+    stale: bool,
 }
 
 fn existing_tracks(conn: &Connection, root: &Path) -> Result<HashMap<String, Stored>> {
@@ -607,10 +622,10 @@ fn existing_tracks(conn: &Connection, root: &Path) -> Result<HashMap<String, Sto
         None => (String::new(), String::from(char::MAX)),
     };
     let mut stmt = conn.prepare(
-        "SELECT path, mtime_ns, size, added_ns IS NOT NULL, missing_ns FROM tracks
-         WHERE path >= ?1 AND path < ?2",
+        "SELECT path, mtime_ns, size, added_ns IS NOT NULL, missing_ns, reader_version < ?3
+         FROM tracks WHERE path >= ?1 AND path < ?2",
     )?;
-    let rows = stmt.query_map([from, to], |row| {
+    let rows = stmt.query_map(params![from, to, READER_VERSION], |row| {
         Ok((
             row.get::<_, String>(0)?,
             Stored {
@@ -618,6 +633,7 @@ fn existing_tracks(conn: &Connection, root: &Path) -> Result<HashMap<String, Sto
                 size: row.get(2)?,
                 dated: row.get(3)?,
                 missing_ns: row.get(4)?,
+                stale: row.get(5)?,
             },
         ))
     })?;
@@ -830,8 +846,9 @@ pub(crate) fn upsert_track(
     tx.prepare_cached(
         "INSERT INTO tracks (path, mtime_ns, size, title, artist, album_artist, album_id,
                              disc_no, track_no, year, duration_ms, codec, sample_rate, art_id,
-                             album, added_ns, bitrate_kbps)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                             album, added_ns, bitrate_kbps, reader_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                 ?18)
          ON CONFLICT (path) DO UPDATE SET
              mtime_ns = excluded.mtime_ns, size = excluded.size, title = excluded.title,
              artist = excluded.artist, album_artist = excluded.album_artist,
@@ -840,6 +857,7 @@ pub(crate) fn upsert_track(
              duration_ms = excluded.duration_ms, codec = excluded.codec,
              sample_rate = excluded.sample_rate, art_id = excluded.art_id,
              album = excluded.album, bitrate_kbps = excluded.bitrate_kbps,
+             reader_version = excluded.reader_version,
              added_ns = COALESCE(tracks.added_ns, excluded.added_ns),
              missing_ns = NULL",
     )?
@@ -861,6 +879,7 @@ pub(crate) fn upsert_track(
         meta.album,
         file.added_ns,
         meta.bitrate_kbps,
+        READER_VERSION,
     ])?;
     Ok(())
 }

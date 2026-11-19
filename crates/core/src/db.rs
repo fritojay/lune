@@ -129,6 +129,11 @@ const MIGRATIONS: &[&str] = &[
     UPDATE tracks SET mtime_ns = -1;
     UPDATE dirs SET mtime_ns = 0;
     "#,
+    // v9: the tag reader version each track was read with (`READER_VERSION`
+    // in tags.rs), so a scan re-reads tracks read by an older one.
+    r#"
+    ALTER TABLE tracks ADD COLUMN reader_version INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

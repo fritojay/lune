@@ -130,8 +130,12 @@ fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
     };
     quick(&mut conn);
     let before = crate::query::track_list(&conn).unwrap()[0].clone();
-    conn.execute_batch("ALTER TABLE tracks DROP COLUMN bitrate_kbps; PRAGMA user_version = 7;")
-        .unwrap();
+    conn.execute_batch(
+        "ALTER TABLE tracks DROP COLUMN bitrate_kbps;
+         ALTER TABLE tracks DROP COLUMN reader_version;
+         PRAGMA user_version = 7;",
+    )
+    .unwrap();
 
     migrate(&conn).unwrap();
     assert_eq!(
@@ -145,4 +149,21 @@ fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
 
     let report = quick(&mut conn);
     assert_eq!(report.updated, 0, "{report:?}");
+}
+
+#[test]
+fn a_v8_database_rereads_every_file_once() {
+    let dir = crate::test_util::TempDir::new();
+    dir.write("1.wav", &crate::test_util::wav_bytes(1000));
+    let mut conn = open_in_memory().unwrap();
+    let quick = |conn: &mut Connection| {
+        crate::scan::scan(conn, dir.path(), crate::ScanMode::Quick, &mut |_| {}).unwrap()
+    };
+    quick(&mut conn);
+    conn.execute_batch("ALTER TABLE tracks DROP COLUMN reader_version; PRAGMA user_version = 8;")
+        .unwrap();
+
+    migrate(&conn).unwrap();
+    assert_eq!(quick(&mut conn).updated, 1);
+    assert_eq!(quick(&mut conn).updated, 0);
 }

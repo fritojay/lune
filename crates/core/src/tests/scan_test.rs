@@ -983,6 +983,51 @@ fn a_file_rewritten_in_place_is_missed_by_a_quick_scan_and_found_by_a_thorough_o
 
 #[cfg(unix)]
 #[test]
+fn a_quick_scan_rereads_tracks_read_by_an_older_reader_once() {
+    let (_dir, music, mut conn) = settled_library();
+    let before = query::track_list(&conn).unwrap();
+    conn.execute(
+        "UPDATE tracks SET reader_version = ?1 WHERE title = '2'",
+        [READER_VERSION - 1],
+    )
+    .unwrap();
+
+    let (report, reads) = scan_counting(&mut conn, &music, ScanMode::Quick);
+    assert_eq!(
+        (reads, report.updated, report.unchanged),
+        (1, 1, 1),
+        "{report:?}"
+    );
+    assert_eq!(report.dirs_skipped, 1, "only `sub` holds a stale track");
+    assert_eq!(query::track_list(&conn).unwrap(), before);
+
+    let (report, reads) = scan_counting(&mut conn, &music, ScanMode::Quick);
+    assert_eq!((reads, report.dirs_skipped), (0, 2), "{report:?}");
+}
+
+#[test]
+fn a_thorough_scan_rereads_a_track_read_by_an_older_reader() {
+    let dir = TempDir::new();
+    dir.touch("1.mp3");
+    dir.touch("2.mp3");
+    let mut conn = db::open_in_memory().unwrap();
+    scan_counting(&mut conn, dir.path(), ScanMode::Thorough);
+    conn.execute(
+        "UPDATE tracks SET reader_version = ?1 WHERE title = '1'",
+        [READER_VERSION - 1],
+    )
+    .unwrap();
+
+    let (report, reads) = scan_counting(&mut conn, dir.path(), ScanMode::Thorough);
+    assert_eq!(
+        (reads, report.updated, report.unchanged),
+        (1, 1, 1),
+        "{report:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_just_modified_directory_is_not_skipped_by_the_next_quick_scan() {
     let dir = TempDir::new();
     dir.touch("music/1.mp3");

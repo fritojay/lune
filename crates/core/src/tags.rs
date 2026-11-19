@@ -56,6 +56,10 @@ pub struct EmbeddedArt {
     pub mime: Option<String>,
 }
 
+/// Bump when [`read_track_meta`] returns new or different data: the next scan
+/// re-reads every track stored by an older version.
+pub(crate) const READER_VERSION: i64 = 1;
+
 pub fn read_track_meta(path: &Path) -> Result<TrackMeta> {
     let io_err = |source| CoreError::Io {
         path: path.to_path_buf(),
