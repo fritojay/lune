@@ -191,13 +191,9 @@ ApplicationWindow {
         folders: library.folders
         busy: library.busy
         status: library.status
-        scrollSpeed: library.scrollSpeed
-        minScrollSpeed: library.minScrollSpeed
-        maxScrollSpeed: library.maxScrollSpeed
         onAddFolderRequested: folderDialog.open()
         onRemoveFolderRequested: index => library.removeFolder(index)
         onRescanRequested: library.rescan()
-        onScrollSpeedChosen: speed => library.setScrollSpeed(speed)
     }
 
     UnavailableDialog {
@@ -207,7 +203,6 @@ ApplicationWindow {
         height: Math.min(560, window.height - 40)
         model: missingTracks
         count: library.missingCount
-        scrollSpeed: library.scrollSpeed
         onForgetRequested: trackId => library.forgetMissing(trackId)
         onForgetAllRequested: library.forgetAllMissing()
     }
@@ -221,6 +216,13 @@ ApplicationWindow {
             Layout.fillWidth: true
             message: library.error
             onDismissed: library.clearError()
+        }
+
+        // The settings could not be saved.
+        ErrorBanner {
+            Layout.fillWidth: true
+            message: Preferences.error
+            onDismissed: Preferences.clearError()
         }
 
         // The audio output failed (e.g. its device was unplugged).
@@ -268,8 +270,7 @@ ApplicationWindow {
                 model: filters
                 currentRow: filters.currentRow
                 cover: player.cover
-                scrollSpeed: library.scrollSpeed
-                onSearchEdited: text => filters.setSearch(text)
+                        onSearchEdited: text => filters.setSearch(text)
                 onRowChosen: row => filters.select(row)
             }
 
@@ -292,8 +293,7 @@ ApplicationWindow {
                     sortDescending: filters.sortDescending
                     hasFolders: library.folders.length > 0
                     scanStatus: library.busy ? library.status : ""
-                    scrollSpeed: library.scrollSpeed
-                    currentTrackId: player.currentTrackId
+                                currentTrackId: player.currentTrackId
                     hiddenColumns: layout.hiddenColumns
                     onSortClicked: column => filters.sortBy(column)
                     onSortChosen: (column, descending) => filters.setSort(column, descending)
@@ -344,8 +344,7 @@ ApplicationWindow {
                 currentRow: queueModel.currentRow
                 totalDuration: queueModel.totalDuration
                 shuffle: player.shuffle
-                scrollSpeed: library.scrollSpeed
-                onShuffleToggled: shuffle => player.setShuffle(shuffle)
+                        onShuffleToggled: shuffle => player.setShuffle(shuffle)
                 onClearRequested: player.clearQueue()
                 onPlayRequested: row => player.playQueueRow(row)
                 onRemoveRequested: row => player.removeQueueRow(row)

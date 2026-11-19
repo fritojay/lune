@@ -1,17 +1,16 @@
 //! The library thread: loads the library and saved queue, keeps the DB in
 //! line with the configured folders (prune and scan at startup, then file
 //! watching and a periodic rescan), and adds or removes folders. It owns its
-//! own DB connection; the UI only receives [`Update`]s. No Qt here, so it is
-//! tested directly.
+//! own DB connection; the UI only receives [`Update`]s, and saves the folder
+//! list each [`Update::Folders`] carries. No Qt here, so it is tested
+//! directly.
 
 use std::mem::{self, Discriminant};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant, SystemTime};
 
-use lune_core::{
-    Catalog, FolderWatcher, Library, MissingTrack, Queue, ScanMode, ScanProgress, Settings,
-};
+use lune_core::{Catalog, FolderWatcher, Library, MissingTrack, Queue, ScanMode, ScanProgress};
 
 /// How long changes must settle before a watched folder is rescanned.
 const WATCH_DELAY: Duration = Duration::from_secs(2);
@@ -38,7 +37,6 @@ pub enum Job {
     /// Deletes these tracks if they are missing.
     ForgetMissing(Vec<i64>),
     ForgetAllMissing,
-    SetScrollSpeed(u32),
 }
 
 pub enum Update {
@@ -49,7 +47,6 @@ pub enum Update {
     /// The tracks whose files are missing; sent with every `Loaded` and `Library`.
     Missing(Vec<MissingTrack>),
     Folders(Vec<Folder>),
-    ScrollSpeed(u32),
     /// What the thread is doing, or `None` when idle.
     Status(Option<String>),
     Error(String),
@@ -65,12 +62,15 @@ pub struct LibraryService {
 }
 
 impl LibraryService {
+    /// The library is pruned to `folders` at startup, or kept as is for
+    /// `None` ([`Store::startup_folders`](crate::preferences::Store::startup_folders)).
     /// `thumbnail_dir`, if any, is cleared of stale covers after the startup
-    /// scan. Every folder is rescanned `rescan_every` after the last full
-    /// scan, by the wall clock `now` (`SystemTime::now` outside tests).
+    /// scan. Every folder is
+    /// rescanned `rescan_every` after the last full scan, by the wall clock
+    /// `now` (`SystemTime::now` outside tests).
     pub fn start(
         db_path: PathBuf,
-        config_path: PathBuf,
+        folders: Option<Vec<PathBuf>>,
         thumbnail_dir: Option<PathBuf>,
         rescan_every: Duration,
         now: impl Fn() -> SystemTime + Send + 'static,
@@ -84,17 +84,15 @@ impl LibraryService {
                 let worker = Worker {
                     library: None,
                     db_path,
-                    config_path,
+                    folders: Vec::new(),
                     thumbnail_dir,
-                    settings: Settings::default(),
-                    settings_unreadable: false,
                     rescan_every,
                     now: Box::new(now),
                     watcher: None,
                     jobs: watcher_jobs,
                     notify: Box::new(notify),
                 };
-                worker.run(rx);
+                worker.run(folders, rx);
             });
         if let Err(err) = spawned {
             tracing::error!(%err, "could not start the library thread");
@@ -110,12 +108,8 @@ impl LibraryService {
 struct Worker {
     library: Option<Library>,
     db_path: PathBuf,
-    config_path: PathBuf,
+    folders: Vec<PathBuf>,
     thumbnail_dir: Option<PathBuf>,
-    settings: Settings,
-    /// The settings file exists but couldn't be read, so `settings` are the
-    /// defaults and saving them would replace the user's folders with none.
-    settings_unreadable: bool,
     rescan_every: Duration,
     now: Box<dyn Fn() -> SystemTime + Send>,
     watcher: Option<FolderWatcher>,
@@ -124,13 +118,13 @@ struct Worker {
 }
 
 impl Worker {
-    fn run(mut self, jobs: Receiver<Job>) {
-        self.startup();
+    fn run(mut self, folders: Option<Vec<PathBuf>>, jobs: Receiver<Job>) {
+        self.startup(folders);
         let mut rescan_due = (self.now)() + self.rescan_every;
         loop {
             let Some(wait) = rescan_wait(rescan_due, (self.now)()) else {
                 rescan_due = (self.now)() + self.rescan_every;
-                let folders = self.settings.library_folders.clone();
+                let folders = self.folders.clone();
                 if self.scan(folders, ScanMode::Quick) {
                     self.publish_library();
                 }
@@ -152,13 +146,12 @@ impl Worker {
                     Job::AddFolder(folder) => changed |= self.add_folder(folder),
                     Job::RemoveFolder(folder) => changed |= self.remove_folder(&folder),
                     Job::RescanAll => {
-                        rescan.extend(self.settings.library_folders.clone());
+                        rescan.extend(self.folders.clone());
                         rescan_due = (self.now)() + self.rescan_every;
                     }
                     Job::Rescan(dirs) => rescan.extend(dirs),
                     Job::ForgetMissing(ids) => forgot |= self.forget_missing(Some(&ids)),
                     Job::ForgetAllMissing => forgot |= self.forget_missing(None),
-                    Job::SetScrollSpeed(speed) => self.set_scroll_speed(speed),
                 }
             }
             // Both are thorough: a watched change may be a file rewritten in
@@ -173,10 +166,7 @@ impl Worker {
         }
     }
 
-    fn startup(&mut self) {
-        // Read even if the library fails to open, so the folders are known
-        // before anything could save over them.
-        let settings = Settings::load(&self.config_path);
+    fn startup(&mut self, folders: Option<Vec<PathBuf>>) {
         let opened = Library::open(&self.db_path).and_then(|library| {
             let catalog = Catalog::new(library.track_list()?);
             let queue = library.load_queue()?;
@@ -199,22 +189,12 @@ impl Worker {
             }
         }
 
-        // Without a settings file the DB may hold a library built with
-        // lune-cli; only a file the user (or the app) wrote decides what to drop.
         let mut changed = false;
-        match settings {
-            Ok(Some(settings)) => {
-                self.settings = settings;
-                changed |= self.prune();
-            }
-            Ok(None) => {}
-            Err(err) => {
-                self.settings_unreadable = true;
-                self.error(format!("{err}. The library folders are not loaded."));
-            }
+        if let Some(folders) = folders {
+            self.folders = folders;
+            changed |= self.prune();
         }
         self.publish_folders();
-        (self.notify)(Update::ScrollSpeed(self.settings.scroll_speed));
         if self.library.is_none() {
             (self.notify)(Update::Status(None));
             return;
@@ -222,7 +202,7 @@ impl Worker {
         self.watch();
         // Thorough: files retagged in place while the app was closed leave
         // their directories' mtimes alone.
-        changed |= self.scan(self.settings.library_folders.clone(), ScanMode::Thorough);
+        changed |= self.scan(self.folders.clone(), ScanMode::Thorough);
         if changed {
             self.publish_library();
         }
@@ -245,10 +225,9 @@ impl Worker {
     }
 
     fn add_folder(&mut self, folder: PathBuf) -> bool {
-        if !self.settings.add_folder(folder.clone()) {
+        if !lune_core::add_folder(&mut self.folders, folder.clone()) {
             return false;
         }
-        self.save_settings();
         self.publish_folders();
         self.watch();
         // A folder that replaced folders inside it rescans them too; that's
@@ -257,10 +236,9 @@ impl Worker {
     }
 
     fn remove_folder(&mut self, folder: &Path) -> bool {
-        if !self.settings.remove_folder(folder) {
+        if !lune_core::remove_folder(&mut self.folders, folder) {
             return false;
         }
-        self.save_settings();
         self.publish_folders();
         self.watch();
         self.prune()
@@ -285,28 +263,8 @@ impl Worker {
         }
     }
 
-    fn save_settings(&mut self) {
-        if self.settings_unreadable {
-            self.error(format!(
-                "The settings were not saved, because {} could not be read. Fix it and restart Lune.",
-                self.config_path.display()
-            ));
-            return;
-        }
-        if let Err(err) = self.settings.save(&self.config_path) {
-            self.error(format!("Could not save the settings: {err}"));
-        }
-    }
-
-    fn set_scroll_speed(&mut self, speed: u32) {
-        if self.settings.set_scroll_speed(speed) {
-            self.save_settings();
-        }
-        (self.notify)(Update::ScrollSpeed(self.settings.scroll_speed));
-    }
-
     fn publish_folders(&self) {
-        let folders = &self.settings.library_folders;
+        let folders = &self.folders;
         let scans = match &self.library {
             Some(library) => library.folder_scans(folders).unwrap_or_else(|err| {
                 tracing::warn!(%err, "could not read when the folders were last scanned");
@@ -329,7 +287,7 @@ impl Worker {
         let Some(library) = &mut self.library else {
             return false;
         };
-        match library.prune(&self.settings.library_folders) {
+        match library.prune(&self.folders) {
             Ok(removed) => removed.is_some_and(|n| n > 0),
             Err(err) => {
                 self.error(format!("Could not update the library: {err}"));
@@ -341,7 +299,7 @@ impl Worker {
     fn watch(&mut self) {
         // Replace, don't stack: drop the old watcher first.
         self.watcher = None;
-        if self.settings.library_folders.is_empty() {
+        if self.folders.is_empty() {
             return;
         }
         // Watching walks every directory, which takes a while on a network
@@ -350,7 +308,7 @@ impl Worker {
             "Setting up folder watching".to_owned(),
         )));
         let jobs = self.jobs.clone();
-        match FolderWatcher::start(&self.settings.library_folders, WATCH_DELAY, move |dirs| {
+        match FolderWatcher::start(&self.folders, WATCH_DELAY, move |dirs| {
             let _ = jobs.send(Job::Rescan(dirs));
         }) {
             Ok((watcher, failed)) => {
@@ -368,7 +326,7 @@ impl Worker {
     fn scan(&mut self, dirs: Vec<PathBuf>, mode: ScanMode) -> bool {
         let dirs = collapse(
             dirs.into_iter()
-                .filter_map(|dir| existing_ancestor(&dir, &self.settings.library_folders))
+                .filter_map(|dir| existing_ancestor(&dir, &self.folders))
                 .collect(),
         );
         let mut changed = false;
@@ -403,7 +361,7 @@ impl Worker {
                         + report.restored
                         + report.dated
                         > 0;
-                    if self.settings.library_folders.contains(&dir) {
+                    if self.folders.contains(&dir) {
                         match library.record_folder_scan(&dir, (self.now)()) {
                             Ok(()) => recorded = true,
                             Err(err) => {

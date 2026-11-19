@@ -9,7 +9,6 @@ ColumnLayout {
     required property var model
     required property int currentRow
     required property url cover
-    required property int scrollSpeed
     signal searchEdited(string text)
     signal rowChosen(int row)
 
@@ -69,7 +68,6 @@ ColumnLayout {
         }
         WheelScroller {
             view: filterList
-            speed: filterPane.scrollSpeed
         }
 
         delegate: Rectangle {

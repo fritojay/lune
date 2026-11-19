@@ -11,7 +11,6 @@ ColumnLayout {
     required property int currentRow
     required property string totalDuration
     required property bool shuffle
-    required property int scrollSpeed
 
     signal shuffleToggled(bool shuffle)
     signal clearRequested()
@@ -84,7 +83,6 @@ ColumnLayout {
         }
         WheelScroller {
             view: queueList
-            speed: queuePane.scrollSpeed
         }
         property int dropRow: -1
 

@@ -70,24 +70,6 @@ impl Settings {
         crate::paths::write_own_file(path, text.as_bytes())
     }
 
-    /// Adds `folder` unless it is already covered: the same folder, or one
-    /// inside a listed folder. Listed folders inside the new one are dropped,
-    /// since it covers them. Returns whether anything changed.
-    pub fn add_folder(&mut self, folder: PathBuf) -> bool {
-        if self.library_folders.iter().any(|f| folder.starts_with(f)) {
-            return false;
-        }
-        self.library_folders.retain(|f| !f.starts_with(&folder));
-        self.library_folders.push(folder);
-        true
-    }
-
-    pub fn remove_folder(&mut self, folder: &Path) -> bool {
-        let before = self.library_folders.len();
-        self.library_folders.retain(|f| f != folder);
-        self.library_folders.len() != before
-    }
-
     /// Clamps `speed` into [`SCROLL_SPEEDS`]. Returns whether it changed.
     pub fn set_scroll_speed(&mut self, speed: u32) -> bool {
         let speed = clamp_scroll_speed(speed);
@@ -95,6 +77,24 @@ impl Settings {
         self.scroll_speed = speed;
         changed
     }
+}
+
+/// Adds `folder` to `folders` unless it is already covered: the same folder,
+/// or one inside a listed folder. Listed folders inside the new one are
+/// dropped, since it covers them. Returns whether anything changed.
+pub fn add_folder(folders: &mut Vec<PathBuf>, folder: PathBuf) -> bool {
+    if folders.iter().any(|f| folder.starts_with(f)) {
+        return false;
+    }
+    folders.retain(|f| !f.starts_with(&folder));
+    folders.push(folder);
+    true
+}
+
+pub fn remove_folder(folders: &mut Vec<PathBuf>, folder: &Path) -> bool {
+    let before = folders.len();
+    folders.retain(|f| f != folder);
+    folders.len() != before
 }
 
 /// A speed this version can't read falls back to the default rather than

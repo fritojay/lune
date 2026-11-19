@@ -28,6 +28,7 @@ fn main() -> std::io::Result<()> {
             "src/list_model.rs",
             "src/missing_model.rs",
             "src/player.rs",
+            "src/preferences.rs",
             "src/queue_model.rs",
             "src/window_layout.rs",
         ])

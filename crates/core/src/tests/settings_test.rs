@@ -120,28 +120,25 @@ fn an_unreadable_scroll_speed_gets_the_default_and_keeps_the_folders() {
 
 #[test]
 fn adding_a_folder_skips_duplicates_and_folders_already_covered() {
-    let mut settings = Settings::default();
-    assert!(settings.add_folder(PathBuf::from("/music/rock")));
-    assert!(!settings.add_folder(PathBuf::from("/music/rock")));
-    assert!(!settings.add_folder(PathBuf::from("/music/rock/old")));
+    let mut list = Vec::new();
+    assert!(add_folder(&mut list, PathBuf::from("/music/rock")));
+    assert!(!add_folder(&mut list, PathBuf::from("/music/rock")));
+    assert!(!add_folder(&mut list, PathBuf::from("/music/rock/old")));
     assert!(
-        settings.add_folder(PathBuf::from("/music/rockabilly")),
+        add_folder(&mut list, PathBuf::from("/music/rockabilly")),
         "not inside /music/rock"
     );
     // A parent replaces the folders inside it.
-    assert!(settings.add_folder(PathBuf::from("/music")));
-    assert_eq!(folders(&settings), ["/music"]);
+    assert!(add_folder(&mut list, PathBuf::from("/music")));
+    assert_eq!(list, [PathBuf::from("/music")]);
 }
 
 #[test]
 fn removing_a_folder() {
-    let mut settings = Settings {
-        library_folders: vec![PathBuf::from("/a"), PathBuf::from("/b")],
-        ..Settings::default()
-    };
-    assert!(settings.remove_folder(Path::new("/a")));
-    assert!(!settings.remove_folder(Path::new("/a")));
-    assert_eq!(folders(&settings), ["/b"]);
+    let mut list = vec![PathBuf::from("/a"), PathBuf::from("/b")];
+    assert!(remove_folder(&mut list, Path::new("/a")));
+    assert!(!remove_folder(&mut list, Path::new("/a")));
+    assert_eq!(list, [PathBuf::from("/b")]);
 }
 
 #[test]

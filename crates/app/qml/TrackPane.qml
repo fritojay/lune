@@ -16,7 +16,6 @@ ColumnLayout {
     required property bool sortDescending
     required property bool hasFolders
     required property string scanStatus
-    required property int scrollSpeed
     required property real currentTrackId
     required property var hiddenColumns
     // A column sort shows a flat track list instead of albums with covers.
@@ -184,7 +183,6 @@ ColumnLayout {
         }
         WheelScroller {
             view: albumList
-            speed: trackPane.scrollSpeed
         }
         property int selectedIndex: -1
 

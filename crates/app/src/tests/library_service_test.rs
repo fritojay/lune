@@ -2,9 +2,10 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use lune_core::SCROLL_SPEEDS;
+use lune_core::Settings;
 
 use super::*;
+use crate::preferences::Store;
 use crate::test_util::{TempDir, wav_bytes};
 
 /// Longer than `WATCH_DELAY` plus a scan, with room for a slow CI machine.
@@ -38,7 +39,7 @@ impl Harness {
         let clock = clock.clone();
         let service = LibraryService::start(
             Self::db(&dir),
-            Self::config(&dir),
+            Store::load(Self::config(&dir)).startup_folders(),
             Some(Self::thumbnails(&dir)),
             RESCAN_EVERY,
             move || clock.now(),
@@ -135,13 +136,11 @@ fn without_a_settings_file_a_library_built_elsewhere_is_kept() {
     prescanned(&dir, &["a", "b"]);
     let h = Harness::start(dir);
     assert_eq!(h.loaded_size(), 3);
-    let folders = h.wait_for(|u| match u {
-        Update::Folders(f) => Some(f),
-        _ => None,
+    assert!(h.folders().is_empty());
+    h.wait_for(|u| match u {
+        Update::Library(_) => panic!("nothing should have been dropped"),
+        _ => matches!(u, Update::Status(None)).then_some(()),
     });
-    assert!(folders.is_empty());
-    h.idle();
-    assert!(!Harness::config(&h.dir).exists(), "nothing was saved");
 }
 
 #[test]
@@ -152,15 +151,14 @@ fn an_empty_new_library_loads_empty() {
 }
 
 #[test]
-fn adding_a_folder_saves_it_and_scans_it() {
+fn adding_a_folder_lists_it_and_scans_it() {
     let dir = two_folders();
     let a = dir.path().join("a");
     let h = Harness::start(dir);
     h.idle();
     h.service.send(Job::AddFolder(a.clone()));
+    assert_eq!(h.folders(), [(a, None)]);
     assert_eq!(h.library_size(), 2);
-    let saved = Settings::load(&Harness::config(&h.dir)).unwrap().unwrap();
-    assert_eq!(saved.library_folders, [a]);
 }
 
 #[test]
@@ -194,9 +192,9 @@ fn removing_a_folder_drops_its_tracks() {
     assert_eq!(h.library_size(), 3);
     h.idle();
     h.service.send(Job::RemoveFolder(a));
+    let folders: Vec<PathBuf> = h.folders().into_iter().map(|(path, _)| path).collect();
+    assert_eq!(folders, [b]);
     assert_eq!(h.library_size(), 1);
-    let saved = Settings::load(&Harness::config(&h.dir)).unwrap().unwrap();
-    assert_eq!(saved.library_folders, [b]);
 }
 
 #[test]
@@ -231,111 +229,16 @@ fn startup_picks_up_changes_made_while_the_app_was_closed() {
 }
 
 #[test]
-fn startup_publishes_the_saved_scroll_speed() {
-    let dir = TempDir::new();
-    Settings {
-        scroll_speed: 6,
-        ..Settings::default()
-    }
-    .save(&Harness::config(&dir))
-    .unwrap();
-    let h = Harness::start(dir);
-    let speed = h.wait_for(|u| match u {
-        Update::ScrollSpeed(speed) => Some(speed),
-        _ => None,
-    });
-    assert_eq!(speed, 6);
-}
-
-#[test]
-fn setting_the_scroll_speed_saves_it_clamped_and_keeps_the_folders() {
-    let dir = two_folders();
-    let a = dir.path().join("a");
-    let h = Harness::start(dir);
-    h.idle();
-    h.service.send(Job::AddFolder(a.clone()));
-    assert_eq!(h.library_size(), 2);
-    h.idle();
-    h.service.send(Job::SetScrollSpeed(u32::MAX));
-    let speed = h.wait_for(|u| match u {
-        Update::ScrollSpeed(speed) => Some(speed),
-        Update::Library(_) => panic!("the library should not change"),
-        _ => None,
-    });
-    assert_eq!(speed, *SCROLL_SPEEDS.end());
-    let saved = Settings::load(&Harness::config(&h.dir)).unwrap().unwrap();
-    assert_eq!(saved.scroll_speed, *SCROLL_SPEEDS.end());
-    assert_eq!(saved.library_folders, [a]);
-}
-
-#[test]
-fn a_broken_settings_file_is_reported_and_drops_nothing() {
+fn a_broken_settings_file_drops_nothing() {
     let dir = two_folders();
     prescanned(&dir, &["a", "b"]);
     dir.write("config/config.toml", b"library_folders = [");
     let h = Harness::start(dir);
     assert_eq!(h.loaded_size(), 3);
     h.wait_for(|u| match u {
-        Update::Error(_) => Some(()),
-        Update::Library(_) => panic!("nothing should have changed"),
-        _ => None,
-    });
-    h.idle();
-}
-
-#[test]
-fn a_broken_settings_file_is_not_saved_over_and_drops_nothing_after_a_restart() {
-    let dir = two_folders();
-    prescanned(&dir, &["a", "b"]);
-    let broken = b"library_folders = [";
-    dir.write("config/config.toml", broken);
-    let h = Harness::start(dir);
-    h.idle();
-    for job in [
-        Job::SetScrollSpeed(7),
-        Job::AddFolder(h.dir.path().join("a")),
-    ] {
-        h.service.send(job);
-        h.wait_for(|u| matches!(u, Update::Error(_)).then_some(()));
-        h.idle();
-    }
-    assert_eq!(std::fs::read(Harness::config(&h.dir)).unwrap(), broken);
-
-    let Harness { dir, service, .. } = h;
-    drop(service);
-    let h = Harness::start(dir);
-    assert_eq!(h.loaded_size(), 3);
-    h.wait_for(|u| match u {
         Update::Library(_) => panic!("nothing should have been dropped"),
         _ => matches!(u, Update::Status(None)).then_some(()),
     });
-}
-
-#[test]
-fn when_the_library_cannot_open_the_saved_settings_still_load_and_are_kept() {
-    let dir = TempDir::new();
-    // A directory where the DB file should be.
-    dir.write("data/library.sqlite3/x", b"");
-    let a = dir.path().join("a");
-    Settings {
-        library_folders: vec![a.clone()],
-        scroll_speed: 6,
-        ..Settings::default()
-    }
-    .save(&Harness::config(&dir))
-    .unwrap();
-    let h = Harness::start(dir);
-    let speed = h.wait_for(|u| match u {
-        Update::ScrollSpeed(speed) => Some(speed),
-        _ => None,
-    });
-    assert_eq!(speed, 6);
-    h.idle();
-    h.service.send(Job::SetScrollSpeed(2));
-    h.idle();
-    let saved = Settings::load(&Harness::config(&h.dir)).unwrap().unwrap();
-    assert_eq!(saved.scroll_speed, 2);
-    assert_eq!(saved.library_folders, [a]);
 }
 
 #[test]

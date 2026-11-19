@@ -14,14 +14,6 @@ fn without_the_info_file_it_is_not_a_flatpak() {
     assert!(!in_flatpak(&dir.path().join(".flatpak-info")));
 }
 
-#[test]
-fn a_scroll_speed_from_qml_is_clamped_even_when_negative() {
-    assert_eq!(scroll_speed_from_qml(4), 4);
-    assert_eq!(scroll_speed_from_qml(-5), *SCROLL_SPEEDS.start());
-    assert_eq!(scroll_speed_from_qml(0), *SCROLL_SPEEDS.start());
-    assert_eq!(scroll_speed_from_qml(i32::MAX), *SCROLL_SPEEDS.end());
-}
-
 fn entry_value(entry: &QVariant, key: &str) -> Option<QVariant> {
     entry
         .value::<QMap<QMapPair_QString_QVariant>>()
@@ -48,4 +40,14 @@ fn a_never_scanned_folder_entry_has_no_time() {
         last_scanned_ns: None,
     });
     assert!(entry_value(&entry, "lastScanned").is_none());
+}
+
+#[test]
+fn replacing_a_folder_list_reports_whether_it_changed() {
+    let mut list = vec![PathBuf::from("/a")];
+    assert!(!replace(&mut list, &[PathBuf::from("/a")]));
+    assert!(replace(&mut list, &[PathBuf::from("/b")]));
+    assert_eq!(list, [PathBuf::from("/b")]);
+    assert!(replace(&mut list, &[]));
+    assert!(list.is_empty());
 }

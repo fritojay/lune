@@ -1,12 +1,13 @@
 import QtQuick
+import com.lune.player
 
 // Flickable moves a fixed wheelScrollLines × 24 px per wheel notch, and Qt 6.11
-// has no way to change that, so mouse wheels scroll here instead, `speed` times
-// as far. Touchpad events are passed on, so they keep Flickable's scrolling.
+// has no way to change that, so mouse wheels scroll here instead,
+// Preferences.scrollSpeed times as far. Touchpad events are passed on, so they
+// keep Flickable's scrolling.
 MouseArea {
     id: wheel
     required property Flickable view
-    required property int speed
     readonly property bool wayland: Qt.platform.pluginName.startsWith("wayland")
 
     parent: view
@@ -31,7 +32,7 @@ MouseArea {
             return
         }
         const view = wheel.view
-        const step = -event.angleDelta.y / 120 * Application.styleHints.wheelScrollLines * 24 * wheel.speed
+        const step = -event.angleDelta.y / 120 * Application.styleHints.wheelScrollLines * 24 * Preferences.scrollSpeed
         const from = scroll.running ? scroll.to : view.contentY
         const top = view.originY
         const bottom = Math.max(top, view.originY + view.contentHeight - view.height)

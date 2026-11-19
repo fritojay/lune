@@ -2,20 +2,17 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import com.lune.player
 
 Dialog {
     id: preferences
     required property list<var> folders
     required property bool busy
     required property string status
-    required property int scrollSpeed
-    required property int minScrollSpeed
-    required property int maxScrollSpeed
 
     signal addFolderRequested()
     signal removeFolderRequested(int index)
     signal rescanRequested()
-    signal scrollSpeedChosen(int speed)
 
     title: qsTr("Preferences")
     modal: true
@@ -50,7 +47,6 @@ Dialog {
                 ScrollBar.vertical: ListScrollBar {}
                 WheelScroller {
                     view: folderList
-                    speed: preferences.scrollSpeed
                 }
 
                 Label {
@@ -123,14 +119,14 @@ Dialog {
             Slider {
                 id: scrollSpeedSlider
                 Layout.fillWidth: true
-                from: preferences.minScrollSpeed
-                to: preferences.maxScrollSpeed
+                from: Preferences.minScrollSpeed
+                to: Preferences.maxScrollSpeed
                 stepSize: 1
                 snapMode: Slider.SnapAlways
-                value: preferences.scrollSpeed
+                value: Preferences.scrollSpeed
                 // Once per drag, not per step; keyboard steps aren't pressed.
-                onMoved: if (!pressed) preferences.scrollSpeedChosen(value)
-                onPressedChanged: if (!pressed) preferences.scrollSpeedChosen(value)
+                onMoved: if (!pressed) Preferences.scrollSpeed = value
+                onPressedChanged: if (!pressed) Preferences.scrollSpeed = value
             }
             Label {
                 text: qsTr("%1×").arg(scrollSpeedSlider.value)
