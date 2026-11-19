@@ -111,32 +111,56 @@ fn qml_columns(key: &str) -> Vec<&'static str> {
 }
 
 #[test]
-fn columns_qml_has_every_column_once_with_a_role_that_exists() {
-    let ids = qml_columns("id");
-    let columns: Vec<_> = ids
-        .iter()
-        .map(|id| SortColumn::from_name(id).unwrap_or_else(|| panic!("no column {id:?}")))
-        .collect();
-    let mut sorted = columns.clone();
-    sorted.sort();
-    sorted.dedup();
-    assert_eq!(
-        sorted,
-        [
-            SortColumn::TrackNumber,
-            SortColumn::Title,
-            SortColumn::Artist,
-            SortColumn::Duration,
-            SortColumn::FileType,
-            SortColumn::BitRate,
-        ]
-    );
-    let roles = qml_columns("role");
-    assert_eq!(roles.len(), ids.len());
-    for role in roles {
-        assert!(
-            ROLES.iter().any(|&(name, _)| name == role),
-            "no role {role:?}"
-        );
+fn columns_qml_has_every_column_once() {
+    let mut ids = qml_columns("id");
+    ids.sort_unstable();
+    let mut names = SortColumn::ALL.map(SortColumn::name);
+    names.sort_unstable();
+    assert_eq!(ids, names);
+}
+
+fn assert_column_texts(track: &ListTrack, texts: [(SortColumn, &str); SortColumn::ALL.len()]) {
+    assert_eq!(texts.map(|(column, _)| column), SortColumn::ALL);
+    let catalog = Catalog::new(vec![track.clone()]);
+    for (column, text) in texts {
+        assert_eq!(column_text(column, track, &catalog), text, "{column:?}");
     }
+}
+
+#[test]
+fn every_column_has_its_text() {
+    let mut t = track(1, 1, None);
+    t.disc_no = Some(2);
+    t.track_no = Some(7);
+    t.artist = Some("Guest".to_owned());
+    t.duration_ms = 185_500;
+    t.bitrate_kbps = Some(320);
+    assert_column_texts(
+        &t,
+        [
+            (SortColumn::TrackNumber, "2.7"),
+            (SortColumn::Title, "Track 1"),
+            (SortColumn::Artist, "Guest"),
+            (SortColumn::Duration, "3:05"),
+            (SortColumn::FileType, "FLAC"),
+            (SortColumn::BitRate, "320 kbps"),
+        ],
+    );
+}
+
+#[test]
+fn unknown_values_have_empty_or_placeholder_text() {
+    let mut t = track(1, 1, None);
+    t.album_artist = String::new();
+    assert_column_texts(
+        &t,
+        [
+            (SortColumn::TrackNumber, ""),
+            (SortColumn::Title, "Track 1"),
+            (SortColumn::Artist, "Unknown Artist"),
+            (SortColumn::Duration, "0:00"),
+            (SortColumn::FileType, "FLAC"),
+            (SortColumn::BitRate, ""),
+        ],
+    );
 }

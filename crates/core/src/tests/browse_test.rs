@@ -605,19 +605,32 @@ fn sorting_an_empty_view_gives_an_empty_view() {
 
 #[test]
 fn a_columns_name_is_the_one_it_is_saved_under() {
-    for column in [
-        SortColumn::TrackNumber,
-        SortColumn::Title,
-        SortColumn::Artist,
-        SortColumn::Duration,
-        SortColumn::FileType,
-        SortColumn::BitRate,
-    ] {
+    for column in SortColumn::ALL {
         assert_eq!(
             toml::Value::try_from(column).unwrap().as_str(),
             Some(column.name())
         );
         assert_eq!(SortColumn::from_name(column.name()), Some(column));
+    }
+}
+
+/// No wildcard arm, so a new column doesn't compile until it's counted here.
+fn column_count() -> usize {
+    match SortColumn::TrackNumber {
+        SortColumn::TrackNumber
+        | SortColumn::Title
+        | SortColumn::Artist
+        | SortColumn::Duration
+        | SortColumn::FileType
+        | SortColumn::BitRate => 6,
+    }
+}
+
+#[test]
+fn all_has_every_column_once_in_declaration_order() {
+    assert_eq!(SortColumn::ALL.len(), column_count());
+    for (i, column) in SortColumn::ALL.into_iter().enumerate() {
+        assert_eq!(column as usize, i, "{column:?}");
     }
 }
 

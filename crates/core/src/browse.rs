@@ -4,6 +4,7 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::sync::LazyLock;
 use std::time::SystemTime;
 
 use serde::de::IntoDeserializer;
@@ -66,20 +67,66 @@ pub enum SortColumn {
 }
 
 impl SortColumn {
+    /// In declaration order, so `name` can index by discriminant.
+    pub const ALL: [Self; 6] = [
+        Self::TrackNumber,
+        Self::Title,
+        Self::Artist,
+        Self::Duration,
+        Self::FileType,
+        Self::BitRate,
+    ];
+
     /// The name it's saved under, which QML also uses for the column.
     pub fn name(self) -> &'static str {
-        match self {
-            Self::TrackNumber => "track_number",
-            Self::Title => "title",
-            Self::Artist => "artist",
-            Self::Duration => "duration",
-            Self::FileType => "file_type",
-            Self::BitRate => "bit_rate",
-        }
+        static NAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
+            SortColumn::ALL
+                .iter()
+                .map(|column| {
+                    toml::Value::try_from(column)
+                        .ok()
+                        .and_then(|name| name.as_str().map(str::to_owned))
+                        .unwrap_or_default()
+                })
+                .collect()
+        });
+        NAMES.get(self as usize).map_or("", String::as_str)
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
         Self::deserialize(IntoDeserializer::<serde::de::value::Error>::into_deserializer(name)).ok()
+    }
+
+    /// The order of tracks `a` and `b` of `catalog`. Track numbers sort by
+    /// disc, then track. Tracks without a track number, an artist, a known
+    /// length, or a known bit rate come last in both directions.
+    fn compare(self, catalog: &Catalog, a: usize, b: usize, descending: bool) -> Ordering {
+        let (x, y) = (&catalog.tracks[a], &catalog.tracks[b]);
+        match self {
+            Self::TrackNumber => missing_last(
+                x.track_no.map(|no| (x.disc_no.unwrap_or(1), no)),
+                y.track_no.map(|no| (y.disc_no.unwrap_or(1), no)),
+                descending,
+            ),
+            Self::Title => missing_last(
+                Some(&catalog.title_keys[a]),
+                Some(&catalog.title_keys[b]),
+                descending,
+            ),
+            Self::Artist => missing_last(
+                Some(&catalog.artist_keys[a]).filter(|k| !k.is_empty()),
+                Some(&catalog.artist_keys[b]).filter(|k| !k.is_empty()),
+                descending,
+            ),
+            // lofty reports 0 when it can't read the length.
+            Self::Duration => missing_last(
+                (x.duration_ms > 0).then_some(x.duration_ms),
+                (y.duration_ms > 0).then_some(y.duration_ms),
+                descending,
+            ),
+            Self::FileType => missing_last(Some(&x.codec), Some(&y.codec), descending),
+            Self::BitRate => missing_last(x.bitrate_kbps, y.bitrate_kbps, descending),
+        }
     }
 }
 
@@ -305,42 +352,10 @@ impl Catalog {
         view
     }
 
-    /// `view` reordered by `sort`. Track numbers sort by disc, then track.
-    /// Ties keep `view`'s order, and tracks without a track number, an artist,
-    /// a known length, or a known bit rate come last in both directions.
+    /// `view` reordered by `sort`. Ties keep `view`'s order.
     pub fn sorted(&self, mut view: View, sort: Sort) -> View {
-        view.tracks.sort_by(|&a, &b| {
-            let (x, y) = (&self.tracks[a], &self.tracks[b]);
-            match sort.column {
-                SortColumn::TrackNumber => missing_last(
-                    x.track_no.map(|no| (x.disc_no.unwrap_or(1), no)),
-                    y.track_no.map(|no| (y.disc_no.unwrap_or(1), no)),
-                    sort.descending,
-                ),
-                SortColumn::Title => missing_last(
-                    Some(&self.title_keys[a]),
-                    Some(&self.title_keys[b]),
-                    sort.descending,
-                ),
-                SortColumn::Artist => missing_last(
-                    Some(&self.artist_keys[a]).filter(|k| !k.is_empty()),
-                    Some(&self.artist_keys[b]).filter(|k| !k.is_empty()),
-                    sort.descending,
-                ),
-                // lofty reports 0 when it can't read the length.
-                SortColumn::Duration => missing_last(
-                    (x.duration_ms > 0).then_some(x.duration_ms),
-                    (y.duration_ms > 0).then_some(y.duration_ms),
-                    sort.descending,
-                ),
-                SortColumn::FileType => {
-                    missing_last(Some(&x.codec), Some(&y.codec), sort.descending)
-                }
-                SortColumn::BitRate => {
-                    missing_last(x.bitrate_kbps, y.bitrate_kbps, sort.descending)
-                }
-            }
-        });
+        view.tracks
+            .sort_by(|&a, &b| sort.column.compare(self, a, b, sort.descending));
         view.albums = (0..view.tracks.len()).map(|i| i..i + 1).collect();
         view.sort = Some(sort);
         view

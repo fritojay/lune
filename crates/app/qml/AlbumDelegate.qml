@@ -14,13 +14,8 @@ Item {
     required property url cover
     required property int firstIndex
     required property int trackCount
-    required property var trackNumbers
-    required property var trackTitles
-    required property var trackArtists
-    required property var trackDurations
+    required property var trackColumns
     required property var trackIds
-    required property var trackFileTypes
-    required property var trackBitRates
 
     required property bool sorted
     required property int selectedIndex
@@ -120,7 +115,7 @@ Item {
                             Layout.fillWidth: modelData.fill ?? false
                             Layout.preferredWidth: Columns.width(modelData, tracks.width)
                             horizontalAlignment: modelData.alignRight ? Text.AlignRight : Text.AlignLeft
-                            text: modelData.marksPlaying && trackRow.nowPlaying ? "▶" : trackRow.field(album[modelData.role])
+                            text: modelData.marksPlaying && trackRow.nowPlaying ? "▶" : trackRow.field(album.trackColumns[modelData.id])
                             textFormat: Text.PlainText
                             elide: Text.ElideRight
                             color: trackRow.textColor

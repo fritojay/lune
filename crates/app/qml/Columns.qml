@@ -2,18 +2,18 @@ pragma Singleton
 import QtQuick
 
 // The main pane's columns, in display order. `id` is the column's
-// SortColumn::name, which FilterModel and WindowLayout take. `role` is the
-// AlbumListModel role with the column's text for each track. A test in
-// album_model_test.rs checks both against Rust.
+// SortColumn::name, which FilterModel and WindowLayout take and
+// AlbumListModel's trackColumns is keyed by. A test in album_model_test.rs
+// checks it against Rust.
 QtObject {
     readonly property var all: [
-        { id: "track_number", title: qsTr("#"), menuTitle: qsTr("Track Number"), role: "trackNumbers",
+        { id: "track_number", title: qsTr("#"), menuTitle: qsTr("Track Number"),
           width: 32, alignRight: true, marksPlaying: true },
-        { id: "title", title: qsTr("Title"), role: "trackTitles", fill: true, primary: true },
-        { id: "artist", title: qsTr("Artist"), role: "trackArtists", width: 220, maxShare: 0.25, hideable: true },
-        { id: "file_type", title: qsTr("File Type"), role: "trackFileTypes", width: 76, hideable: true },
-        { id: "bit_rate", title: qsTr("Bit Rate"), role: "trackBitRates", width: 72, alignRight: true, hideable: true },
-        { id: "duration", title: qsTr("Time"), role: "trackDurations", width: 56, alignRight: true },
+        { id: "title", title: qsTr("Title"), fill: true, primary: true },
+        { id: "artist", title: qsTr("Artist"), width: 220, maxShare: 0.25, hideable: true },
+        { id: "file_type", title: qsTr("File Type"), width: 76, hideable: true },
+        { id: "bit_rate", title: qsTr("Bit Rate"), width: 72, alignRight: true, hideable: true },
+        { id: "duration", title: qsTr("Time"), width: 56, alignRight: true },
     ]
     readonly property var hideable: all.filter(column => column.hideable)
 

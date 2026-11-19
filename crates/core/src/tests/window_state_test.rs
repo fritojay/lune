@@ -204,16 +204,8 @@ fn every_grouping_and_sort_survives_a_save_and_load() {
         Grouping::RecentlyAdded,
         Grouping::RecentlyPlayed,
     ];
-    let columns = [
-        SortColumn::TrackNumber,
-        SortColumn::Title,
-        SortColumn::Artist,
-        SortColumn::Duration,
-        SortColumn::FileType,
-        SortColumn::BitRate,
-    ];
     for grouping in groupings {
-        for sort in columns
+        for sort in SortColumn::ALL
             .into_iter()
             .flat_map(|column| [false, true].map(|descending| Some(Sort { column, descending })))
             .chain([None])

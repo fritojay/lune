@@ -15,9 +15,10 @@ use std::rc::Rc;
 use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{
-    QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QStringList, QVariant,
+    QHash, QHashPair_i32_QByteArray, QList, QMap, QMapPair_QString_QVariant, QModelIndex, QString,
+    QStringList, QVariant,
 };
-use lune_core::{Catalog, ListTrack, View};
+use lune_core::{Catalog, ListTrack, SortColumn, View};
 
 use crate::list_model::{self, text};
 use crate::property::set;
@@ -98,16 +99,6 @@ impl Album<'_> {
             .filter_map(|&i| self.catalog.track(i))
             .collect()
     }
-
-    /// One string per track.
-    fn strings(&self, f: impl Fn(&ListTrack) -> String) -> QVariant {
-        let list: QStringList = self
-            .tracks()
-            .into_iter()
-            .map(|t| QString::from(&f(t)))
-            .collect();
-        QVariant::from(&list)
-    }
 }
 
 /// Not [`list_model::Role`], whose row type can't borrow for any lifetime.
@@ -127,29 +118,13 @@ const ROLES: &[Role] = &[
     ("trackCount", |a| {
         QVariant::from(&i32::try_from(a.range.len()).unwrap_or(i32::MAX))
     }),
-    ("trackNumbers", |a| {
-        a.strings(|t| {
-            let multi_disc = a.catalog.is_multi_disc(t.album_id);
-            format::track_number(t.disc_no, t.track_no, multi_disc)
-        })
-    }),
-    ("trackTitles", |a| a.strings(|t| t.title.clone())),
-    ("trackArtists", |a| a.strings(track_artist)),
-    ("trackDurations", |a| {
-        a.strings(|t| format::duration(t.duration_ms))
-    }),
+    ("trackColumns", track_columns),
     ("trackIds", |a| {
         let mut ids = QList::<i64>::default();
         for t in a.tracks() {
             ids.append(t.id);
         }
         QVariant::from(&ids)
-    }),
-    ("trackFileTypes", |a| {
-        a.strings(|t| format::file_type(&t.codec))
-    }),
-    ("trackBitRates", |a| {
-        a.strings(|t| format::bit_rate(t.bitrate_kbps))
     }),
 ];
 
@@ -240,6 +215,35 @@ impl qobject::AlbumListModel {
 fn first_track<'a>(catalog: Option<&'a Catalog>, view: &View, row: usize) -> Option<&'a ListTrack> {
     let start = view.albums.get(row)?.start;
     catalog?.track(*view.tracks.get(start)?)
+}
+
+/// Each column's text for each track, by column name.
+fn track_columns(album: &Album<'_>) -> QVariant {
+    let tracks = album.tracks();
+    let mut columns = QMap::<QMapPair_QString_QVariant>::default();
+    for column in SortColumn::ALL {
+        let texts: QStringList = tracks
+            .iter()
+            .map(|t| QString::from(&column_text(column, t, album.catalog)))
+            .collect();
+        columns.insert(QString::from(column.name()), QVariant::from(&texts));
+    }
+    QVariant::from(&columns)
+}
+
+fn column_text(column: SortColumn, track: &ListTrack, catalog: &Catalog) -> String {
+    match column {
+        SortColumn::TrackNumber => format::track_number(
+            track.disc_no,
+            track.track_no,
+            catalog.is_multi_disc(track.album_id),
+        ),
+        SortColumn::Title => track.title.clone(),
+        SortColumn::Artist => track_artist(track),
+        SortColumn::Duration => format::duration(track.duration_ms),
+        SortColumn::FileType => format::file_type(&track.codec),
+        SortColumn::BitRate => format::bit_rate(track.bitrate_kbps),
+    }
 }
 
 /// The track's artist, else its album's.
