@@ -1,0 +1,39 @@
+name: Set up Rust
+description: >
+  Installs the toolchain rust-toolchain.toml pins, or with `msrv` the
+  rust-version from Cargo.toml, so each version is written down in one place.
+
+inputs:
+  msrv:
+    description: Install Cargo.toml's rust-version instead of rust-toolchain.toml's channel.
+    default: "false"
+  components:
+    description: Comma-separated rustup components.
+    default: ""
+
+outputs:
+  version:
+    description: >
+      The installed toolchain. rust-toolchain.toml still overrides it inside the
+      repository, so run the MSRV one as `cargo +<version>`.
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      env:
+        MSRV: ${{ inputs.msrv }}
+      run: |
+        if [ "$MSRV" = true ]; then
+          version="$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)"
+        else
+          version="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+        fi
+        test -n "$version" || { echo "no toolchain version found" >&2; exit 1; }
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      with:
+        toolchain: ${{ steps.version.outputs.version }}
+        components: ${{ inputs.components }}

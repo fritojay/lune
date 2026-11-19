@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -6,77 +5,65 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
+use clap::ArgGroup;
 use lune_engine::{OutputKind, PlaybackState, Player, PlayerConfig, VecQueue};
 
-const USAGE: &str = "\
-usage: lune-cli play [options] <files..>
-
-options:
-  --capture <out.wav>  render to a new WAV file instead of the sound card
-                       (refuses to overwrite an existing file)
-  --null               render to nowhere (no sound card needed)
-  --fast               with --capture/--null: render as fast as possible
-  --rate <hz>          with --capture/--null: output rate (default 48000)
-
-controls (type a line, then Enter):
+const CONTROLS: &str = "\
+Controls (type a line, then Enter):
   p        pause / resume      n        next track
   b        previous track      s <sec>  seek to <sec>
   v <0-1>  volume              q        quit";
 
-pub fn run(args: &[OsString]) -> anyhow::Result<()> {
-    let mut capture: Option<Option<PathBuf>> = None;
-    let mut fast = false;
-    let mut rate = 48_000u32;
-    let mut files = Vec::new();
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-        match arg.to_str() {
-            Some("--capture") => {
-                let path = PathBuf::from(it.next().context("--capture needs a path")?);
-                // The engine already refuses to overwrite (create_new); these
-                // checks just give a clear message before playback starts.
-                if !path
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
-                {
-                    bail!("--capture path must end in .wav: {}", path.display());
-                }
-                if path.exists() {
-                    bail!(
-                        "--capture will not overwrite an existing file: {}",
-                        path.display()
-                    );
-                }
-                capture = Some(Some(path));
-            }
-            Some("--null") => capture = Some(None),
-            Some("--fast") => fast = true,
-            Some("--rate") => {
-                rate = it
-                    .next()
-                    .and_then(|r| r.to_str())
-                    .context("--rate needs a number")?
-                    .parse()
-                    .context("--rate needs a number")?;
-            }
-            Some("--help" | "-h") => {
-                println!("{USAGE}");
-                return Ok(());
-            }
-            _ => files.push(PathBuf::from(arg)),
+#[derive(clap::Args, Debug, PartialEq, Eq)]
+#[command(after_help = CONTROLS, group(ArgGroup::new("sink").args(["capture", "null"])))]
+pub struct Args {
+    /// Render to a new WAV file instead of the sound card (refuses to
+    /// overwrite an existing file)
+    #[arg(long, value_name = "OUT.wav")]
+    pub capture: Option<PathBuf>,
+    /// Render to nowhere (no sound card needed)
+    #[arg(long)]
+    pub null: bool,
+    /// With --capture/--null: render as fast as possible
+    #[arg(long, requires = "sink")]
+    pub fast: bool,
+    /// With --capture/--null: output rate [default: 48000]
+    #[arg(long, value_name = "HZ", requires = "sink")]
+    pub rate: Option<u32>,
+    #[arg(required = true)]
+    pub files: Vec<PathBuf>,
+}
+
+pub fn run(args: Args) -> anyhow::Result<()> {
+    let Args {
+        capture,
+        null,
+        fast,
+        rate,
+        files,
+    } = args;
+    if let Some(path) = &capture {
+        if !path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+        {
+            bail!("--capture path must end in .wav: {}", path.display());
+        }
+        // The engine already refuses to overwrite (create_new); this just
+        // gives a clear message before playback starts.
+        if path.exists() {
+            bail!(
+                "--capture will not overwrite an existing file: {}",
+                path.display()
+            );
         }
     }
-    if files.is_empty() {
-        bail!("no files given\n\n{USAGE}");
-    }
-    if fast && capture.is_none() {
-        bail!("--fast only works with --capture or --null");
-    }
 
+    let capture = if null { Some(None) } else { capture.map(Some) };
     let output = match capture {
         Some(path) => OutputKind::Capture {
             path,
-            rate,
+            rate: rate.unwrap_or(48_000),
             channels: 2,
             realtime: !fast,
         },
@@ -128,7 +115,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<()> {
                         }
                     }
                     Some("q") => break,
-                    _ => eprintln!("{USAGE}"),
+                    _ => eprintln!("{CONTROLS}"),
                 }
             }
             Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {}
@@ -171,3 +158,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/play_test.rs"]
+mod tests;

@@ -21,18 +21,12 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use anyhow::{Context, bail};
+use anyhow::bail;
+use clap::Parser;
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
 
 /// Location of `qml/main.qml` inside the QML module compiled by `build.rs`.
 const MAIN_QML: &str = "qrc:/qt/qml/com/lune/player/qml/main.qml";
-
-const USAGE: &str = "\
-usage: lune [--db <path>] [--config <path>] [--bench]
-
-  --db <path>      library database (defaults to the platform data directory)
-  --config <path>  settings file (defaults to the platform config directory)
-  --bench      scroll the track list automatically, print timings and memory, and quit";
 
 pub struct Config {
     pub db_path: PathBuf,
@@ -56,25 +50,27 @@ pub fn config() -> &'static Config {
     })
 }
 
-fn parse_args(started: Instant) -> anyhow::Result<Config> {
-    let mut db_path = None;
-    let mut config_path = None;
-    let mut bench = false;
-    let mut args = std::env::args_os().skip(1);
-    while let Some(arg) = args.next() {
-        if arg == "--db" {
-            db_path = Some(PathBuf::from(args.next().context("--db needs a path")?));
-        } else if arg == "--config" {
-            config_path = Some(PathBuf::from(args.next().context("--config needs a path")?));
-        } else if arg == "--bench" {
-            bench = true;
-        } else if arg == "--help" || arg == "-h" {
-            println!("{USAGE}");
-            std::process::exit(0);
-        } else {
-            bail!("unknown argument {}\n\n{USAGE}", arg.to_string_lossy());
-        }
-    }
+/// Lune, a music player.
+#[derive(Parser, Debug, PartialEq, Eq)]
+#[command(name = "lune", version)]
+struct Args {
+    /// Library database (defaults to the platform data directory)
+    #[arg(long = "db", value_name = "PATH")]
+    db_path: Option<PathBuf>,
+    /// Settings file (defaults to the platform config directory)
+    #[arg(long = "config", value_name = "PATH")]
+    config_path: Option<PathBuf>,
+    /// Scroll the track list automatically, print timings and memory, and quit
+    #[arg(long)]
+    bench: bool,
+}
+
+fn config_from(args: Args, started: Instant) -> anyhow::Result<Config> {
+    let Args {
+        db_path,
+        config_path,
+        bench,
+    } = args;
     let db_path = match db_path {
         Some(path) => path,
         None => lune_core::default_db_path()?,
@@ -98,7 +94,7 @@ fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    if CONFIG.set(parse_args(started)?).is_err() {
+    if CONFIG.set(config_from(Args::parse(), started)?).is_err() {
         bail!("configuration was read before it was set");
     }
 
@@ -136,3 +132,7 @@ fn main() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/main_test.rs"]
+mod tests;

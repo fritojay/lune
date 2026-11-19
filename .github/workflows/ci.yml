@@ -38,19 +38,7 @@ jobs:
           $QMAKE -query QT_VERSION
           test "$($QMAKE -query QT_VERSION)" = "$QT_VERSION"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: 1.100.0 # keep in sync with rust-toolchain.toml
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      - name: fmt
-        run: cargo fmt --all --check
-      - name: clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: test
-        run: cargo test --locked --workspace --all-features
-      - name: build
-        run: cargo build --locked --workspace --all-targets
+      - uses: ./.github/actions/check
       - name: Smoke test (app launches headless)
         run: |
           set +e
@@ -76,19 +64,7 @@ jobs:
           echo "QMAKE=$QT_ROOT_DIR/bin/qmake" >> "$GITHUB_ENV"
           "$QT_ROOT_DIR/bin/qmake" -query QT_VERSION
           test "$("$QT_ROOT_DIR/bin/qmake" -query QT_VERSION)" = "$QT_VERSION"
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: 1.100.0 # keep in sync with rust-toolchain.toml
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      - name: fmt
-        run: cargo fmt --all --check
-      - name: clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: test
-        run: cargo test --locked --workspace --all-features
-      - name: build
-        run: cargo build --locked --workspace --all-targets
+      - uses: ./.github/actions/check
       - name: Smoke test (app launches headless)
         run: |
           set +e
@@ -127,15 +103,16 @@ jobs:
   # The workspace's rust-version (Cargo.toml) must stay true. lune-app is
   # excluded: it needs Qt, and its deps (cxx-qt) set their own MSRV.
   msrv:
-    name: MSRV (Rust 1.89)
+    name: MSRV
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install ALSA headers (cpal)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      - id: msrv
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: "1.89"
+          msrv: true
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: check
-        run: cargo +1.89 check --locked --workspace --exclude lune-app --all-targets --all-features
+        run: cargo +${{ steps.msrv.outputs.version }} check --locked --workspace --exclude lune-app --all-targets --all-features

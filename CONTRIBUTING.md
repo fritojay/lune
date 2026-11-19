@@ -23,7 +23,7 @@ Cargo workspace (packages are named `lune-core`, `lune-engine`, `lune-cli`, `lun
 
 ## Stack
 
-symphonia (no system FFmpeg), cpal, rubato, rtrb, lofty, rusqlite (`bundled`, FTS5), notify, directories, souvlaki, tracing, thiserror, cxx-qt / cxx-qt-build / cxx-qt-lib (pinned exact versions).
+symphonia (no system FFmpeg), cpal, rubato, rtrb, lofty, rusqlite (`bundled`, FTS5), notify, directories, souvlaki, tracing, thiserror, clap (derive, binaries' arguments), cxx-qt / cxx-qt-build / cxx-qt-lib (pinned exact versions).
 
 ## Portability
 

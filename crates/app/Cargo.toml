@@ -15,6 +15,7 @@ path = "src/main.rs"
 lune-core.workspace = true
 lune-engine.workspace = true
 anyhow.workspace = true
+clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 cxx.workspace = true
