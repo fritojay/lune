@@ -21,7 +21,7 @@ mod test_util;
 mod watch;
 mod window_state;
 
-pub use browse::{Catalog, Filter, FilterValue, Grouping, Sort, SortColumn, View};
+pub use browse::{Catalog, Field, Filter, FilterValue, Grouping, Sort, SortColumn, View};
 pub use error::{CoreError, Result};
 pub use library::Library;
 pub use paths::{default_config_path, default_db_path, default_thumbnail_dir, window_state_path};

@@ -36,42 +36,41 @@ fn missing_values_get_placeholders() {
 }
 
 #[test]
-fn filter_labels_depend_on_the_value() {
-    let filter = |value, label: &str| Filter {
+fn filter_labels_depend_on_the_field() {
+    let filter = |value, field, label: &str| Filter {
         value,
+        field,
         label: label.to_owned(),
         detail: None,
         tracks: 1,
     };
-    assert_eq!(filter_label(&filter(FilterValue::All, "")), "All");
+    let text = || FilterValue::Text("x".into());
     assert_eq!(
-        filter_label(&filter(FilterValue::Artist(String::new()), "")),
+        filter_label(&filter(FilterValue::All, Field::Genre, "")),
+        "All"
+    );
+    assert_eq!(
+        filter_label(&filter(text(), Field::Artist, "")),
         "Unknown Artist"
     );
+    assert_eq!(filter_label(&filter(text(), Field::AlbumArtist, "X")), "X");
     assert_eq!(
-        filter_label(&filter(FilterValue::AlbumArtist("x".into()), "X")),
-        "X"
-    );
-    assert_eq!(
-        filter_label(&filter(FilterValue::Album(1), "")),
+        filter_label(&filter(FilterValue::Album(1), Field::Album, "")),
         "Unknown Album"
     );
     assert_eq!(
-        filter_label(&filter(FilterValue::Year(None), "")),
+        filter_label(&filter(FilterValue::UnknownYear, Field::Year, "")),
         "Unknown"
     );
     assert_eq!(
-        filter_label(&filter(FilterValue::Year(Some(2001)), "")),
+        filter_label(&filter(FilterValue::Year(2001), Field::Year, "2001")),
         "2001"
     );
     assert_eq!(
-        filter_label(&filter(FilterValue::Genre(String::new()), "")),
+        filter_label(&filter(text(), Field::Genre, "")),
         "Unknown Genre"
     );
-    assert_eq!(
-        filter_label(&filter(FilterValue::Genre("jazz".into()), "Jazz")),
-        "Jazz"
-    );
+    assert_eq!(filter_label(&filter(text(), Field::Genre, "Jazz")), "Jazz");
 }
 
 #[test]

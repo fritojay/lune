@@ -13,7 +13,7 @@ fn custom() -> WindowState {
         hidden_columns: [SortColumn::FileType, SortColumn::BitRate].into(),
         browse: BrowseState {
             grouping: Grouping::Artist,
-            selected: FilterValue::Artist("radiohead".into()),
+            selected: FilterValue::Text("radiohead".into()),
             sort: Some(Sort {
                 column: SortColumn::Duration,
                 descending: true,
@@ -181,15 +181,12 @@ fn a_malformed_file_is_reported_as_window_state_not_settings() {
 fn every_kind_of_selected_filter_survives_a_save_and_load() {
     for selected in [
         FilterValue::All,
-        FilterValue::AlbumArtist("the beatles".into()),
-        FilterValue::Artist("björk".into()),
-        FilterValue::Artist(String::new()),
+        FilterValue::Text("björk".into()),
+        FilterValue::Text(String::new()),
         FilterValue::Album(42),
         FilterValue::Album(-1),
-        FilterValue::Year(Some(1997)),
-        FilterValue::Year(None),
-        FilterValue::Genre("trip hop".into()),
-        FilterValue::Genre(String::new()),
+        FilterValue::Year(1997),
+        FilterValue::UnknownYear,
     ] {
         let state = browsing(selected.clone());
         assert_eq!(round_trip(&state), state, "{selected:?}");
@@ -218,6 +215,33 @@ fn every_grouping_and_sort_survives_a_save_and_load() {
 }
 
 #[test]
+fn selections_saved_with_a_variant_per_field_are_read() {
+    let dir = TempDir::new();
+    for (saved, selected) in [
+        (
+            "{ album_artist = \"pj harvey\" }",
+            FilterValue::Text("pj harvey".into()),
+        ),
+        ("{ artist = \"björk\" }", FilterValue::Text("björk".into())),
+        ("{ genre = \"\" }", FilterValue::Text(String::new())),
+        ("{ album = 42 }", FilterValue::Album(42)),
+        ("{ year = 1997 }", FilterValue::Year(1997)),
+        ("\"unknown_year\"", FilterValue::UnknownYear),
+        ("\"all\"", FilterValue::All),
+    ] {
+        let path = dir.write(
+            "window.toml",
+            format!("[browse]\nselected = {saved}\n").as_bytes(),
+        );
+        assert_eq!(
+            WindowState::load(&path).unwrap().browse.selected,
+            selected,
+            "{saved}"
+        );
+    }
+}
+
+#[test]
 fn a_hand_written_browse_section_is_read() {
     let dir = TempDir::new();
     let path = dir.write(
@@ -228,7 +252,7 @@ fn a_hand_written_browse_section_is_read() {
         WindowState::load(&path).unwrap().browse,
         BrowseState {
             grouping: Grouping::AlbumArtist,
-            selected: FilterValue::AlbumArtist("pj harvey".into()),
+            selected: FilterValue::Text("pj harvey".into()),
             sort: Some(Sort {
                 column: SortColumn::Title,
                 descending: false,

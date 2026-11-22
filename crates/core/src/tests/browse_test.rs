@@ -83,10 +83,7 @@ fn album_artist_filters_list_each_album_artist_once_in_key_order() {
         labels(&filters),
         [("", 8), ("Portishead", 2), ("Radiohead", 3), ("Various", 3)]
     );
-    assert_eq!(
-        filters[2].value,
-        FilterValue::AlbumArtist("radiohead".to_owned())
-    );
+    assert_eq!(filters[2].value, FilterValue::Text("radiohead".to_owned()));
 }
 
 #[test]
@@ -94,7 +91,7 @@ fn selecting_an_album_artist_lists_all_their_albums_grouped_in_album_order() {
     let catalog = library();
     let view = catalog.view(
         Grouping::AlbumArtist,
-        &FilterValue::AlbumArtist("radiohead".to_owned()),
+        &FilterValue::Text("radiohead".to_owned()),
         None,
     );
     assert_eq!(ids(&catalog, &view), [3, 4, 5]);
@@ -118,7 +115,7 @@ fn artist_filters_use_the_track_artist_and_merge_case_variants() {
     );
     let view = catalog.view(
         Grouping::Artist,
-        &FilterValue::Artist("portishead".to_owned()),
+        &FilterValue::Text("portishead".to_owned()),
         None,
     );
     // A track on someone else's album is grouped under that album.
@@ -141,11 +138,11 @@ fn genre_filters_use_the_track_genre_and_merge_case_variants() {
         labels(&filters),
         [("", 5), ("", 1), ("Rock", 2), ("Trip Hop", 2)]
     );
-    assert_eq!(filters[1].value, FilterValue::Genre(String::new()));
+    assert_eq!(filters[1].value, FilterValue::Text(String::new()));
 
     let view = catalog.view(
         Grouping::Genre,
-        &FilterValue::Genre("trip hop".to_owned()),
+        &FilterValue::Text("trip hop".to_owned()),
         None,
     );
     // Only the matching tracks of each album are selected.
@@ -186,10 +183,10 @@ fn year_filters_ascend_with_unknown_last() {
         values,
         [
             FilterValue::All,
-            FilterValue::Year(Some(1994)),
-            FilterValue::Year(Some(1997)),
-            FilterValue::Year(Some(2000)),
-            FilterValue::Year(None),
+            FilterValue::Year(1994),
+            FilterValue::Year(1997),
+            FilterValue::Year(2000),
+            FilterValue::UnknownYear,
         ]
     );
 }
@@ -208,9 +205,9 @@ fn the_year_view_orders_albums_by_max_year_and_keeps_album_track_order() {
     assert_eq!(ids(&catalog, &view), [3, 5, 1, 2, 4]);
     assert_eq!(view.albums, [0..1, 1..2, 2..4, 4..5]);
 
-    let view = catalog.view(Grouping::Year, &FilterValue::Year(Some(1990)), None);
+    let view = catalog.view(Grouping::Year, &FilterValue::Year(1990), None);
     assert_eq!(ids(&catalog, &view), [3, 5]);
-    let view = catalog.view(Grouping::Year, &FilterValue::Year(None), None);
+    let view = catalog.view(Grouping::Year, &FilterValue::UnknownYear, None);
     assert_eq!(ids(&catalog, &view), [4]);
 }
 
@@ -375,7 +372,7 @@ fn a_value_that_no_longer_exists_selects_nothing() {
     let catalog = library();
     let view = catalog.view(
         Grouping::AlbumArtist,
-        &FilterValue::AlbumArtist("gone".to_owned()),
+        &FilterValue::Text("gone".to_owned()),
         None,
     );
     assert!(view.is_empty());
@@ -614,7 +611,7 @@ fn an_album_is_multi_disc_when_any_track_is_past_the_first_disc() {
 fn sorting_keeps_only_the_filtered_and_searched_tracks() {
     let catalog = library();
     let matches = HashSet::from([4, 5, 6]);
-    let radiohead = FilterValue::AlbumArtist(normalize::key("Radiohead"));
+    let radiohead = FilterValue::Text(normalize::key("Radiohead"));
     let view = catalog.view(Grouping::AlbumArtist, &radiohead, Some(&matches));
     let view = catalog.sorted(view, sort(SortColumn::TrackNumber, true));
     assert_eq!(ids(&catalog, &view), [5, 4]);
@@ -704,4 +701,23 @@ fn an_unknown_grouping_name_is_no_grouping() {
     assert_eq!(Grouping::from_name("AlbumArtist"), None);
     assert_eq!(Grouping::from_name("album"), Some(Grouping::Album));
     assert_eq!(Grouping::from_name("albums"), None);
+}
+
+#[test]
+fn every_filters_count_is_the_size_of_its_view() {
+    let catalog = Catalog::new(vec![
+        with_genre(added(track(1, "A", 10, "One", Some(1999)), 5), Some("Rock")),
+        played(with_artist(track(2, "A", 10, "One", Some(1999)), None), 7),
+        with_genre(added(track(3, "B", 20, "Two", None), 6), None),
+        track(4, "B", 30, "Three", Some(2005)),
+    ]);
+    let matches = HashSet::from([1, 3, 4]);
+    for grouping in Grouping::ALL {
+        for matches in [None, Some(&matches)] {
+            for filter in catalog.filters(grouping, matches) {
+                let view = catalog.view(grouping, &filter.value, matches);
+                assert_eq!(view.len(), filter.tracks, "{grouping:?} {:?}", filter.value);
+            }
+        }
+    }
 }

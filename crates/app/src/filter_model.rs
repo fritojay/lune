@@ -349,7 +349,10 @@ impl qobject::FilterModel {
         };
         let (value, title) = match self.filter(self.current_row) {
             Some(filter) => (filter.value.clone(), format::filter_label(filter)),
-            None => (FilterValue::All, format::filter_label(&all())),
+            None => (
+                FilterValue::All,
+                format::filter_label(&all(self.grouping_kind())),
+            ),
         };
         let mut view = catalog.view(self.grouping_kind(), &value, self.matches.as_ref());
         if let Some(sort) = self.sort() {
@@ -379,9 +382,10 @@ impl qobject::FilterModel {
     }
 }
 
-fn all() -> Filter {
+fn all(grouping: Grouping) -> Filter {
     Filter {
         value: FilterValue::All,
+        field: grouping.field(),
         label: String::new(),
         detail: None,
         tracks: 0,

@@ -1,7 +1,7 @@
 //! Display strings for tag values. Tag text is shown as is; only missing
 //! values get a placeholder.
 
-use lune_core::{Filter, FilterValue};
+use lune_core::{Field, Filter, FilterValue};
 
 pub fn duration(ms: u64) -> String {
     let secs = ms / 1000;
@@ -52,12 +52,14 @@ pub fn bit_rate(kbps: Option<u32>) -> String {
 }
 
 pub fn filter_label(filter: &Filter) -> String {
-    match &filter.value {
-        FilterValue::All => "All".to_owned(),
-        FilterValue::AlbumArtist(_) | FilterValue::Artist(_) => artist(&filter.label),
-        FilterValue::Album(_) => album(&filter.label),
-        FilterValue::Year(y) => year(*y),
-        FilterValue::Genre(_) => genre(&filter.label),
+    if filter.value == FilterValue::All {
+        return "All".to_owned();
+    }
+    match filter.field {
+        Field::AlbumArtist | Field::Artist => artist(&filter.label),
+        Field::Album => album(&filter.label),
+        Field::Year => or(&filter.label, "Unknown"),
+        Field::Genre => genre(&filter.label),
     }
 }
 

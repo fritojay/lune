@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{CoreError, FilterValue, Grouping, Result, Sort, SortColumn};
 
@@ -38,10 +38,6 @@ pub struct WindowState {
 #[serde(default)]
 pub struct BrowseState {
     pub grouping: Grouping,
-    #[serde(
-        serialize_with = "serialize_filter",
-        deserialize_with = "deserialize_filter"
-    )]
     pub selected: FilterValue,
     pub sort: Option<Sort>,
 }
@@ -160,50 +156,6 @@ fn columns_or_default<'de, D: Deserializer<'de>>(
                 .ok()
         })
         .collect())
-}
-
-/// [`FilterValue`] as written to the file. TOML has no null, so an unknown
-/// year is its own variant.
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum SavedFilter {
-    All,
-    AlbumArtist(String),
-    Artist(String),
-    Album(i64),
-    Year(i32),
-    UnknownYear,
-    Genre(String),
-}
-
-fn serialize_filter<S: Serializer>(
-    value: &FilterValue,
-    serializer: S,
-) -> std::result::Result<S::Ok, S::Error> {
-    match value.clone() {
-        FilterValue::All => SavedFilter::All,
-        FilterValue::AlbumArtist(key) => SavedFilter::AlbumArtist(key),
-        FilterValue::Artist(key) => SavedFilter::Artist(key),
-        FilterValue::Album(id) => SavedFilter::Album(id),
-        FilterValue::Year(Some(year)) => SavedFilter::Year(year),
-        FilterValue::Year(None) => SavedFilter::UnknownYear,
-        FilterValue::Genre(key) => SavedFilter::Genre(key),
-    }
-    .serialize(serializer)
-}
-
-fn deserialize_filter<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> std::result::Result<FilterValue, D::Error> {
-    Ok(match SavedFilter::deserialize(deserializer)? {
-        SavedFilter::All => FilterValue::All,
-        SavedFilter::AlbumArtist(key) => FilterValue::AlbumArtist(key),
-        SavedFilter::Artist(key) => FilterValue::Artist(key),
-        SavedFilter::Album(id) => FilterValue::Album(id),
-        SavedFilter::Year(year) => FilterValue::Year(Some(year)),
-        SavedFilter::UnknownYear => FilterValue::Year(None),
-        SavedFilter::Genre(key) => FilterValue::Genre(key),
-    })
 }
 
 #[cfg(test)]

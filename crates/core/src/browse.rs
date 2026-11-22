@@ -52,30 +52,126 @@ impl Grouping {
     pub fn from_name(name: &str) -> Option<Self> {
         from_serde_name(name)
     }
+
+    pub fn field(self) -> Field {
+        self.def().1
+    }
+
+    /// The order its values are listed in, and what they are.
+    fn def(self) -> (Order, Field) {
+        match self {
+            Self::AlbumArtist => (Order::Catalog, Field::AlbumArtist),
+            Self::Artist => (Order::Catalog, Field::Artist),
+            Self::Album => (Order::Catalog, Field::Album),
+            Self::Year => (Order::Year, Field::Year),
+            Self::Genre => (Order::Catalog, Field::Genre),
+            Self::RecentlyAdded => (Order::Added, Field::Album),
+            Self::RecentlyPlayed => (Order::Played, Field::Album),
+        }
+    }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+/// What a grouping's values are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    AlbumArtist,
+    /// The track artist.
+    Artist,
+    Album,
+    /// The album's max year.
+    Year,
+    /// The track genre.
+    Genre,
+}
+
+impl Field {
+    fn key<'a>(self, catalog: &'a Catalog, i: usize) -> Key<'a> {
+        let track = &catalog.tracks[i];
+        match self {
+            Self::AlbumArtist => Key::Text(&track.album_artist_key),
+            Self::Artist => Key::Text(&catalog.artist_keys[i]),
+            Self::Album => Key::Album(track.album_id),
+            Self::Year => Key::Year(track.album_year),
+            Self::Genre => Key::Text(&catalog.genre_keys[i]),
+        }
+    }
+
+    fn label(self, track: &ListTrack) -> String {
+        match self {
+            Self::AlbumArtist => track.album_artist.clone(),
+            Self::Artist => track.artist.clone().unwrap_or_default(),
+            Self::Album => track.album.clone(),
+            Self::Year => track.album_year.map(|y| y.to_string()).unwrap_or_default(),
+            Self::Genre => track.genre.clone().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Order {
+    Catalog,
+    Year,
+    Added,
+    Played,
+}
+
+/// A value of a grouping; the grouping's [`Field`] says what it is.
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FilterValue {
     #[default]
     All,
-    /// An album artist key.
-    AlbumArtist(String),
-    /// A track artist key; tracks without an artist tag have the key "".
-    Artist(String),
-    /// An album; also the values of the recency groupings.
+    /// A tag key; tracks without the tag have the key "". The aliases read
+    /// window state saved when each field had its own variant.
+    #[serde(alias = "album_artist", alias = "artist", alias = "genre")]
+    Text(String),
     Album(i64),
-    /// An album max year; `None` = Unknown.
+    Year(i32),
+    /// TOML has no null, so this isn't `Year(None)`. After `Year` so it
+    /// sorts last.
+    UnknownYear,
+}
+
+impl FilterValue {
+    /// `None` for `All`.
+    fn key(&self) -> Option<Key<'_>> {
+        match self {
+            Self::All => None,
+            Self::Text(text) => Some(Key::Text(text)),
+            Self::Album(id) => Some(Key::Album(*id)),
+            Self::Year(year) => Some(Key::Year(Some(*year))),
+            Self::UnknownYear => Some(Key::Year(None)),
+        }
+    }
+}
+
+/// A [`FilterValue`] borrowed from the catalog, so matching tracks against
+/// one doesn't allocate per track.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Key<'a> {
+    Text(&'a str),
+    Album(i64),
     Year(Option<i32>),
-    /// A track genre key; tracks without a genre tag have the key "".
-    Genre(String),
+}
+
+impl Key<'_> {
+    fn to_value(self) -> FilterValue {
+        match self {
+            Self::Text(text) => FilterValue::Text(text.to_owned()),
+            Self::Album(id) => FilterValue::Album(id),
+            Self::Year(Some(year)) => FilterValue::Year(year),
+            Self::Year(None) => FilterValue::UnknownYear,
+        }
+    }
 }
 
 /// One entry of the filter pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filter {
     pub value: FilterValue,
-    /// The display string from the tags. Empty when the tag is missing (an
-    /// unknown artist or genre); unused for `All` and `Year`.
+    pub field: Field,
+    /// The display string from the tags. Empty when the tag is missing and
+    /// for `All`.
     pub label: String,
     /// For albums, the album artist.
     pub detail: Option<String>,
@@ -293,43 +389,42 @@ impl Catalog {
     /// The filter pane for `grouping`: `All` first, then every value that has
     /// tracks. With `matches` (search results), only tracks in it count.
     pub fn filters(&self, grouping: Grouping, matches: Option<&HashSet<i64>>) -> Vec<Filter> {
+        let field = grouping.field();
         let mut all = 0;
-        let mut values: HashMap<FilterValue, (SortKey, Filter)> = HashMap::new();
+        // Each value with the position of its first track.
+        let mut values: HashMap<Key<'_>, (usize, Filter)> = HashMap::new();
         for (position, i) in self.order(grouping).enumerate() {
             let track = &self.tracks[i];
             if matches.is_some_and(|m| !m.contains(&track.id)) {
                 continue;
             }
             all += 1;
-            let (key, value) = self.value_of(grouping, position, i);
             values
-                .entry(value)
-                .or_insert_with_key(|value| {
+                .entry(field.key(self, i))
+                .or_insert_with_key(|key| {
                     let filter = Filter {
-                        value: value.clone(),
-                        label: match grouping {
-                            Grouping::AlbumArtist => track.album_artist.clone(),
-                            Grouping::Artist => track.artist.clone().unwrap_or_default(),
-                            Grouping::Album
-                            | Grouping::RecentlyAdded
-                            | Grouping::RecentlyPlayed => track.album.clone(),
-                            Grouping::Genre => track.genre.clone().unwrap_or_default(),
-                            Grouping::Year => String::new(),
-                        },
-                        detail: matches!(value, FilterValue::Album(_))
-                            .then(|| track.album_artist.clone()),
+                        value: key.to_value(),
+                        field,
+                        label: field.label(track),
+                        detail: (field == Field::Album).then(|| track.album_artist.clone()),
                         tracks: 0,
                     };
-                    (key, filter)
+                    (position, filter)
                 })
                 .1
                 .tracks += 1;
         }
-        let mut values: Vec<(SortKey, Filter)> = values.into_values().collect();
-        values.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let mut values: Vec<(usize, Filter)> = values.into_values().collect();
+        // Albums keep the grouping's order; other values sort by themselves.
+        if field == Field::Album {
+            values.sort_unstable_by_key(|(position, _)| *position);
+        } else {
+            values.sort_unstable_by(|a, b| a.1.value.cmp(&b.1.value));
+        }
         let mut filters = Vec::with_capacity(values.len() + 1);
         filters.push(Filter {
             value: FilterValue::All,
+            field,
             label: String::new(),
             detail: None,
             tracks: all,
@@ -346,21 +441,15 @@ impl Catalog {
         value: &FilterValue,
         matches: Option<&HashSet<i64>>,
     ) -> View {
+        let field = grouping.field();
+        let wanted = value.key();
         let mut view = View::default();
         for i in self.order(grouping) {
             let track = &self.tracks[i];
             if matches.is_some_and(|m| !m.contains(&track.id)) {
                 continue;
             }
-            let selected = match value {
-                FilterValue::All => true,
-                FilterValue::AlbumArtist(key) => track.album_artist_key == *key,
-                FilterValue::Artist(key) => self.artist_keys[i] == *key,
-                FilterValue::Album(id) => track.album_id == *id,
-                FilterValue::Year(year) => track.album_year == *year,
-                FilterValue::Genre(key) => self.genre_keys[i] == *key,
-            };
-            if !selected {
+            if wanted.is_some_and(|wanted| field.key(self, i) != wanted) {
                 continue;
             }
             let at = view.tracks.len();
@@ -387,52 +476,13 @@ impl Catalog {
     }
 
     fn order(&self, grouping: Grouping) -> Box<dyn Iterator<Item = usize> + '_> {
-        match grouping {
-            Grouping::Year => Box::new(self.by_year.iter().copied()),
-            Grouping::RecentlyAdded => Box::new(self.by_added.iter().copied()),
-            Grouping::RecentlyPlayed => Box::new(self.by_played.iter().copied()),
-            Grouping::AlbumArtist | Grouping::Artist | Grouping::Album | Grouping::Genre => {
-                Box::new(0..self.tracks.len())
-            }
+        match grouping.def().0 {
+            Order::Catalog => Box::new(0..self.tracks.len()),
+            Order::Year => Box::new(self.by_year.iter().copied()),
+            Order::Added => Box::new(self.by_added.iter().copied()),
+            Order::Played => Box::new(self.by_played.iter().copied()),
         }
     }
-
-    /// The value track `i`, at `position` in `grouping`'s order, has in
-    /// `grouping`, and where that value sorts.
-    fn value_of(&self, grouping: Grouping, position: usize, i: usize) -> (SortKey, FilterValue) {
-        let track = &self.tracks[i];
-        match grouping {
-            Grouping::AlbumArtist => (
-                SortKey::Text(track.album_artist_key.clone()),
-                FilterValue::AlbumArtist(track.album_artist_key.clone()),
-            ),
-            Grouping::Artist => (
-                SortKey::Text(self.artist_keys[i].clone()),
-                FilterValue::Artist(self.artist_keys[i].clone()),
-            ),
-            // Only the first track of each album is kept as the key, and it
-            // is visited first, so albums keep the grouping's order.
-            Grouping::Album | Grouping::RecentlyAdded | Grouping::RecentlyPlayed => (
-                SortKey::Position(position),
-                FilterValue::Album(track.album_id),
-            ),
-            Grouping::Year => (
-                SortKey::Year(track.album_year.is_none(), track.album_year),
-                FilterValue::Year(track.album_year),
-            ),
-            Grouping::Genre => (
-                SortKey::Text(self.genre_keys[i].clone()),
-                FilterValue::Genre(self.genre_keys[i].clone()),
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum SortKey {
-    Text(String),
-    Position(usize),
-    Year(bool, Option<i32>),
 }
 
 /// Indices of the tracks of albums with a `date`, newest album first. An
