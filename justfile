@@ -28,11 +28,6 @@ fmt:
 bundle-mac:
     packaging/macos/build-app.sh
 
-# Build dist/Lune and the portable .zip (on x64 Windows, in PowerShell)
-[windows]
-bundle-windows:
-    pwsh -NoProfile -File packaging/windows/build-zip.ps1
-
 # Set the release version (e.g. `just bump-version 0.1.2`), then commit and tag it
 bump-version version:
     packaging/bump-version.py {{version}}

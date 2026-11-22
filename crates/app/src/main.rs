@@ -1,7 +1,3 @@
-// No console window behind the app in release builds on Windows; they log to
-// a file instead (`logging::HAS_CONSOLE`). Debug builds keep the console for the log.
-#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
-
 mod album_model;
 mod bench;
 mod covers;
@@ -11,7 +7,6 @@ mod format;
 mod library_manager;
 mod library_service;
 mod list_model;
-mod logging;
 mod media_controls;
 mod missing_model;
 mod player;
@@ -97,23 +92,11 @@ fn config_from(args: Args, started: Instant) -> anyhow::Result<Config> {
 
 fn main() -> anyhow::Result<()> {
     let started = Instant::now();
-    logging::init();
-    run(started).inspect_err(|err| {
-        // With a console, returning the error prints it.
-        if !logging::HAS_CONSOLE {
-            tracing::error!("{err:#}");
-        }
-    })
-}
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
-fn run(started: Instant) -> anyhow::Result<()> {
-    let args = match Args::try_parse() {
-        Ok(args) => args,
-        // Without a console, clap's message (even for `--help`) would go nowhere.
-        Err(err) if !logging::HAS_CONSOLE => bail!("{err}"),
-        Err(err) => err.exit(),
-    };
-    if CONFIG.set(config_from(args, started)?).is_err() {
+    if CONFIG.set(config_from(Args::parse(), started)?).is_err() {
         bail!("configuration was read before it was set");
     }
 

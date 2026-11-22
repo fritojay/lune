@@ -74,37 +74,6 @@ jobs:
           # 142 = killed by SIGALRM while still running, i.e. QML loaded and the event loop ran.
           test "$code" -eq 142 || { echo "lune exited early with code $code"; exit 1; }
 
-  windows:
-    name: Windows
-    runs-on: windows-latest
-    env:
-      QT_QPA_PLATFORM: offscreen
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
-        with:
-          version: ${{ env.QT_VERSION }}
-          arch: win64_msvc2022_64
-          aqtversion: "==3.3.0"
-          cache: true
-      - name: Point CXX-Qt at the pinned Qt
-        run: |
-          echo "QMAKE=$QT_ROOT_DIR/bin/qmake.exe" >> "$GITHUB_ENV"
-          "$QT_ROOT_DIR/bin/qmake.exe" -query QT_VERSION
-          test "$("$QT_ROOT_DIR/bin/qmake.exe" -query QT_VERSION)" = "$QT_VERSION"
-      - uses: ./.github/actions/check
-      - name: Smoke test (app launches headless)
-        run: |
-          set +e
-          # Qt's DLLs are found on PATH, which install-qt-action extended.
-          timeout 5 target/debug/lune.exe
-          code=$?
-          # 124 = still running when the timeout fired, i.e. QML loaded and the event loop ran.
-          test "$code" -eq 124 || { echo "lune exited early with code $code"; exit 1; }
-
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

@@ -45,10 +45,5 @@ fn main() -> std::io::Result<()> {
         ])
         .qt_module("Quick")
         .build();
-    println!("cargo::rerun-if-changed=../../packaging/windows/lune.rc");
-    println!("cargo::rerun-if-changed=../../packaging/windows/lune.ico");
-    embed_resource::compile("../../packaging/windows/lune.rc", embed_resource::NONE)
-        .manifest_required()
-        .map_err(std::io::Error::other)?;
     Ok(())
 }

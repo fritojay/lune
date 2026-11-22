@@ -146,9 +146,10 @@ pub fn url(art_id: Option<i64>) -> QVariant {
 /// `None` for a path that isn't valid UTF-8 (only possible in an unusual
 /// cache directory): the cover is then shown as missing.
 pub fn file_url(path: &Path) -> Option<QUrl> {
-    // Not a plain `file` scheme and path: a Windows path needs the leading
-    // `/` and forward slashes that `fromLocalFile` adds.
-    Some(QUrl::from_local_file(&QString::from(path.to_str()?)))
+    let mut url = QUrl::default();
+    url.set_scheme(&QString::from("file"));
+    url.set_path(&QString::from(path.to_str()?));
+    Some(url)
 }
 
 /// The app's cover cache, reading the library at the configured path.
