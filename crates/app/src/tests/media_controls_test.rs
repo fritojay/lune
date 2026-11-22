@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[cfg(not(windows))]
 fn transport_events_map_to_commands() {
     assert_eq!(
         command_for(MediaControlEvent::Play),
@@ -29,6 +30,7 @@ fn transport_events_map_to_commands() {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn seeks_become_signed_offsets_or_absolute_positions() {
     assert_eq!(
         command_for(MediaControlEvent::Seek(SeekDirection::Backward)),
@@ -50,6 +52,7 @@ fn seeks_become_signed_offsets_or_absolute_positions() {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn volume_is_clamped_and_nonsense_is_ignored() {
     assert_eq!(
         command_for(MediaControlEvent::SetVolume(1.7)),
@@ -63,6 +66,7 @@ fn volume_is_clamped_and_nonsense_is_ignored() {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn events_the_player_does_not_support_are_ignored() {
     assert_eq!(command_for(MediaControlEvent::Raise), None);
     assert_eq!(command_for(MediaControlEvent::Quit), None);

@@ -21,11 +21,16 @@ tracing-subscriber.workspace = true
 cxx.workspace = true
 cxx-qt.workspace = true
 cxx-qt-lib.workspace = true
-# Media keys and Now Playing; the default libdbus backend on Linux.
+
+# Media keys and Now Playing; the default libdbus backend on Linux. Not yet on
+# Windows (media_controls.rs).
+[target.'cfg(not(windows))'.dependencies]
 souvlaki = "0.9.3"
 
 [build-dependencies]
 cxx-qt-build.workspace = true
+# The Windows exe's icon (packaging/windows/lune.rc); a no-op elsewhere.
+embed-resource = "3.0.12"
 
 [lints]
 workspace = true

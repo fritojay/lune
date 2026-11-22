@@ -1,17 +1,23 @@
 //! Media keys and the OS "Now Playing" display (MPRIS on Linux, Now Playing
-//! on macOS), behind [`MediaControls`] so the player doesn't depend on the
-//! platform library.
+//! on macOS, none yet on Windows), behind [`MediaControls`] so the player
+//! doesn't depend on the platform library.
 
 use std::time::Duration;
 
+#[cfg(not(windows))]
 use souvlaki::{
     MediaControlEvent, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection,
 };
 
 /// How far a "seek" without an amount (a media key) moves.
+#[cfg(not(windows))]
 const SEEK_STEP: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    windows,
+    expect(dead_code, reason = "only souvlaki's events become commands")
+)]
 pub enum MediaCommand {
     Play,
     Pause,
@@ -48,8 +54,19 @@ pub trait MediaControls {
     fn set_volume(&mut self, volume: f64);
 }
 
+/// None yet on Windows: its controls belong to a window, and souvlaki panics
+/// without the window's HWND.
+#[cfg(windows)]
+pub fn system(
+    _on_command: impl Fn(MediaCommand) + Send + 'static,
+) -> Option<Box<dyn MediaControls>> {
+    tracing::info!("no media key or Now Playing support on Windows yet");
+    None
+}
+
 /// The OS media controls, or `None` where they can't be set up (e.g. no
 /// D-Bus session). `on_command` is called from a platform thread.
+#[cfg(not(windows))]
 pub fn system(
     on_command: impl Fn(MediaCommand) + Send + 'static,
 ) -> Option<Box<dyn MediaControls>> {
@@ -78,6 +95,7 @@ pub fn system(
 }
 
 /// What the player does for a platform event; `None` for events it ignores.
+#[cfg(not(windows))]
 pub fn command_for(event: MediaControlEvent) -> Option<MediaCommand> {
     let signed = |direction, amount: Duration| match direction {
         SeekDirection::Forward => amount.as_secs_f64(),
@@ -108,8 +126,10 @@ pub fn command_for(event: MediaControlEvent) -> Option<MediaCommand> {
     })
 }
 
+#[cfg(not(windows))]
 struct Souvlaki(souvlaki::MediaControls);
 
+#[cfg(not(windows))]
 impl MediaControls for Souvlaki {
     fn set_now_playing(&mut self, now: &NowPlaying) {
         let metadata = MediaMetadata {

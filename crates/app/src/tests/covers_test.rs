@@ -119,3 +119,12 @@ fn rows_by_cover_lists_the_rows_of_each_cover_and_skips_rows_without_one() {
 fn rows_by_cover_of_no_rows_is_empty() {
     assert!(rows_by_cover([]).is_empty());
 }
+
+#[test]
+fn a_cover_url_names_the_local_file() {
+    let path = std::env::temp_dir().join("thumbnails").join("a b#1.jpg");
+    let url = file_url(&path).unwrap();
+    assert_eq!(url.scheme().map(|s| s.to_string()).as_deref(), Some("file"));
+    let local = url.to_local_file().unwrap().to_string();
+    assert_eq!(PathBuf::from(local), path);
+}
