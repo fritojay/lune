@@ -133,6 +133,8 @@ fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
     conn.execute_batch(
         "ALTER TABLE tracks DROP COLUMN bitrate_kbps;
          ALTER TABLE tracks DROP COLUMN reader_version;
+         ALTER TABLE tracks DROP COLUMN genre;
+         ALTER TABLE albums DROP COLUMN genre;
          PRAGMA user_version = 7;",
     )
     .unwrap();
@@ -160,10 +162,50 @@ fn a_v8_database_rereads_every_file_once() {
         crate::scan::scan(conn, dir.path(), crate::ScanMode::Quick, &mut |_| {}).unwrap()
     };
     quick(&mut conn);
-    conn.execute_batch("ALTER TABLE tracks DROP COLUMN reader_version; PRAGMA user_version = 8;")
-        .unwrap();
+    conn.execute_batch(
+        "ALTER TABLE tracks DROP COLUMN reader_version;
+         ALTER TABLE tracks DROP COLUMN genre;
+         ALTER TABLE albums DROP COLUMN genre;
+         PRAGMA user_version = 8;",
+    )
+    .unwrap();
 
     migrate(&conn).unwrap();
     assert_eq!(quick(&mut conn).updated, 1);
+    assert_eq!(quick(&mut conn).updated, 0);
+}
+
+#[test]
+fn a_v9_database_rereads_every_file_once_to_fill_in_genres() {
+    let dir = crate::test_util::TempDir::new();
+    dir.touch("1.mp3");
+    let mut conn = open_in_memory().unwrap();
+    let quick = |conn: &mut Connection| {
+        let read = |_: &std::path::Path| {
+            let mut m = crate::test_util::meta("A", "Album", 1);
+            m.genre = Some("Jazz".to_owned());
+            Ok(m)
+        };
+        crate::scan::scan_using(conn, dir.path(), crate::ScanMode::Quick, read, &mut |_| {})
+            .unwrap()
+    };
+    let genres = |conn: &Connection| {
+        let track = crate::query::track_list(conn).unwrap().remove(0);
+        (track.genre, track.album_genre)
+    };
+    quick(&mut conn);
+    conn.execute_batch(
+        "ALTER TABLE tracks DROP COLUMN genre;
+         ALTER TABLE albums DROP COLUMN genre;
+         UPDATE tracks SET reader_version = 1;
+         PRAGMA user_version = 9;",
+    )
+    .unwrap();
+
+    migrate(&conn).unwrap();
+    assert_eq!(genres(&conn), (None, None));
+    assert_eq!(quick(&mut conn).updated, 1);
+    let jazz = Some("Jazz".to_owned());
+    assert_eq!(genres(&conn), (jazz.clone(), jazz));
     assert_eq!(quick(&mut conn).updated, 0);
 }

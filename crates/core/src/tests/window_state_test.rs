@@ -188,6 +188,8 @@ fn every_kind_of_selected_filter_survives_a_save_and_load() {
         FilterValue::Album(-1),
         FilterValue::Year(Some(1997)),
         FilterValue::Year(None),
+        FilterValue::Genre("trip hop".into()),
+        FilterValue::Genre(String::new()),
     ] {
         let state = browsing(selected.clone());
         assert_eq!(round_trip(&state), state, "{selected:?}");
@@ -239,8 +241,8 @@ fn a_hand_written_browse_section_is_read() {
 fn an_unreadable_browse_section_is_dropped_but_the_window_size_is_kept() {
     let dir = TempDir::new();
     for (name, browse) in [
-        ("unknown-grouping.toml", "grouping = \"genre\""),
-        ("unknown-filter.toml", "selected = { genre = \"jazz\" }"),
+        ("unknown-grouping.toml", "grouping = \"composer\""),
+        ("unknown-filter.toml", "selected = { composer = \"bach\" }"),
         (
             "unknown-column.toml",
             "sort = { column = \"bpm\", descending = true }",

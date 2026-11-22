@@ -39,6 +39,7 @@ pub struct TrackMeta {
     pub track_no: Option<u32>,
     pub disc_no: Option<u32>,
     pub year: Option<i32>,
+    pub genre: Option<String>,
     pub duration_ms: u64,
     /// Lowercase codec name, e.g. `mp3`, `flac`, `aac`, `alac`, `vorbis`.
     pub codec: String,
@@ -58,7 +59,7 @@ pub struct EmbeddedArt {
 
 /// Bump when [`read_track_meta`] returns new or different data: the next scan
 /// re-reads every track stored by an older version.
-pub(crate) const READER_VERSION: i64 = 1;
+pub(crate) const READER_VERSION: i64 = 2;
 
 pub fn read_track_meta(path: &Path) -> Result<TrackMeta> {
     let io_err = |source| CoreError::Io {
@@ -107,6 +108,7 @@ pub fn read_track_meta(path: &Path) -> Result<TrackMeta> {
             .and_then(Accessor::date)
             .map(|d| i32::from(d.year))
             .filter(|y| *y > 0),
+        genre: text(|t| t.genre().map(|s| s.into_owned())),
         duration_ms: u64::try_from(props.duration().as_millis()).unwrap_or(u64::MAX),
         codec: codec_name(tagged.file_type(), mp4_codec),
         sample_rate: props.sample_rate(),

@@ -16,7 +16,7 @@ pub(crate) const ALBUM_TRACK_ORDER: &str =
 
 /// What [`ListTrack::from_row`] reads, as `(expression, name)`. Queries
 /// alias `tracks` as `t` and `albums` as `a`.
-const LIST_TRACK_COLUMNS: [(&str, &str); 19] = [
+const LIST_TRACK_COLUMNS: [(&str, &str); 21] = [
     ("t.id", "id"),
     ("t.path", "path"),
     ("t.title", "title"),
@@ -28,6 +28,8 @@ const LIST_TRACK_COLUMNS: [(&str, &str); 19] = [
     ("a.album_artist_key", "album_artist_key"),
     ("a.art_id", "art_id"),
     ("a.year_max", "album_year"),
+    ("a.genre", "album_genre"),
+    ("t.genre", "genre"),
     ("t.disc_no", "disc_no"),
     ("t.track_no", "track_no"),
     ("t.duration_ms", "duration_ms"),
@@ -96,6 +98,9 @@ pub struct ListTrack {
     pub art_id: Option<i64>,
     /// The album's max year; `None` = Unknown.
     pub album_year: Option<i32>,
+    /// The first genre in album order.
+    pub album_genre: Option<String>,
+    pub genre: Option<String>,
     pub disc_no: Option<u32>,
     pub track_no: Option<u32>,
     pub duration_ms: u64,
@@ -155,6 +160,8 @@ impl ListTrack {
             album_artist_key: row.get(col!("album_artist_key"))?,
             art_id: row.get(col!("art_id"))?,
             album_year: row.get(col!("album_year"))?,
+            album_genre: row.get(col!("album_genre"))?,
+            genre: row.get(col!("genre"))?,
             disc_no: row.get(col!("disc_no"))?,
             track_no: row.get(col!("track_no"))?,
             duration_ms: get_u64(row, col!("duration_ms"))?,

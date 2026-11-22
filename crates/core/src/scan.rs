@@ -101,8 +101,8 @@ pub(crate) fn scan(
     scan_using(conn, root, mode, read_track_meta, progress)
 }
 
-/// [`scan`] with the tag reader as a parameter, so tests can inject failures.
-fn scan_using(
+/// [`scan`] with the tag reader as a parameter, so tests can inject tags or failures.
+pub(crate) fn scan_using(
     conn: &mut Connection,
     root: &Path,
     mode: ScanMode,
@@ -846,10 +846,10 @@ pub(crate) fn upsert_track(
     tx.prepare_cached(
         "INSERT INTO tracks (path, mtime_ns, size, title, artist, album_artist, album_id,
                              disc_no, track_no, year, duration_ms, codec, sample_rate, art_id,
-                             album, added_ns, bitrate_kbps, reader_version)
+                             album, added_ns, bitrate_kbps, reader_version, genre)
          VALUES (:path, :mtime_ns, :size, :title, :artist, :album_artist, :album_id,
                  :disc_no, :track_no, :year, :duration_ms, :codec, :sample_rate, :art_id,
-                 :album, :added_ns, :bitrate_kbps, :reader_version)
+                 :album, :added_ns, :bitrate_kbps, :reader_version, :genre)
          ON CONFLICT (path) DO UPDATE SET
              mtime_ns = excluded.mtime_ns, size = excluded.size, title = excluded.title,
              artist = excluded.artist, album_artist = excluded.album_artist,
@@ -858,7 +858,7 @@ pub(crate) fn upsert_track(
              duration_ms = excluded.duration_ms, codec = excluded.codec,
              sample_rate = excluded.sample_rate, art_id = excluded.art_id,
              album = excluded.album, bitrate_kbps = excluded.bitrate_kbps,
-             reader_version = excluded.reader_version,
+             reader_version = excluded.reader_version, genre = excluded.genre,
              added_ns = COALESCE(tracks.added_ns, excluded.added_ns),
              missing_ns = NULL",
     )?
@@ -881,6 +881,7 @@ pub(crate) fn upsert_track(
         ":added_ns": file.added_ns,
         ":bitrate_kbps": meta.bitrate_kbps,
         ":reader_version": READER_VERSION,
+        ":genre": meta.genre,
     })?;
     Ok(())
 }
@@ -912,7 +913,12 @@ pub(crate) fn refresh_albums(tx: &Transaction<'_>, touched: &Touched) -> Result<
                        WHERE t.album_id = albums.id AND t.art_id IS NOT NULL
                          AND t.missing_ns IS NULL
                        ORDER BY {ALBUM_TRACK_ORDER}
-                       LIMIT 1)
+                       LIMIT 1),
+             genre = (SELECT t.genre FROM tracks t
+                      WHERE t.album_id = albums.id AND t.genre IS NOT NULL
+                        AND t.missing_ns IS NULL
+                      ORDER BY {ALBUM_TRACK_ORDER}
+                      LIMIT 1)
          WHERE id = ?1"
     ))?;
     // Only rewrites when the strings differ, so `execute` returns 1 exactly

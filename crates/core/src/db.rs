@@ -134,6 +134,11 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE tracks ADD COLUMN reader_version INTEGER NOT NULL DEFAULT 0;
     "#,
+    // v10: genres. Reader version 2 reads them, so the next scan fills them in.
+    r#"
+    ALTER TABLE tracks ADD COLUMN genre TEXT;
+    ALTER TABLE albums ADD COLUMN genre TEXT;  -- the first genre in album order
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

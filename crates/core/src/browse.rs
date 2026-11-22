@@ -23,6 +23,7 @@ pub enum Grouping {
     Artist,
     Album,
     Year,
+    Genre,
     /// Albums by their latest added track, newest first, so an album that
     /// had singles out comes back to the top when the rest arrives.
     RecentlyAdded,
@@ -32,11 +33,12 @@ pub enum Grouping {
 
 impl Grouping {
     /// In declaration order, so `name` can index by discriminant.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::AlbumArtist,
         Self::Artist,
         Self::Album,
         Self::Year,
+        Self::Genre,
         Self::RecentlyAdded,
         Self::RecentlyPlayed,
     ];
@@ -64,6 +66,8 @@ pub enum FilterValue {
     Album(i64),
     /// An album max year; `None` = Unknown.
     Year(Option<i32>),
+    /// A track genre key; tracks without a genre tag have the key "".
+    Genre(String),
 }
 
 /// One entry of the filter pane.
@@ -71,7 +75,7 @@ pub enum FilterValue {
 pub struct Filter {
     pub value: FilterValue,
     /// The display string from the tags. Empty when the tag is missing (an
-    /// unknown artist); unused for `All` and `Year`.
+    /// unknown artist or genre); unused for `All` and `Year`.
     pub label: String,
     /// For albums, the album artist.
     pub detail: Option<String>,
@@ -196,6 +200,7 @@ pub struct Catalog {
     tracks: Vec<ListTrack>,
     artist_keys: Vec<String>,
     title_keys: Vec<String>,
+    genre_keys: Vec<String>,
     /// Albums with a track on a disc after the first.
     multi_disc: HashSet<i64>,
     /// Indices of `tracks` in year order: album year (Unknown last), then
@@ -218,6 +223,10 @@ impl Catalog {
             .map(|t| normalize::key(t.artist.as_deref().unwrap_or_default()))
             .collect();
         let title_keys = tracks.iter().map(|t| normalize::key(&t.title)).collect();
+        let genre_keys = tracks
+            .iter()
+            .map(|t| normalize::key(t.genre.as_deref().unwrap_or_default()))
+            .collect();
         let multi_disc = tracks
             .iter()
             .filter(|t| t.disc_no.is_some_and(|d| d > 1))
@@ -236,6 +245,7 @@ impl Catalog {
             tracks,
             artist_keys,
             title_keys,
+            genre_keys,
             multi_disc,
             by_year,
             by_added,
@@ -303,6 +313,7 @@ impl Catalog {
                             Grouping::Album
                             | Grouping::RecentlyAdded
                             | Grouping::RecentlyPlayed => track.album.clone(),
+                            Grouping::Genre => track.genre.clone().unwrap_or_default(),
                             Grouping::Year => String::new(),
                         },
                         detail: matches!(value, FilterValue::Album(_))
@@ -347,6 +358,7 @@ impl Catalog {
                 FilterValue::Artist(key) => self.artist_keys[i] == *key,
                 FilterValue::Album(id) => track.album_id == *id,
                 FilterValue::Year(year) => track.album_year == *year,
+                FilterValue::Genre(key) => self.genre_keys[i] == *key,
             };
             if !selected {
                 continue;
@@ -379,7 +391,7 @@ impl Catalog {
             Grouping::Year => Box::new(self.by_year.iter().copied()),
             Grouping::RecentlyAdded => Box::new(self.by_added.iter().copied()),
             Grouping::RecentlyPlayed => Box::new(self.by_played.iter().copied()),
-            Grouping::AlbumArtist | Grouping::Artist | Grouping::Album => {
+            Grouping::AlbumArtist | Grouping::Artist | Grouping::Album | Grouping::Genre => {
                 Box::new(0..self.tracks.len())
             }
         }
@@ -407,6 +419,10 @@ impl Catalog {
             Grouping::Year => (
                 SortKey::Year(track.album_year.is_none(), track.album_year),
                 FilterValue::Year(track.album_year),
+            ),
+            Grouping::Genre => (
+                SortKey::Text(self.genre_keys[i].clone()),
+                FilterValue::Genre(self.genre_keys[i].clone()),
             ),
         }
     }

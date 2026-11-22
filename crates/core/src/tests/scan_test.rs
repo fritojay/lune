@@ -39,6 +39,23 @@ fn with_year(mut m: TrackMeta, year: Option<i32>) -> TrackMeta {
     m
 }
 
+fn with_genre(mut m: TrackMeta, genre: &str) -> TrackMeta {
+    m.genre = Some(genre.to_owned());
+    m
+}
+
+fn album_genres(conn: &Connection) -> Vec<Option<String>> {
+    query::track_list(conn)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.album_genre)
+        .collect()
+}
+
+fn genres(names: &[&str]) -> Vec<Option<String>> {
+    names.iter().map(|&name| Some(name.to_owned())).collect()
+}
+
 fn with_disc(mut m: TrackMeta, disc: u32) -> TrackMeta {
     m.disc_no = Some(disc);
     m
@@ -210,6 +227,102 @@ fn album_year_is_the_max_and_never_reorders_tracks() {
 }
 
 #[test]
+fn album_genre_is_the_first_genre_in_album_order_and_tracks_keep_their_own() {
+    let dir = TempDir::new();
+    for rel in ["1.mp3", "2.mp3", "3.mp3"] {
+        dir.touch(rel);
+    }
+    let mut conn = db::open_in_memory().unwrap();
+    scan_tags(
+        &mut conn,
+        &dir,
+        &[
+            ("3.mp3", with_genre(meta("A", "Album", 3), "Rock")),
+            ("2.mp3", with_genre(meta("A", "Album", 2), "Jazz")),
+            ("1.mp3", meta("A", "Album", 1)),
+        ],
+    );
+    let list = query::track_list(&conn).unwrap();
+    let track_genres: Vec<_> = list.iter().map(|t| t.genre.as_deref()).collect();
+    assert_eq!(track_genres, [None, Some("Jazz"), Some("Rock")]);
+    assert_eq!(album_genres(&conn), genres(&["Jazz"; 3]));
+}
+
+#[test]
+fn a_missing_track_no_longer_gives_its_album_a_genre() {
+    let dir = TempDir::new();
+    dir.touch("1.mp3");
+    dir.touch("2.mp3");
+    let mut conn = db::open_in_memory().unwrap();
+    let m2 = with_genre(meta("A", "Album", 2), "Rock");
+    scan_tags(
+        &mut conn,
+        &dir,
+        &[
+            ("1.mp3", with_genre(meta("A", "Album", 1), "Jazz")),
+            ("2.mp3", m2.clone()),
+        ],
+    );
+    assert_eq!(album_genres(&conn), genres(&["Jazz"; 2]));
+
+    dir.remove("1.mp3");
+    scan_tags(&mut conn, &dir, &[("2.mp3", m2)]);
+    assert_eq!(album_genres(&conn), genres(&["Rock"]));
+}
+
+#[test]
+fn track_and_album_genres_follow_the_tags_on_rescan() {
+    let dir = TempDir::new();
+    dir.touch("1.mp3");
+    dir.touch("2.mp3");
+    let mut conn = db::open_in_memory().unwrap();
+    let m2 = with_genre(meta("A", "Album", 2), "Rock");
+    scan_tags(
+        &mut conn,
+        &dir,
+        &[
+            ("1.mp3", with_genre(meta("A", "Album", 1), "Jazz")),
+            ("2.mp3", m2.clone()),
+        ],
+    );
+
+    dir.write("1.mp3", b"retagged");
+    let report = scan_tags(
+        &mut conn,
+        &dir,
+        &[
+            ("1.mp3", with_genre(meta("A", "Album", 1), "Soul")),
+            ("2.mp3", m2.clone()),
+        ],
+    );
+    assert_eq!(report.updated, 1);
+    let track_genres: Vec<_> = query::track_list(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.genre)
+        .collect();
+    assert_eq!(track_genres, genres(&["Soul", "Rock"]));
+    assert_eq!(album_genres(&conn), genres(&["Soul"; 2]));
+
+    dir.write("1.mp3", b"genre removed");
+    scan_tags(
+        &mut conn,
+        &dir,
+        &[("1.mp3", meta("A", "Album", 1)), ("2.mp3", m2)],
+    );
+    assert_eq!(album_genres(&conn), genres(&["Rock"; 2]));
+}
+
+#[test]
+fn an_album_with_no_genres_has_none() {
+    let dir = TempDir::new();
+    dir.touch("1.mp3");
+    let mut conn = db::open_in_memory().unwrap();
+    scan_tags(&mut conn, &dir, &[("1.mp3", meta("A", "Album", 1))]);
+    assert_eq!(album_genres(&conn), [None]);
+}
+
+#[test]
 fn an_album_with_no_years_is_unknown() {
     let dir = TempDir::new();
     dir.touch("1.mp3");
@@ -313,6 +426,7 @@ fn every_tag_comes_back_in_its_own_field() {
         track_no: Some(3),
         disc_no: Some(2),
         year: Some(1987),
+        genre: Some("Genre".to_owned()),
         duration_ms: 234_567,
         codec: "flac".to_owned(),
         sample_rate: Some(48_000),
@@ -346,6 +460,8 @@ fn every_tag_comes_back_in_its_own_field() {
             album_artist_key: "album artist".to_owned(),
             art_id: track.art_id,
             album_year: Some(1987),
+            album_genre: Some("Genre".to_owned()),
+            genre: Some("Genre".to_owned()),
             disc_no: Some(2),
             track_no: Some(3),
             duration_ms: 234_567,

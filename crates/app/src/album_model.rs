@@ -112,6 +112,9 @@ const ROLES: &[Role] = &[
         text(&format::artist(&a.first.album_artist))
     }),
     ("year", |a| text(&format::year(a.first.album_year))),
+    ("genre", |a| {
+        text(a.first.album_genre.as_deref().unwrap_or_default())
+    }),
     ("duration", |a| text(&total_duration(&a.tracks()))),
     ("cover", |a| covers::url(shown_cover(a.view, a.first))),
     ("firstIndex", |a| {

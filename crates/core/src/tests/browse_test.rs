@@ -28,6 +28,11 @@ fn with_artist(mut t: ListTrack, artist: Option<&str>) -> ListTrack {
     t
 }
 
+fn with_genre(mut t: ListTrack, genre: Option<&str>) -> ListTrack {
+    t.genre = genre.map(str::to_owned);
+    t
+}
+
 fn library() -> Catalog {
     Catalog::new(vec![
         track(1, "Portishead", 10, "Dummy", Some(1994)),
@@ -119,6 +124,33 @@ fn artist_filters_use_the_track_artist_and_merge_case_variants() {
     // A track on someone else's album is grouped under that album.
     assert_eq!(ids(&catalog, &view), [1, 2, 7]);
     assert_eq!(view.albums, [0..2, 2..3]);
+}
+
+#[test]
+fn genre_filters_use_the_track_genre_and_merge_case_variants() {
+    let catalog = Catalog::new(vec![
+        with_genre(track(1, "Portishead", 10, "Dummy", None), Some("Trip Hop")),
+        with_genre(track(2, "Portishead", 10, "Dummy", None), Some("Rock")),
+        with_genre(track(3, "Radiohead", 20, "Kid A", None), Some("rock")),
+        with_genre(track(4, "Various", 30, "Mix", None), None),
+        with_genre(track(5, "Various", 30, "Mix", None), Some("Trip Hop")),
+    ]);
+    let filters = catalog.filters(Grouping::Genre, None);
+    // Track 4 has no genre tag: it is listed under an empty (unknown) label.
+    assert_eq!(
+        labels(&filters),
+        [("", 5), ("", 1), ("Rock", 2), ("Trip Hop", 2)]
+    );
+    assert_eq!(filters[1].value, FilterValue::Genre(String::new()));
+
+    let view = catalog.view(
+        Grouping::Genre,
+        &FilterValue::Genre("trip hop".to_owned()),
+        None,
+    );
+    // Only the matching tracks of each album are selected.
+    assert_eq!(ids(&catalog, &view), [1, 5]);
+    assert_eq!(view.albums, [0..1, 1..2]);
 }
 
 #[test]
@@ -641,8 +673,9 @@ fn grouping_count() -> usize {
         | Grouping::Artist
         | Grouping::Album
         | Grouping::Year
+        | Grouping::Genre
         | Grouping::RecentlyAdded
-        | Grouping::RecentlyPlayed => 6,
+        | Grouping::RecentlyPlayed => 7,
     }
 }
 

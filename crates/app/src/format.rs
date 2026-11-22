@@ -38,6 +38,10 @@ pub fn album(title: &str) -> String {
     or(title, "Unknown Album")
 }
 
+pub fn genre(name: &str) -> String {
+    or(name, "Unknown Genre")
+}
+
 pub fn file_type(codec: &str) -> String {
     codec.to_uppercase()
 }
@@ -53,6 +57,7 @@ pub fn filter_label(filter: &Filter) -> String {
         FilterValue::AlbumArtist(_) | FilterValue::Artist(_) => artist(&filter.label),
         FilterValue::Album(_) => album(&filter.label),
         FilterValue::Year(y) => year(*y),
+        FilterValue::Genre(_) => genre(&filter.label),
     }
 }
 

@@ -10,6 +10,7 @@ Item {
     required property string albumTitle
     required property string albumArtist
     required property string year
+    required property string genre
     required property string duration
     required property url cover
     required property int firstIndex
@@ -78,7 +79,8 @@ Item {
             }
             Text {
                 width: parent.width - album.gutter
-                text: album.albumArtist + " · " + album.year + (album.duration ? " · " + album.duration : "")
+                text: album.albumArtist + " · " + album.year + (album.genre ? " · " + album.genre : "")
+                      + (album.duration ? " · " + album.duration : "")
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: album.palette.text

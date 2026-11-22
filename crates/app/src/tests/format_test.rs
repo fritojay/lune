@@ -31,6 +31,8 @@ fn missing_values_get_placeholders() {
     assert_eq!(artist("  "), "Unknown Artist");
     assert_eq!(artist("Björk"), "Björk");
     assert_eq!(album(""), "Unknown Album");
+    assert_eq!(genre(" "), "Unknown Genre");
+    assert_eq!(genre("Jazz"), "Jazz");
 }
 
 #[test]
@@ -61,6 +63,14 @@ fn filter_labels_depend_on_the_value() {
     assert_eq!(
         filter_label(&filter(FilterValue::Year(Some(2001)), "")),
         "2001"
+    );
+    assert_eq!(
+        filter_label(&filter(FilterValue::Genre(String::new()), "")),
+        "Unknown Genre"
+    );
+    assert_eq!(
+        filter_label(&filter(FilterValue::Genre("jazz".into()), "Jazz")),
+        "Jazz"
     );
 }
 

@@ -173,6 +173,7 @@ enum SavedFilter {
     Album(i64),
     Year(i32),
     UnknownYear,
+    Genre(String),
 }
 
 fn serialize_filter<S: Serializer>(
@@ -186,6 +187,7 @@ fn serialize_filter<S: Serializer>(
         FilterValue::Album(id) => SavedFilter::Album(id),
         FilterValue::Year(Some(year)) => SavedFilter::Year(year),
         FilterValue::Year(None) => SavedFilter::UnknownYear,
+        FilterValue::Genre(key) => SavedFilter::Genre(key),
     }
     .serialize(serializer)
 }
@@ -200,6 +202,7 @@ fn deserialize_filter<'de, D: Deserializer<'de>>(
         SavedFilter::Album(id) => FilterValue::Album(id),
         SavedFilter::Year(year) => FilterValue::Year(Some(year)),
         SavedFilter::UnknownYear => FilterValue::Year(None),
+        SavedFilter::Genre(key) => FilterValue::Genre(key),
     })
 }
 
