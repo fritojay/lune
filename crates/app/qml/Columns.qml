@@ -8,12 +8,12 @@ import QtQuick
 QtObject {
     readonly property var all: [
         { id: "track_number", title: qsTr("#"), menuTitle: qsTr("Track Number"),
-          width: 32, alignRight: true, marksPlaying: true },
-        { id: "title", title: qsTr("Title"), fill: true, primary: true },
-        { id: "artist", title: qsTr("Artist"), width: 220, maxShare: 0.25, hideable: true },
-        { id: "file_type", title: qsTr("File Type"), width: 76, hideable: true },
-        { id: "bit_rate", title: qsTr("Bit Rate"), width: 72, alignRight: true, hideable: true },
-        { id: "duration", title: qsTr("Time"), width: 56, alignRight: true },
+          alignRight: true, marksPlaying: true },
+        { id: "title", title: qsTr("Title"), primary: true },
+        { id: "artist", title: qsTr("Artist"), hideable: true },
+        { id: "file_type", title: qsTr("File Type"), hideable: true },
+        { id: "bit_rate", title: qsTr("Bit Rate"), alignRight: true, hideable: true },
+        { id: "duration", title: qsTr("Time"), alignRight: true },
     ]
     readonly property var hideable: all.filter(column => column.hideable)
 
@@ -22,10 +22,5 @@ QtObject {
         return all.filter(column => !hidden.includes(column.id))
     }
 
-    // -1 leaves a filling column at its implicit width.
-    function width(column: var, available: real): real {
-        if (column.fill)
-            return -1
-        return column.maxShare ? Math.min(column.width, available * column.maxShare) : column.width
-    }
+    readonly property int spacing: 10
 }

@@ -35,7 +35,10 @@ fn main() -> std::io::Result<()> {
         .qrc_resources([
             "qml/icons/clear.svg",
             "qml/icons/missing.svg",
+            "qml/icons/next.svg",
+            "qml/icons/previous.svg",
             "qml/icons/queue.svg",
+            "qml/icons/shuffle.svg",
             "qml/icons/volume-high.svg",
             "qml/icons/volume-low.svg",
             "qml/icons/volume-muted.svg",

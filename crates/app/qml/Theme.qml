@@ -12,6 +12,14 @@ QtObject {
     // A tint of the text color rather than alternateBase, which the macOS style makes
     // near-white regardless of the text color, so stripes stay readable in light and dark mode.
     function stripeColor(palette: Palette): color {
-        return Qt.rgba(palette.text.r, palette.text.g, palette.text.b, 0.07)
+        return tint(palette, 0.05)
+    }
+
+    function hoverColor(palette: Palette): color {
+        return tint(palette, 0.1)
+    }
+
+    function tint(palette: Palette, alpha: real): color {
+        return Qt.rgba(palette.text.r, palette.text.g, palette.text.b, alpha)
     }
 }

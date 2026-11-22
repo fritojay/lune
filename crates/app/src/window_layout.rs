@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::pin::Pin;
 
 use cxx_qt::CxxQtType;
-use cxx_qt_lib::{QString, QStringList};
+use cxx_qt_lib::{QList, QString, QStringList};
 use lune_core::{SortColumn, WindowState};
 
 use crate::property::set;
@@ -23,6 +23,8 @@ pub mod qobject {
         type QString = cxx_qt_lib::QString;
         include!("cxx-qt-lib/qstringlist.h");
         type QStringList = cxx_qt_lib::QStringList;
+        include!("cxx-qt-lib/qlist.h");
+        type QList_f64 = cxx_qt_lib::QList<f64>;
     }
 
     extern "RustQt" {
@@ -65,6 +67,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setColumnShown"]
         fn set_column_shown(self: Pin<&mut WindowLayout>, column: &QString, shown: bool);
+
+        /// `hidden` is passed in, though it is `hiddenColumns`, so a QML binding
+        /// updates when it changes.
+        #[qinvokable]
+        #[cxx_name = "columnWidths"]
+        fn column_widths(self: &WindowLayout, available: f64, hidden: &QStringList) -> QList_f64;
     }
 }
 
@@ -162,11 +170,21 @@ impl qobject::WindowLayout {
     }
 
     fn hidden(&self) -> BTreeSet<SortColumn> {
-        self.hidden_columns
-            .iter()
-            .filter_map(|name| SortColumn::from_name(&name.to_string()))
+        columns_named(&self.hidden_columns)
+    }
+
+    fn column_widths(&self, available: f64, hidden: &QStringList) -> QList<f64> {
+        column_widths(available, &columns_named(hidden))
+            .into_iter()
             .collect()
     }
+}
+
+fn columns_named(names: &QStringList) -> BTreeSet<SortColumn> {
+    names
+        .iter()
+        .filter_map(|name| SortColumn::from_name(&name.to_string()))
+        .collect()
 }
 
 fn names(columns: &BTreeSet<SortColumn>) -> QStringList {
@@ -190,6 +208,121 @@ fn with_column_shown(
         hidden.insert(column)
     };
     changed.then_some(hidden)
+}
+
+struct ColumnSize {
+    column: SortColumn,
+    width: f64,
+    max_share: Option<f64>,
+    hideable: bool,
+}
+
+const COLUMN_SIZES: [ColumnSize; 6] = [
+    ColumnSize {
+        column: SortColumn::TrackNumber,
+        width: 32.0,
+        max_share: None,
+        hideable: false,
+    },
+    ColumnSize {
+        column: SortColumn::Title,
+        width: 120.0,
+        max_share: None,
+        hideable: false,
+    },
+    ColumnSize {
+        column: SortColumn::Artist,
+        width: 220.0,
+        max_share: Some(0.25),
+        hideable: true,
+    },
+    ColumnSize {
+        column: SortColumn::FileType,
+        width: 76.0,
+        max_share: None,
+        hideable: true,
+    },
+    ColumnSize {
+        column: SortColumn::BitRate,
+        width: 72.0,
+        max_share: None,
+        hideable: true,
+    },
+    ColumnSize {
+        column: SortColumn::Duration,
+        width: 56.0,
+        max_share: None,
+        hideable: false,
+    },
+];
+
+const COLUMN_SPACING: f64 = 10.0;
+
+const MIN_SHRUNK_WIDTH: f64 = 40.0;
+
+/// When the row is too narrow, hideable columns shrink, then drop out from the
+/// right; only then does the title, which takes what the others leave, shrink.
+fn column_widths(available: f64, hidden: &BTreeSet<SortColumn>) -> Vec<f64> {
+    let available = if available.is_finite() {
+        available.max(0.0)
+    } else {
+        0.0
+    };
+    let shown: Vec<&ColumnSize> = COLUMN_SIZES
+        .iter()
+        .filter(|size| !hidden.contains(&size.column))
+        .collect();
+    let natural = |size: &ColumnSize| {
+        size.max_share
+            .map_or(size.width, |share| size.width.min(available * share))
+    };
+    let mut kept = vec![true; shown.len()];
+    loop {
+        let gaps = COLUMN_SPACING * kept.iter().filter(|&&k| k).count().saturating_sub(1) as f64;
+        let (mut fixed, mut flexible) = (0.0, 0.0);
+        for (size, _) in shown.iter().zip(&kept).filter(|(_, k)| **k) {
+            if size.hideable {
+                flexible += natural(size);
+            } else {
+                fixed += natural(size);
+            }
+        }
+        let scale = if flexible > 0.0 {
+            ((available - fixed - gaps) / flexible).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let squeezed = shown
+            .iter()
+            .zip(&kept)
+            .any(|(size, k)| *k && size.hideable && natural(size) * scale < MIN_SHRUNK_WIDTH);
+        if squeezed
+            && let Some(last) = shown
+                .iter()
+                .zip(&kept)
+                .rposition(|(size, k)| *k && size.hideable)
+        {
+            kept[last] = false;
+            continue;
+        }
+        let mut widths: Vec<f64> = shown
+            .iter()
+            .zip(&kept)
+            .map(|(size, k)| match (k, size.hideable) {
+                (false, _) => 0.0,
+                (true, true) => (natural(size) * scale).floor(),
+                (true, false) => natural(size),
+            })
+            .collect();
+        if let Some(title) = shown
+            .iter()
+            .position(|size| size.column == SortColumn::Title)
+        {
+            let others: f64 = widths.iter().sum::<f64>() - widths[title];
+            widths[title] = (available - gaps - others).max(0.0).floor();
+        }
+        return widths;
+    }
 }
 
 /// QML sizes are reals. The cast saturates, and NaN becomes 0.

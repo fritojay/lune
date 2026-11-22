@@ -32,34 +32,20 @@ Pane {
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")
     }
 
-    // Sized by the symbol at 14 pt but drawn larger, so the symbol fills more of
-    // the button without the button growing.
     component TransportButton: ToolButton {
-        id: transportButton
-        font.pointSize: 14
-        contentItem: Item {
-            implicitWidth: sizer.implicitWidth
-            implicitHeight: sizer.implicitHeight
-            Text {
-                id: sizer
-                visible: false
-                text: transportButton.text
-                font: transportButton.font
-            }
-            Text {
-                anchors.centerIn: parent
-                text: transportButton.text
-                font.pointSize: 20
-                color: transportButton.palette.buttonText
-            }
-        }
+        icon.width: 20
+        icon.height: 20
+        icon.color: palette.buttonText
+        Keys.onReturnPressed: click()
+        Keys.onEnterPressed: click()
     }
 
-    padding: 8
+    padding: 10
+    topPadding: 8
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 0
+        spacing: 4
 
         Item {
             id: nowPlayingLine
@@ -141,18 +127,49 @@ Pane {
             RowLayout {
                 id: transport
                 anchors.centerIn: parent
-                spacing: 0
+                spacing: 6
                 TransportButton {
-                    text: "⏮"
+                    icon.source: "icons/previous.svg"
                     onClicked: nowPlayingBar.previous()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Previous")
                 }
-                TransportButton {
-                    text: nowPlayingBar.playing ? "⏸" : "▶"
+                // Not RoundButton: the macOS native style can't be restyled.
+                AbstractButton {
+                    id: playButton
+                    implicitWidth: 40
+                    implicitHeight: 40
+                    hoverEnabled: true
+                    enabled: nowPlayingBar.available
+                    contentItem: Item {
+                        PathIcon {
+                            anchors.centerIn: parent
+                            width: 20
+                            height: 20
+                            name: nowPlayingBar.playing ? "pause" : "play"
+                            color: playButton.palette.highlightedText
+                        }
+                    }
+                    background: Rectangle {
+                        radius: width / 2
+                        color: !playButton.enabled ? playButton.palette.mid
+                             : playButton.down ? Qt.darker(playButton.palette.highlight, 1.15)
+                             : playButton.hovered ? Qt.lighter(playButton.palette.highlight, 1.1)
+                             : playButton.palette.highlight
+                        border.width: playButton.visualFocus ? 2 : 0
+                        border.color: playButton.palette.highlightedText
+                    }
                     onClicked: nowPlayingBar.togglePause()
+                    Keys.onReturnPressed: click()
+                    Keys.onEnterPressed: click()
+                    ToolTip.visible: hovered
+                    ToolTip.text: nowPlayingBar.playing ? qsTr("Pause") : qsTr("Play")
                 }
                 TransportButton {
-                    text: "⏭"
+                    icon.source: "icons/next.svg"
                     onClicked: nowPlayingBar.next()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Next")
                 }
             }
 
@@ -187,8 +204,18 @@ Pane {
 
         RowLayout {
             Layout.fillWidth: true
+            spacing: 8
             Label {
+                Layout.preferredWidth: clockWidth.width
+                horizontalAlignment: Text.AlignRight
                 text: nowPlayingBar.clock(seekBar.pressed ? seekBar.value : nowPlayingBar.position)
+                font.features: { "tnum": 1 }
+                opacity: 0.7
+                TextMetrics {
+                    id: clockWidth
+                    font.features: { "tnum": 1 }
+                    text: nowPlayingBar.clock(Math.max(nowPlayingBar.duration, 600))
+                }
             }
             Slider {
                 id: seekBar
@@ -204,7 +231,10 @@ Pane {
                 onPressedChanged: if (!pressed) nowPlayingBar.seek(value)
             }
             Label {
+                Layout.preferredWidth: clockWidth.width
                 text: nowPlayingBar.clock(nowPlayingBar.duration)
+                font.features: { "tnum": 1 }
+                opacity: 0.7
             }
         }
     }

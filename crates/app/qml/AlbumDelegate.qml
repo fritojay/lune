@@ -21,6 +21,7 @@ Item {
     required property int selectedIndex
     required property real currentTrackId
     required property var hiddenColumns
+    required property var columnWidths
     required property real gutter
     required property int tracksLeft
     required property int tracksRight
@@ -101,32 +102,50 @@ Item {
                 width: tracks.width
                 height: Theme.rowHeight
                 color: selected ? album.palette.highlight
-                                : (album.sorted ? viewIndex : index) % 2 ? Theme.stripeColor(album.palette) : "transparent"
+                     : rowArea.containsMouse ? Theme.hoverColor(album.palette)
+                     : (album.sorted ? viewIndex : index) % 2 ? Theme.stripeColor(album.palette) : "transparent"
 
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6 + album.gutter
-                    spacing: 10
+                    spacing: Columns.spacing
                     Repeater {
                         model: Columns.shown(album.hiddenColumns)
                         Text {
+                            id: cell
                             required property var modelData
-                            Layout.fillWidth: modelData.fill ?? false
-                            Layout.preferredWidth: Columns.width(modelData, tracks.width)
+                            required property int index
+                            readonly property bool marker: (modelData.marksPlaying ?? false) && trackRow.nowPlaying
+                            readonly property real columnWidth: album.columnWidths[index] ?? 0
+                            visible: columnWidth > 0
+                            Layout.preferredWidth: columnWidth
                             horizontalAlignment: modelData.alignRight ? Text.AlignRight : Text.AlignLeft
-                            text: modelData.marksPlaying && trackRow.nowPlaying ? "▶" : trackRow.field(album.trackColumns[modelData.id])
+                            text: marker ? "" : trackRow.field(album.trackColumns[modelData.id])
                             textFormat: Text.PlainText
                             elide: Text.ElideRight
                             color: trackRow.textColor
-                            opacity: modelData.primary ? 1 : 0.7
+                            opacity: modelData.primary || trackRow.nowPlaying ? 1 : 0.7
                             font.bold: (modelData.primary ?? false) && trackRow.nowPlaying
+                            font.features: modelData.alignRight ? { "tnum": 1 } : {}
+
+                            Loader {
+                                active: cell.marker
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                sourceComponent: PathIcon {
+                                    name: "now-playing"
+                                    color: trackRow.selected ? album.palette.highlightedText : album.palette.highlight
+                                }
+                            }
                         }
                     }
                 }
 
                 MouseArea {
+                    id: rowArea
                     anchors.fill: parent
+                    hoverEnabled: true
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: mouse => {
                         album.trackClicked(trackRow.viewIndex)

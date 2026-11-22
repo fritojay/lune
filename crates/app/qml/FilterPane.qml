@@ -9,6 +9,7 @@ ColumnLayout {
     required property var model
     required property int currentRow
     required property url cover
+    required property bool hasTrack
     signal searchEdited(string text)
     signal rowChosen(int row)
 
@@ -78,7 +79,8 @@ ColumnLayout {
             required property int count
             width: ListView.view.width
             height: detail ? 40 : 28
-            color: ListView.isCurrentItem ? palette.highlight : "transparent"
+            color: ListView.isCurrentItem ? palette.highlight
+                 : rowArea.containsMouse ? Theme.hoverColor(palette) : "transparent"
             readonly property color textColor: ListView.isCurrentItem ? palette.highlightedText : palette.text
 
             ColumnLayout {
@@ -100,6 +102,7 @@ ColumnLayout {
                         text: filterRow.count
                         color: filterRow.textColor
                         opacity: 0.6
+                        font.features: { "tnum": 1 }
                     }
                 }
                 Text {
@@ -115,7 +118,9 @@ ColumnLayout {
             }
 
             MouseArea {
+                id: rowArea
                 anchors.fill: parent
+                hoverEnabled: true
                 onClicked: {
                     filterPane.rowChosen(filterRow.index)
                     filterList.forceActiveFocus()
@@ -127,6 +132,7 @@ ColumnLayout {
     // The playing track's cover, as large as the pane allows while leaving
     // the filter list at least half the height.
     CoverArt {
+        visible: filterPane.hasTrack
         readonly property real side: Math.min(parent.width - 12, parent.height / 2)
         Layout.preferredWidth: side
         Layout.preferredHeight: side

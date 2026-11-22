@@ -217,7 +217,8 @@ ApplicationWindow {
         // Quick filters: picks which grouping the filter pane lists.
         GroupingBar {
             Layout.fillWidth: true
-            Layout.margins: 6
+            Layout.leftMargin: 6
+            Layout.topMargin: 4
             grouping: filters.grouping
             onGroupingChosen: grouping => filters.setGrouping(grouping)
         }
@@ -252,6 +253,7 @@ ApplicationWindow {
                 model: filters
                 currentRow: filters.currentRow
                 cover: player.cover
+                hasTrack: player.hasTrack
                         onSearchEdited: text => filters.setSearch(text)
                 onRowChosen: row => filters.select(row)
             }
@@ -277,6 +279,7 @@ ApplicationWindow {
                     scanStatus: library.busy ? library.status : ""
                                 currentTrackId: player.currentTrackId
                     hiddenColumns: layout.hiddenColumns
+                    columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
                     onSortClicked: column => filters.sortBy(column)
                     onSortChosen: (column, descending) => filters.setSort(column, descending)
                     onColumnToggled: (column, shown) => layout.setColumnShown(column, shown)

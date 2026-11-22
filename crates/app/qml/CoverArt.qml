@@ -1,4 +1,5 @@
 import QtQuick
+import com.lune.player
 
 Rectangle {
     id: coverArt
@@ -6,7 +7,7 @@ Rectangle {
     property bool placeholder: true
     property bool decodeAtSize: true
 
-    color: palette.mid
+    color: Theme.tint(palette, 0.08)
 
     Image {
         id: image
@@ -18,11 +19,22 @@ Rectangle {
         sourceSize.height: coverArt.decodeAtSize ? height * Screen.devicePixelRatio : -1
     }
 
-    Text {
+    Loader {
         anchors.centerIn: parent
-        visible: coverArt.placeholder && image.status !== Image.Ready
-        text: "♪"
-        font.pointSize: 40
-        color: coverArt.palette.base
+        active: coverArt.placeholder && image.status !== Image.Ready
+        sourceComponent: PathIcon {
+            name: "note"
+            width: Math.round(coverArt.height / 3)
+            height: width
+            color: coverArt.palette.text
+            opacity: 0.25
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: "transparent"
+        border.width: 1
+        border.color: Theme.tint(coverArt.palette, 0.12)
     }
 }

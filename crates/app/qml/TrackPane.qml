@@ -18,6 +18,8 @@ ColumnLayout {
     required property string scanStatus
     required property real currentTrackId
     required property var hiddenColumns
+    required property var columnWidths
+    readonly property real rowWidth: headingCells.width
     // A column sort shows a flat track list instead of albums with covers.
     readonly property bool sorted: sortColumn !== ""
     readonly property int tracksLeft: sorted ? 0 : 2 * Theme.albumPadding + Theme.coverSize
@@ -46,11 +48,15 @@ ColumnLayout {
 
     component SortHeading: Label {
         id: sortHeading
+        property bool active
         signal clicked()
-        font.bold: true
-        opacity: 0.7
+        font.pointSize: Application.font.pointSize - 1
+        elide: Text.ElideRight
+        opacity: active || sortArea.containsMouse ? 1 : 0.6
         MouseArea {
+            id: sortArea
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: sortHeading.clicked()
         }
@@ -143,18 +149,22 @@ ColumnLayout {
         }
 
         RowLayout {
+            id: headingCells
             anchors.fill: parent
             anchors.leftMargin: trackPane.tracksLeft + 6
             anchors.rightMargin: trackPane.tracksRight + 6 + albumScroll.gutter
-            spacing: 10
+            spacing: Columns.spacing
             Repeater {
                 model: Columns.shown(trackPane.hiddenColumns)
                 SortHeading {
                     required property var modelData
-                    Layout.fillWidth: modelData.fill ?? false
-                    Layout.preferredWidth: Columns.width(modelData, headings.width - trackPane.tracksLeft - trackPane.tracksRight)
+                    required property int index
+                    readonly property real columnWidth: trackPane.columnWidths[index] ?? 0
+                    visible: columnWidth > 0
+                    Layout.preferredWidth: columnWidth
                     horizontalAlignment: modelData.alignRight ? Text.AlignRight : Text.AlignLeft
                     text: trackPane.heading(modelData.title, modelData.id)
+                    active: trackPane.sortColumn === modelData.id
                     onClicked: trackPane.sortClicked(modelData.id)
                 }
             }
@@ -194,6 +204,7 @@ ColumnLayout {
             selectedIndex: albumList.selectedIndex
             currentTrackId: trackPane.currentTrackId
             hiddenColumns: trackPane.hiddenColumns
+            columnWidths: trackPane.columnWidths
             gutter: albumScroll.gutter
             onTrackClicked: viewIndex => albumList.selectedIndex = viewIndex
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)

@@ -26,7 +26,8 @@ Rectangle {
     signal dragEnded()
 
     height: Theme.rowHeight + 14
-    color: index % 2 ? Theme.stripeColor(palette) : "transparent"
+    color: rowArea.containsMouse ? Theme.hoverColor(palette)
+         : index % 2 ? Theme.stripeColor(palette) : "transparent"
 
     Rectangle {
         width: parent.width
@@ -42,10 +43,16 @@ Rectangle {
         anchors.leftMargin: 8
         anchors.rightMargin: 8 + queueRow.gutter
         spacing: 8
-        Text {
-            Layout.preferredWidth: 12
-            text: queueRow.current ? "▶" : ""
-            color: queueRow.palette.text
+        Loader {
+            Layout.preferredWidth: 14
+            Layout.preferredHeight: 14
+            active: queueRow.current
+            sourceComponent: PathIcon {
+                name: "now-playing"
+                width: 14
+                height: 14
+                color: queueRow.palette.highlight
+            }
         }
         CoverArt {
             Layout.preferredWidth: Theme.rowHeight + 6
@@ -88,13 +95,16 @@ Rectangle {
         }
         Text {
             text: queueRow.duration
+            font.features: { "tnum": 1 }
             opacity: 0.7
             color: queueRow.palette.text
         }
     }
 
     MouseArea {
+        id: rowArea
         anchors.fill: parent
+        hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onDoubleClicked: mouse => {
             if (mouse.button === Qt.LeftButton)
