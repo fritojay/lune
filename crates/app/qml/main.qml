@@ -35,10 +35,14 @@ ApplicationWindow {
         }
     }
 
-    // Native on macOS, where Qt moves "Preferences…" into the application menu by its text.
+    // Native on macOS, where Qt moves "About…" and "Preferences…" into the application menu by their text.
     menuBar: MenuBar {
         Menu {
             title: qsTr("&File")
+            Action {
+                text: qsTr("&About Lune…")
+                onTriggered: about.open()
+            }
             Action {
                 text: qsTr("&Preferences…")
                 shortcut: StandardKey.Preferences
@@ -157,6 +161,12 @@ ApplicationWindow {
             [qsTr("Esc"), qsTr("Close the volume slider")],
             [preferencesKey.nativeText, qsTr("Preferences")],
         ]
+    }
+
+    AboutDialog {
+        id: about
+        anchors.centerIn: parent
+        width: Math.min(400, window.width - 40)
     }
 
     FolderDialog {

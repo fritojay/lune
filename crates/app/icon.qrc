@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/qt/qml/com/lune/player/qml/icons">
+        <file alias="lune.svg">../../packaging/icon/lune.svg</file>
+    </qresource>
+</RCC>

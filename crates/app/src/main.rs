@@ -25,7 +25,7 @@ use std::time::Instant;
 
 use anyhow::bail;
 use clap::Parser;
-use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
+use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 
 /// Location of `qml/main.qml` inside the QML module compiled by `build.rs`.
 const MAIN_QML: &str = "qrc:/qt/qml/com/lune/player/qml/main.qml";
@@ -101,6 +101,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut app = QGuiApplication::new();
+    let Some(app_ref) = app.as_mut() else {
+        anyhow::bail!("failed to create the Qt application");
+    };
+    app_ref.set_application_version(&QString::from(env!("CARGO_PKG_VERSION")));
     // Fusion on every Linux desktop, so the look doesn't depend on the
     // platform theme: KDE's picks a style that can't load the icons in our
     // QML module and runs menu shortcuts into their text. A non-empty env var

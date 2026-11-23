@@ -3,6 +3,7 @@ use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 fn main() -> std::io::Result<()> {
     // Every QML file in `qml/` is in the module, so a new component can't be left out.
     println!("cargo::rerun-if-changed=qml");
+    println!("cargo::rerun-if-changed=../../packaging/icon/lune.svg");
     const SINGLETONS: [&str; 3] = ["qml/Columns.qml", "qml/Groupings.qml", "qml/Theme.qml"];
     let mut components = Vec::new();
     for entry in std::fs::read_dir("qml")? {
@@ -43,6 +44,8 @@ fn main() -> std::io::Result<()> {
             "qml/icons/volume-low.svg",
             "qml/icons/volume-muted.svg",
         ])
+        // The app icon stays in packaging/, where the bundles take it from.
+        .qrc("icon.qrc")
         .qt_module("Quick")
         .build();
     Ok(())
