@@ -1045,7 +1045,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lune-app"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "lune-cli"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1074,7 +1074,7 @@ dependencies = [
 
 [[package]]
 name = "lune-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "blake3",
  "caseless",
@@ -1092,7 +1092,7 @@ dependencies = [
 
 [[package]]
 name = "lune-engine"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "cpal",
  "rtrb",
