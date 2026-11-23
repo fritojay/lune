@@ -51,7 +51,7 @@ Rectangle {
                 name: "now-playing"
                 width: 14
                 height: 14
-                color: queueRow.palette.highlight
+                color: Theme.accentColor(queueRow.palette)
             }
         }
         CoverArt {

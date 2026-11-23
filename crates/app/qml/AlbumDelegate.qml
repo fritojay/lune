@@ -137,7 +137,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 sourceComponent: PathIcon {
                                     name: "now-playing"
-                                    color: trackRow.selected ? album.palette.highlightedText : album.palette.highlight
+                                    color: trackRow.selected ? album.palette.highlightedText : Theme.accentColor(album.palette)
                                 }
                             }
                         }
