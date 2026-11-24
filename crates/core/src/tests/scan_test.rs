@@ -859,13 +859,16 @@ fn prune_drops_the_covers_of_the_tracks_it_removes() {
 fn rescanning_a_folder_leaves_folders_that_share_its_name_prefix_alone() {
     let dir = TempDir::new();
     let mut conn = db::open_in_memory().unwrap();
-    // "keep." sorts just before "keep/", "keeper" just after it.
-    for f in ["keep/1.mp3", "keep./1.mp3", "keeper/1.mp3"] {
+    // "keep." ("keep[" on Windows) sorts just before "keep" and the separator,
+    // "keeper" just after it.
+    let before_sep = char::from(std::path::MAIN_SEPARATOR as u8 - 1);
+    let just_before = format!("keep{before_sep}/1.mp3");
+    for f in ["keep/1.mp3", &just_before, "keeper/1.mp3"] {
         dir.touch(f);
     }
     let all = [
         ("keep/1.mp3", meta("A", "Kept", 1)),
-        ("keep./1.mp3", meta("B", "Dot", 1)),
+        (&just_before, meta("B", "Dot", 1)),
         ("keeper/1.mp3", meta("C", "Sibling", 1)),
     ];
     scan_tags(&mut conn, &dir, &all);

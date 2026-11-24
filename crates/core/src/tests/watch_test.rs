@@ -122,9 +122,12 @@ fn watch_settled(dir: &TempDir, delay: Duration) -> (FolderWatcher, mpsc::Receiv
     loop {
         let dirs = rx.recv_timeout(Duration::from_secs(10)).unwrap();
         if dirs.iter().any(|d| marker.starts_with(d)) {
-            return (watcher, rx);
+            break;
         }
     }
+    // Windows can report the marker again, e.g. as its folder's mtime updates.
+    while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
+    (watcher, rx)
 }
 
 fn event(kind: EventKind, path: &Path) -> notify::Result<Event> {
@@ -208,14 +211,7 @@ fn reading_files_in_a_watched_folder_is_not_reported() {
             .count();
         std::fs::read(&track).unwrap();
     }
-    std::thread::sleep(Duration::from_millis(500));
-    // Windows can report the settle marker more than once.
-    let artist = std::fs::canonicalize(dir.path().join("Artist")).unwrap();
-    let reported: Vec<PathBuf> = rx.try_iter().flatten().collect();
-    assert!(
-        !reported.iter().any(|d| artist.starts_with(d)),
-        "{reported:?}"
-    );
+    assert_eq!(rx.recv_timeout(Duration::from_millis(500)).ok(), None);
 }
 
 #[test]
