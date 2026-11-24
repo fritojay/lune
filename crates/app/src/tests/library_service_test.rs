@@ -338,8 +338,6 @@ fn the_rescan_wait_is_capped_and_ends_at_the_due_time() {
     );
 }
 
-// `age` sets a directory's mtime, which works on Unix only.
-#[cfg(unix)]
 #[test]
 fn startup_rereads_a_file_rewritten_in_place_while_the_app_was_closed() {
     let dir = two_folders();

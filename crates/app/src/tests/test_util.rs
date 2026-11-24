@@ -38,14 +38,33 @@ impl TempDir {
     }
 
     /// Sets the mtime of `rel` to an hour ago, so a scan treats it as
-    /// settled. Opening a directory to set its times works on Unix only.
+    /// settled.
     pub fn age(&self, rel: &str) {
         let an_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-        std::fs::File::open(self.0.join(rel))
-            .unwrap()
+        open_for_times(&self.0.join(rel))
             .set_modified(an_hour_ago)
             .unwrap();
     }
+}
+
+/// Unix sets times through any descriptor the owner holds.
+#[cfg(unix)]
+fn open_for_times(path: &Path) -> std::fs::File {
+    std::fs::File::open(path).unwrap()
+}
+
+/// Windows needs write access to set times, and backup semantics to open a
+/// directory at all.
+#[cfg(windows)]
+fn open_for_times(path: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    #[expect(clippy::disallowed_methods, reason = "test fixture in a temp dir")]
+    std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .unwrap()
 }
 
 impl Drop for TempDir {
