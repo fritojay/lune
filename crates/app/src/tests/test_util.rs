@@ -118,5 +118,7 @@ pub fn qml_values(qml: &'static str, key: &str) -> Vec<&'static str> {
         .collect()
 }
 
+// Its only test plants a link with `std::os::unix`.
+#[cfg(unix)]
 #[path = "test_util_test.rs"]
 mod tests;

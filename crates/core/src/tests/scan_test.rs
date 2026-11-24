@@ -1101,6 +1101,7 @@ fn a_folder_that_looks_empty_keeps_its_tracks_until_they_return() {
 
 /// A library at `music` of `1.mp3` and `sub/2.mp3`, scanned after its
 /// directories settled, so the next quick scan may skip them.
+#[cfg(unix)]
 fn settled_library() -> (TempDir, PathBuf, Connection) {
     let dir = TempDir::new();
     dir.touch("music/1.mp3");

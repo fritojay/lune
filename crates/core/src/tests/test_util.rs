@@ -38,6 +38,7 @@ impl TempDir {
         std::fs::remove_file(self.0.join(rel)).unwrap();
     }
 
+    #[cfg(unix)]
     pub fn remove_dir(&self, rel: &str) {
         #[expect(clippy::disallowed_methods, reason = "test fixture in a temp dir")]
         std::fs::remove_dir_all(self.0.join(rel)).unwrap();
@@ -54,11 +55,13 @@ impl TempDir {
     /// Sets the mtime of `rel` (a file or directory, "" for the root) to an
     /// hour ago, so a scan treats it as settled. Opening a directory to set its
     /// times works on Unix only.
+    #[cfg(unix)]
     pub fn age(&self, rel: &str) {
         let an_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
         self.set_mtime(rel, an_hour_ago);
     }
 
+    #[cfg(unix)]
     pub fn mtime(&self, rel: &str) -> std::time::SystemTime {
         std::fs::metadata(self.0.join(rel))
             .unwrap()
@@ -67,6 +70,7 @@ impl TempDir {
     }
 
     /// Unix only for directories, like [`Self::age`].
+    #[cfg(unix)]
     pub fn set_mtime(&self, rel: &str, mtime: std::time::SystemTime) {
         std::fs::File::open(self.0.join(rel))
             .unwrap()
@@ -291,5 +295,7 @@ pub fn create_fresh_dir(parent: &Path, prefix: &str) -> PathBuf {
     }
 }
 
+// Its only test plants a link with `std::os::unix`.
+#[cfg(unix)]
 #[path = "test_util_test.rs"]
 mod tests;

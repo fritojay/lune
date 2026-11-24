@@ -1,7 +1,5 @@
 use super::*;
 
-// Planting the link needs `std::os::unix`.
-#[cfg(unix)]
 #[test]
 fn a_fresh_dir_skips_a_link_planted_at_its_name() {
     let parent = TempDir::new();

@@ -114,5 +114,7 @@ pub fn create_fresh_dir(parent: &Path, prefix: &str) -> PathBuf {
     }
 }
 
+// Its only test plants a link with `std::os::unix`.
+#[cfg(unix)]
 #[path = "test_util_test.rs"]
 mod tests;
