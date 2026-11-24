@@ -6,7 +6,7 @@ use std::hash::{BuildHasher, RandomState};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, named_params};
 
 use crate::Result;
 
@@ -342,12 +342,17 @@ pub(crate) fn save(conn: &mut Connection, queue: &Queue) -> Result<()> {
     tx.execute("DELETE FROM queue", [])?;
     {
         let mut insert = tx.prepare(
-            "INSERT INTO queue (position, track_id, original_position) VALUES (?1, ?2, ?3)",
+            "INSERT INTO queue (position, track_id, original_position)
+             VALUES (:position, :track_id, :original_position)",
         )?;
         let original = queue.original_positions();
         for (i, item) in queue.items.iter().enumerate() {
             let original = original.as_ref().and_then(|o| o.get(i)).map(|&p| p as i64);
-            insert.execute(params![i as i64, item.track_id, original])?;
+            insert.execute(named_params! {
+                ":position": i as i64,
+                ":track_id": item.track_id,
+                ":original_position": original,
+            })?;
         }
     }
     save_state(&tx, queue)?;
@@ -363,14 +368,14 @@ pub(crate) fn save_cursor(conn: &Connection, queue: &Queue) -> Result<()> {
 
 fn save_state(conn: &Connection, queue: &Queue) -> Result<()> {
     conn.execute(
-        "INSERT INTO queue_state (id, cursor, shuffle, resume_ms) VALUES (1, ?1, ?2, ?3)
+        "INSERT INTO queue_state (id, cursor, shuffle, resume_ms) VALUES (1, :cursor, :shuffle, :resume_ms)
          ON CONFLICT (id) DO UPDATE SET cursor = excluded.cursor, shuffle = excluded.shuffle,
              resume_ms = excluded.resume_ms",
-        params![
-            queue.current_index().map(|i| i as i64),
-            queue.shuffle(),
-            i64::try_from(queue.resume_position().as_millis()).unwrap_or(i64::MAX),
-        ],
+        named_params! {
+            ":cursor": queue.current_index().map(|i| i as i64),
+            ":shuffle": queue.shuffle(),
+            ":resume_ms": i64::try_from(queue.resume_position().as_millis()).unwrap_or(i64::MAX),
+        },
     )?;
     Ok(())
 }
@@ -382,7 +387,13 @@ pub(crate) fn load(conn: &Connection) -> Result<Queue> {
         .query_row(
             "SELECT cursor, shuffle, resume_ms FROM queue_state WHERE id = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok((
+                    row.get("cursor")?,
+                    row.get("shuffle")?,
+                    row.get("resume_ms")?,
+                ))
+            },
         )
         .optional()?
         .unwrap_or((None, false, 0));
@@ -393,10 +404,10 @@ pub(crate) fn load(conn: &Connection) -> Result<Queue> {
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, i64>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<i64>>(3)?,
+            row.get::<_, i64>("position")?,
+            row.get::<_, i64>("track_id")?,
+            row.get::<_, String>("path")?,
+            row.get::<_, Option<i64>>("original_position")?,
         ))
     })?;
     let mut tracks = Vec::new();

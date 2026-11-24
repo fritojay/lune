@@ -112,7 +112,7 @@ fn symlinks_inside_a_folder_are_not_followed() {
     let paths: Vec<String> = conn
         .prepare("SELECT path FROM tracks")
         .unwrap()
-        .query_map([], |r| r.get(0))
+        .query_map([], |r| r.get("path"))
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap();
@@ -777,7 +777,7 @@ fn art(hash: &str) -> Option<crate::EmbeddedArt> {
 fn art_hashes(conn: &Connection) -> Vec<String> {
     conn.prepare("SELECT hash FROM art ORDER BY hash")
         .unwrap()
-        .query_map([], |r| r.get(0))
+        .query_map([], |r| r.get("hash"))
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap()
@@ -1168,8 +1168,8 @@ fn a_quick_scan_rereads_tracks_read_by_an_older_reader_once() {
     let (_dir, music, mut conn) = settled_library();
     let before = query::track_list(&conn).unwrap();
     conn.execute(
-        "UPDATE tracks SET reader_version = ?1 WHERE title = '2'",
-        [READER_VERSION - 1],
+        "UPDATE tracks SET reader_version = :reader_version WHERE title = '2'",
+        named_params! { ":reader_version": READER_VERSION - 1 },
     )
     .unwrap();
 
@@ -1194,8 +1194,8 @@ fn a_thorough_scan_rereads_a_track_read_by_an_older_reader() {
     let mut conn = db::open_in_memory().unwrap();
     scan_counting(&mut conn, dir.path(), ScanMode::Thorough);
     conn.execute(
-        "UPDATE tracks SET reader_version = ?1 WHERE title = '1'",
-        [READER_VERSION - 1],
+        "UPDATE tracks SET reader_version = :reader_version WHERE title = '1'",
+        named_params! { ":reader_version": READER_VERSION - 1 },
     )
     .unwrap();
 
@@ -1442,9 +1442,11 @@ fn an_interrupted_scan_leaves_its_albums_up_to_date() {
 }
 
 fn track_id(conn: &Connection, title: &str) -> i64 {
-    conn.query_row("SELECT id FROM tracks WHERE title = ?1", [title], |r| {
-        r.get(0)
-    })
+    conn.query_row(
+        "SELECT id FROM tracks WHERE title = :title",
+        named_params! { ":title": title },
+        |r| r.get("id"),
+    )
     .unwrap()
 }
 
@@ -1486,7 +1488,7 @@ fn forgetting_every_missing_track_drops_their_albums_and_covers() {
     dir.remove("gone.mp3");
     scan_tags(&mut conn, &dir, &tags[..1]);
     let album_count = |conn: &Connection| -> i64 {
-        conn.query_row("SELECT COUNT(*) FROM albums", [], |r| r.get(0))
+        conn.query_row("SELECT COUNT(*) AS n FROM albums", [], |r| r.get("n"))
             .unwrap()
     };
     assert_eq!(album_count(&conn), 2, "a missing track keeps its album");

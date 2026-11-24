@@ -70,7 +70,8 @@ impl Rng {
 }
 
 pub(crate) fn generate(conn: &mut Connection, tracks: usize) -> Result<()> {
-    let existing: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))?;
+    let existing: i64 =
+        conn.query_row("SELECT COUNT(*) AS n FROM tracks", [], |row| row.get("n"))?;
     if existing > 0 {
         return Err(CoreError::NotEmpty(existing.unsigned_abs()));
     }

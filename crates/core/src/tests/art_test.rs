@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use image::{ImageFormat, RgbaImage};
 use proptest::prelude::*;
-use rusqlite::params;
+use rusqlite::named_params;
 
 use super::*;
 use crate::test_util::{TempDir, flac_with_cover};
@@ -22,8 +22,11 @@ fn hash(bytes: &[u8]) -> String {
 /// One album with cover `art_id` 1 (of `cover`) on the given track paths.
 fn library(cover: &[u8], paths: &[&str]) -> Connection {
     let conn = db::open_in_memory().unwrap();
-    conn.execute("INSERT INTO art (id, hash) VALUES (1, ?1)", [hash(cover)])
-        .unwrap();
+    conn.execute(
+        "INSERT INTO art (id, hash) VALUES (1, :hash)",
+        named_params! { ":hash": hash(cover) },
+    )
+    .unwrap();
     conn.execute(
         "INSERT INTO albums (id, album_artist, album_artist_key, title, title_key, art_id)
          VALUES (1, 'A', 'a', 'T', 't', 1)",
@@ -33,8 +36,8 @@ fn library(cover: &[u8], paths: &[&str]) -> Connection {
     for path in paths {
         conn.execute(
             "INSERT INTO tracks (path, mtime_ns, size, album_id, duration_ms, codec, art_id)
-             VALUES (?1, 0, 0, 1, 1000, 'flac', 1)",
-            params![path],
+             VALUES (:path, 0, 0, 1, 1000, 'flac', 1)",
+            named_params! { ":path": path },
         )
         .unwrap();
     }
@@ -218,7 +221,11 @@ proptest! {
         // It must exist, or `cache/..` doesn't resolve and nothing escapes.
         let cache = dir.write("cache/other.jpg", b"").parent().unwrap().to_path_buf();
         let conn = library(b"x", &["1.flac"]);
-        conn.execute("UPDATE art SET hash = ?1 WHERE id = 1", [&bad]).unwrap();
+        conn.execute(
+            "UPDATE art SET hash = :hash WHERE id = 1",
+            named_params! { ":hash": bad },
+        )
+        .unwrap();
         let read = Cell::new(false);
         let result = thumbnail_with(&conn, 1, &cache, 32, |_| {
             read.set(true);

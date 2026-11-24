@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::SystemTime;
 
-use rusqlite::{Connection, Row};
+use rusqlite::{Connection, Row, RowIndex, named_params};
 
 use crate::Result;
 use crate::scan::unix_ns;
@@ -131,7 +131,7 @@ pub struct MissingTrack {
 
 /// Reads a non-negative integer column. SQLite has no unsigned type; negative
 /// values never occur for these columns and read as 0.
-fn get_u64(row: &Row<'_>, idx: usize) -> rusqlite::Result<u64> {
+fn get_u64(row: &Row<'_>, idx: impl RowIndex) -> rusqlite::Result<u64> {
     Ok(u64::try_from(row.get::<_, i64>(idx)?).unwrap_or(0))
 }
 
@@ -176,17 +176,18 @@ impl ListTrack {
 
 pub(crate) fn stats(conn: &Connection) -> Result<LibraryStats> {
     Ok(conn.query_row(
-        "SELECT (SELECT COUNT(*) FROM tracks WHERE missing_ns IS NULL),
-                (SELECT COUNT(DISTINCT album_id) FROM tracks WHERE missing_ns IS NULL),
-                (SELECT COUNT(*) FROM art),
-                (SELECT COALESCE(SUM(duration_ms), 0) FROM tracks WHERE missing_ns IS NULL)",
+        "SELECT (SELECT COUNT(*) FROM tracks WHERE missing_ns IS NULL) AS tracks,
+                (SELECT COUNT(DISTINCT album_id) FROM tracks WHERE missing_ns IS NULL) AS albums,
+                (SELECT COUNT(*) FROM art) AS art,
+                (SELECT COALESCE(SUM(duration_ms), 0) FROM tracks WHERE missing_ns IS NULL)
+                    AS total_duration_ms",
         [],
         |row| {
             Ok(LibraryStats {
-                tracks: get_u64(row, 0)?,
-                albums: get_u64(row, 1)?,
-                art: get_u64(row, 2)?,
-                total_duration_ms: get_u64(row, 3)?,
+                tracks: get_u64(row, "tracks")?,
+                albums: get_u64(row, "albums")?,
+                art: get_u64(row, "art")?,
+                total_duration_ms: get_u64(row, "total_duration_ms")?,
             })
         },
     )?)
@@ -194,7 +195,7 @@ pub(crate) fn stats(conn: &Connection) -> Result<LibraryStats> {
 
 pub(crate) fn albums(conn: &Connection) -> Result<Vec<AlbumRow>> {
     let mut stmt = conn.prepare(
-        "SELECT a.id, a.album_artist, a.title, a.year_max, COUNT(*)
+        "SELECT a.id, a.album_artist, a.title, a.year_max, COUNT(*) AS track_count
          FROM albums a JOIN tracks t ON t.album_id = a.id
          WHERE t.missing_ns IS NULL
          GROUP BY a.id
@@ -202,11 +203,11 @@ pub(crate) fn albums(conn: &Connection) -> Result<Vec<AlbumRow>> {
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(AlbumRow {
-            id: row.get(0)?,
-            album_artist: row.get(1)?,
-            title: row.get(2)?,
-            year_max: row.get(3)?,
-            track_count: row.get(4)?,
+            id: row.get("id")?,
+            album_artist: row.get("album_artist")?,
+            title: row.get("title")?,
+            year_max: row.get("year_max")?,
+            track_count: row.get("track_count")?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -216,11 +217,11 @@ pub(crate) fn album_tracks(conn: &Connection, album_id: i64) -> Result<Vec<ListT
     let mut stmt = conn.prepare(&format!(
         "SELECT {}
          FROM tracks t JOIN albums a ON a.id = t.album_id
-         WHERE t.album_id = ?1 AND t.missing_ns IS NULL
+         WHERE t.album_id = :album_id AND t.missing_ns IS NULL
          ORDER BY {ALBUM_TRACK_ORDER}",
         *LIST_TRACK_SELECT
     ))?;
-    let rows = stmt.query_map([album_id], ListTrack::from_row)?;
+    let rows = stmt.query_map(named_params! { ":album_id": album_id }, ListTrack::from_row)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
@@ -242,32 +243,32 @@ pub(crate) fn track_list(conn: &Connection) -> Result<Vec<ListTrack>> {
 /// Every missing track, by path.
 pub(crate) fn missing_tracks(conn: &Connection) -> Result<Vec<MissingTrack>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.path, t.title, t.artist, a.title, t.missing_ns
+        "SELECT t.id, t.path, t.title, t.artist, a.title AS album, t.missing_ns
          FROM tracks t JOIN albums a ON a.id = t.album_id
          WHERE t.missing_ns IS NOT NULL
          ORDER BY t.path",
     )?;
     let rows = stmt.query_map([], |row| {
-        let path: String = row.get(1)?;
-        let title = match row.get::<_, Option<String>>(2)? {
+        let path: String = row.get("path")?;
+        let title = match row.get::<_, Option<String>>("title")? {
             Some(title) => title,
             None => file_name(&path),
         };
         Ok(MissingTrack {
-            id: row.get(0)?,
+            id: row.get("id")?,
             path: PathBuf::from(path),
             title,
-            artist: row.get(3)?,
-            album: row.get(4)?,
-            missing_ns: row.get(5)?,
+            artist: row.get("artist")?,
+            album: row.get("album")?,
+            missing_ns: row.get("missing_ns")?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 pub(crate) fn record_play(conn: &Connection, track_id: i64, at: SystemTime) -> Result<()> {
-    conn.prepare_cached("UPDATE tracks SET played_ns = ?2 WHERE id = ?1")?
-        .execute(rusqlite::params![track_id, unix_ns(at)])?;
+    conn.prepare_cached("UPDATE tracks SET played_ns = :played_ns WHERE id = :id")?
+        .execute(named_params! { ":id": track_id, ":played_ns": unix_ns(at) })?;
     Ok(())
 }
 
@@ -289,12 +290,15 @@ pub(crate) fn search(conn: &Connection, text: &str, limit: u32) -> Result<Vec<Li
          FROM tracks_fts f
          JOIN tracks t ON t.id = f.rowid
          JOIN albums a ON a.id = t.album_id
-         WHERE tracks_fts MATCH ?1 AND t.missing_ns IS NULL
+         WHERE tracks_fts MATCH :query AND t.missing_ns IS NULL
          ORDER BY f.rank
-         LIMIT ?2",
+         LIMIT :limit",
         *LIST_TRACK_SELECT
     ))?;
-    let rows = stmt.query_map(rusqlite::params![query, limit], ListTrack::from_row)?;
+    let rows = stmt.query_map(
+        named_params! { ":query": query, ":limit": limit },
+        ListTrack::from_row,
+    )?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
@@ -305,10 +309,10 @@ pub(crate) fn search_ids(conn: &Connection, text: &str) -> Result<HashSet<i64>> 
         return Ok(HashSet::new());
     };
     let mut stmt = conn.prepare(
-        "SELECT f.rowid FROM tracks_fts f JOIN tracks t ON t.id = f.rowid
-         WHERE tracks_fts MATCH ?1 AND t.missing_ns IS NULL",
+        "SELECT f.rowid AS id FROM tracks_fts f JOIN tracks t ON t.id = f.rowid
+         WHERE tracks_fts MATCH :query AND t.missing_ns IS NULL",
     )?;
-    let rows = stmt.query_map([query], |row| row.get(0))?;
+    let rows = stmt.query_map(named_params! { ":query": query }, |row| row.get("id"))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 

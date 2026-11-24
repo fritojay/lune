@@ -183,8 +183,9 @@ fn configure(conn: &Connection) -> Result<()> {
 fn enable_wal(conn: &Connection) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let result = conn
-            .pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0));
+        let result = conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| {
+            row.get::<_, String>("journal_mode")
+        });
         match result {
             Ok(_) => return Ok(()),
             Err(rusqlite::Error::SqliteFailure(err, _))
@@ -198,7 +199,8 @@ fn enable_wal(conn: &Connection) -> Result<()> {
 }
 
 fn migrate(conn: &Connection) -> Result<()> {
-    let found: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let found: i64 =
+        conn.pragma_query_value(None, "user_version", |row| row.get("user_version"))?;
     let Ok(skip) = usize::try_from(found) else {
         return Err(CoreError::SchemaInvalid(found));
     };
@@ -213,7 +215,8 @@ fn migrate(conn: &Connection) -> Result<()> {
         // Several connections can open a new file at once (the app's
         // threads): take the write lock, then check nobody migrated meanwhile.
         conn.execute_batch("BEGIN IMMEDIATE")?;
-        let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let current: i64 =
+            conn.pragma_query_value(None, "user_version", |row| row.get("user_version"))?;
         if current >= next {
             conn.execute_batch("COMMIT")?;
             continue;

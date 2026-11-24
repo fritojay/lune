@@ -11,7 +11,7 @@ fn a_negative_schema_version_is_rejected() {
 fn a_newer_schema_is_rejected_and_migrations_reach_the_latest() {
     let conn = open_in_memory().unwrap();
     let v: i64 = conn
-        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .pragma_query_value(None, "user_version", |r| r.get("user_version"))
         .unwrap();
     assert_eq!(v, SCHEMA_VERSION);
     conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
@@ -40,7 +40,7 @@ fn a_v1_database_with_data_upgrades() {
     migrate(&conn).unwrap();
     let album: Option<String> = conn
         .query_row("SELECT album FROM tracks WHERE path = '/x.mp3'", [], |r| {
-            r.get(0)
+            r.get("album")
         })
         .unwrap();
     assert_eq!(album, None, "v1 rows have no album tag until re-read");
@@ -62,15 +62,16 @@ fn a_v3_database_drops_the_art_cache_path_and_keeps_its_covers() {
     migrate(&conn).unwrap();
     let has_cache_path: bool = conn
         .query_row(
-            "SELECT count(*) > 0 FROM pragma_table_info('art') WHERE name = 'cache_path'",
+            "SELECT count(*) > 0 AS found FROM pragma_table_info('art')
+             WHERE name = 'cache_path'",
             [],
-            |r| r.get(0),
+            |r| r.get("found"),
         )
         .unwrap();
     assert!(!has_cache_path);
     let cover: (String, String) = conn
         .query_row("SELECT hash, mime FROM art WHERE id = 1", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
+            Ok((r.get("hash")?, r.get("mime")?))
         })
         .unwrap();
     assert_eq!(cover, ("h".to_string(), "image/png".to_string()));
@@ -95,7 +96,7 @@ fn many_connections_can_open_a_new_database_at_once() {
     }
     let conn = open(&path).unwrap();
     let v: i64 = conn
-        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .pragma_query_value(None, "user_version", |r| r.get("user_version"))
         .unwrap();
     assert_eq!(v, SCHEMA_VERSION);
 }

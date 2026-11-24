@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::sync_channel;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, OptionalExtension, Transaction, named_params, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, named_params};
 
 use crate::normalize;
 use crate::query::ALBUM_TRACK_ORDER;
@@ -194,15 +194,17 @@ pub(crate) fn scan_using(
     let mut touched = Touched::default();
     for (path, added_ns) in &undated {
         report.dated += tx
-            .prepare_cached("UPDATE tracks SET added_ns = ?2 WHERE path = ?1 AND added_ns IS NULL")?
-            .execute(params![path, added_ns])?;
+            .prepare_cached(
+                "UPDATE tracks SET added_ns = :added_ns WHERE path = :path AND added_ns IS NULL",
+            )?
+            .execute(named_params! { ":path": path, ":added_ns": added_ns })?;
     }
     for path in &restored {
         let album: Option<i64> = tx
             .prepare_cached(
-                "UPDATE tracks SET missing_ns = NULL WHERE path = ?1 RETURNING album_id",
+                "UPDATE tracks SET missing_ns = NULL WHERE path = :path RETURNING album_id",
             )?
-            .query_row([path], |row| row.get(0))
+            .query_row(named_params! { ":path": path }, |row| row.get("album_id"))
             .optional()?;
         if let Some(album_id) = album {
             touched.albums.insert(album_id);
@@ -211,8 +213,13 @@ pub(crate) fn scan_using(
     }
     for path in &missing {
         let album: Option<i64> = tx
-            .prepare_cached("UPDATE tracks SET missing_ns = ?2 WHERE path = ?1 RETURNING album_id")?
-            .query_row(params![path, unix_ns(now)], |row| row.get(0))
+            .prepare_cached(
+                "UPDATE tracks SET missing_ns = :missing_ns WHERE path = :path RETURNING album_id",
+            )?
+            .query_row(
+                named_params! { ":path": path, ":missing_ns": unix_ns(now) },
+                |row| row.get("album_id"),
+            )
             .optional()?;
         if let Some(album_id) = album {
             touched.albums.insert(album_id);
@@ -221,10 +228,10 @@ pub(crate) fn scan_using(
     }
     // Forgetting a directory only costs listing it again, so stale rows go
     // now; the listed ones come back as they are finished.
-    let mut forget = tx.prepare_cached("DELETE FROM dirs WHERE path = ?1")?;
+    let mut forget = tx.prepare_cached("DELETE FROM dirs WHERE path = :path")?;
     for dir in stored_dirs.keys() {
         if !walked.skipped.contains(Path::new(dir)) {
-            forget.execute([dir])?;
+            forget.execute(named_params! { ":path": dir })?;
         }
     }
     drop(forget);
@@ -281,10 +288,10 @@ pub(crate) fn prune(conn: &mut Connection, folders: &[PathBuf]) -> Result<Option
         let mut stmt = tx.prepare("SELECT id, album_id, art_id, path FROM tracks")?;
         let rows = stmt.query_map([], |row| {
             Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-                row.get::<_, String>(3)?,
+                row.get::<_, i64>("id")?,
+                row.get::<_, i64>("album_id")?,
+                row.get::<_, Option<i64>>("art_id")?,
+                row.get::<_, String>("path")?,
             ))
         })?;
         let mut outside = Vec::new();
@@ -298,9 +305,9 @@ pub(crate) fn prune(conn: &mut Connection, folders: &[PathBuf]) -> Result<Option
     };
     let mut touched = Touched::default();
     {
-        let mut delete = tx.prepare_cached("DELETE FROM tracks WHERE id = ?1")?;
+        let mut delete = tx.prepare_cached("DELETE FROM tracks WHERE id = :id")?;
         for (id, album_id, art_id) in &outside {
-            delete.execute([id])?;
+            delete.execute(named_params! { ":id": id })?;
             touched.albums.insert(*album_id);
             touched.art.extend(*art_id);
         }
@@ -308,11 +315,11 @@ pub(crate) fn prune(conn: &mut Connection, folders: &[PathBuf]) -> Result<Option
     {
         let mut stmt = tx.prepare("SELECT path FROM dirs")?;
         let dirs: Vec<String> = stmt
-            .query_map([], |row| row.get(0))?
+            .query_map([], |row| row.get("path"))?
             .collect::<rusqlite::Result<_>>()?;
-        let mut delete = tx.prepare_cached("DELETE FROM dirs WHERE path = ?1")?;
+        let mut delete = tx.prepare_cached("DELETE FROM dirs WHERE path = :path")?;
         for dir in dirs.iter().filter(|dir| !inside(dir)) {
-            delete.execute([dir])?;
+            delete.execute(named_params! { ":path": dir })?;
         }
     }
     refresh_albums(&tx, &touched)?;
@@ -330,8 +337,10 @@ pub(crate) fn record_folder_scan(conn: &Connection, folder: &Path, at: SystemTim
     let Some(folder) = folder.to_str() else {
         return Ok(());
     };
-    conn.prepare_cached("INSERT OR REPLACE INTO folder_scans (path, scanned_ns) VALUES (?1, ?2)")?
-        .execute(params![folder, unix_ns(at)])?;
+    conn.prepare_cached(
+        "INSERT OR REPLACE INTO folder_scans (path, scanned_ns) VALUES (:path, :scanned_ns)",
+    )?
+    .execute(named_params! { ":path": folder, ":scanned_ns": unix_ns(at) })?;
     Ok(())
 }
 
@@ -340,21 +349,23 @@ fn forget_folder_scans(conn: &Connection, folders: &[PathBuf]) -> Result<()> {
     let keep: HashSet<&str> = folders.iter().filter_map(|f| f.to_str()).collect();
     let mut stmt = conn.prepare("SELECT path FROM folder_scans")?;
     let recorded: Vec<String> = stmt
-        .query_map([], |row| row.get(0))?
+        .query_map([], |row| row.get("path"))?
         .collect::<rusqlite::Result<_>>()?;
-    let mut delete = conn.prepare_cached("DELETE FROM folder_scans WHERE path = ?1")?;
+    let mut delete = conn.prepare_cached("DELETE FROM folder_scans WHERE path = :path")?;
     for folder in recorded.iter().filter(|f| !keep.contains(f.as_str())) {
-        delete.execute([folder])?;
+        delete.execute(named_params! { ":path": folder })?;
     }
     Ok(())
 }
 
 pub(crate) fn folder_scans(conn: &Connection, folders: &[PathBuf]) -> Result<Vec<Option<i64>>> {
-    let mut stmt = conn.prepare_cached("SELECT scanned_ns FROM folder_scans WHERE path = ?1")?;
+    let mut stmt = conn.prepare_cached("SELECT scanned_ns FROM folder_scans WHERE path = :path")?;
     let mut scans = Vec::with_capacity(folders.len());
     for folder in folders {
         scans.push(match folder.to_str() {
-            Some(path) => stmt.query_row([path], |row| row.get(0)).optional()?,
+            Some(path) => stmt
+                .query_row(named_params! { ":path": path }, |row| row.get("scanned_ns"))
+                .optional()?,
             None => None,
         });
     }
@@ -367,7 +378,7 @@ pub(crate) fn forget_missing(conn: &mut Connection, ids: Option<&[i64]>) -> Resu
     let tx = conn.transaction()?;
     let mut deleted: Vec<(i64, Option<i64>)> = Vec::new();
     {
-        let columns = |row: &rusqlite::Row<'_>| Ok((row.get(0)?, row.get(1)?));
+        let columns = |row: &rusqlite::Row<'_>| Ok((row.get("album_id")?, row.get("art_id")?));
         match ids {
             None => {
                 let mut stmt = tx.prepare(
@@ -379,11 +390,14 @@ pub(crate) fn forget_missing(conn: &mut Connection, ids: Option<&[i64]>) -> Resu
             }
             Some(ids) => {
                 let mut stmt = tx.prepare(
-                    "DELETE FROM tracks WHERE id = ?1 AND missing_ns IS NOT NULL
+                    "DELETE FROM tracks WHERE id = :id AND missing_ns IS NOT NULL
                      RETURNING album_id, art_id",
                 )?;
                 for id in ids {
-                    deleted.extend(stmt.query_row([id], columns).optional()?);
+                    deleted.extend(
+                        stmt.query_row(named_params! { ":id": id }, columns)
+                            .optional()?,
+                    );
                 }
             }
         }
@@ -572,11 +586,14 @@ fn stored_dirs(conn: &Connection, root: &Path) -> Result<HashMap<String, i64>> {
         return Ok(HashMap::new());
     };
     let (from, to) = path_prefix_range(root);
-    let mut stmt = conn
-        .prepare("SELECT path, mtime_ns FROM dirs WHERE path = ?1 OR (path >= ?2 AND path < ?3)")?;
-    let rows = stmt.query_map(params![root, from, to], |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    })?;
+    let mut stmt = conn.prepare(
+        "SELECT path, mtime_ns FROM dirs
+         WHERE path = :root OR (path >= :from AND path < :to)",
+    )?;
+    let rows = stmt.query_map(
+        named_params! { ":root": root, ":from": from, ":to": to },
+        |row| Ok((row.get("path")?, row.get("mtime_ns")?)),
+    )?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
@@ -621,18 +638,20 @@ fn existing_tracks(conn: &Connection, root: &Path) -> Result<HashMap<String, Sto
         None => (String::new(), String::from(char::MAX)),
     };
     let mut stmt = conn.prepare(
-        "SELECT path, mtime_ns, size, added_ns IS NOT NULL, missing_ns, reader_version < ?3
-         FROM tracks WHERE path >= ?1 AND path < ?2",
+        "SELECT path, mtime_ns, size, added_ns IS NOT NULL AS dated, missing_ns,
+                reader_version < :reader_version AS stale
+         FROM tracks WHERE path >= :from AND path < :to",
     )?;
-    let rows = stmt.query_map(params![from, to, READER_VERSION], |row| {
+    let params = named_params! { ":from": from, ":to": to, ":reader_version": READER_VERSION };
+    let rows = stmt.query_map(params, |row| {
         Ok((
-            row.get::<_, String>(0)?,
+            row.get::<_, String>("path")?,
             Stored {
-                mtime_ns: row.get(1)?,
-                size: row.get(2)?,
-                dated: row.get(3)?,
-                missing_ns: row.get(4)?,
-                stale: row.get(5)?,
+                mtime_ns: row.get("mtime_ns")?,
+                size: row.get("size")?,
+                dated: row.get("dated")?,
+                missing_ns: row.get("missing_ns")?,
+                stale: row.get("stale")?,
             },
         ))
     })?;
@@ -658,8 +677,8 @@ fn path_prefix_range(root: &str) -> (String, String) {
 }
 
 fn save_dir(tx: &Transaction<'_>, dir: &str, mtime_ns: i64) -> Result<()> {
-    tx.prepare_cached("INSERT OR REPLACE INTO dirs (path, mtime_ns) VALUES (?1, ?2)")?
-        .execute(params![dir, mtime_ns])?;
+    tx.prepare_cached("INSERT OR REPLACE INTO dirs (path, mtime_ns) VALUES (:path, :mtime_ns)")?
+        .execute(named_params! { ":path": dir, ":mtime_ns": mtime_ns })?;
     Ok(())
 }
 
@@ -803,36 +822,41 @@ pub(crate) fn upsert_track(
     let album_id: i64 = tx
         .prepare_cached(
             "INSERT INTO albums (album_artist, album_artist_key, title, title_key)
-             VALUES (?1, ?2, ?3, ?4)
+             VALUES (:album_artist, :album_artist_key, :title, :title_key)
              ON CONFLICT (album_artist_key, title_key) DO UPDATE SET id = id
              RETURNING id",
         )?
         .query_row(
-            params![
-                album_artist,
-                normalize::key(album_artist),
-                album_title,
-                normalize::key(album_title)
-            ],
-            |row| row.get(0),
+            named_params! {
+                ":album_artist": album_artist,
+                ":album_artist_key": normalize::key(album_artist),
+                ":title": album_title,
+                ":title_key": normalize::key(album_title),
+            },
+            |row| row.get("id"),
         )?;
 
     let art_id: Option<i64> = match &meta.art {
         Some(art) => Some(
             tx.prepare_cached(
-                "INSERT INTO art (hash, mime) VALUES (?1, ?2)
+                "INSERT INTO art (hash, mime) VALUES (:hash, :mime)
                  ON CONFLICT (hash) DO UPDATE SET id = id
                  RETURNING id",
             )?
-            .query_row(params![art.hash, art.mime], |row| row.get(0))?,
+            .query_row(
+                named_params! { ":hash": art.hash, ":mime": art.mime },
+                |row| row.get("id"),
+            )?,
         ),
         None => None,
     };
 
     if file.known {
         let old: Option<(i64, Option<i64>)> = tx
-            .prepare_cached("SELECT album_id, art_id FROM tracks WHERE path = ?1")?
-            .query_row([&file.path], |row| Ok((row.get(0)?, row.get(1)?)))
+            .prepare_cached("SELECT album_id, art_id FROM tracks WHERE path = :path")?
+            .query_row(named_params! { ":path": file.path }, |row| {
+                Ok((row.get("album_id")?, row.get("art_id")?))
+            })
             .optional()?;
         if let Some((old_album, old_art)) = old {
             touched.albums.insert(old_album);
@@ -890,10 +914,10 @@ pub(crate) fn upsert_track(
 /// such as a capitalization change shows up on rescan.
 pub(crate) fn refresh_albums(tx: &Transaction<'_>, touched: &Touched) -> Result<()> {
     let mut delete_art = tx.prepare_cached(
-        "DELETE FROM art WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM tracks WHERE art_id = ?1)",
+        "DELETE FROM art WHERE id = :id AND NOT EXISTS (SELECT 1 FROM tracks WHERE art_id = :id)",
     )?;
     for id in &touched.art {
-        delete_art.execute([id])?;
+        delete_art.execute(named_params! { ":id": id })?;
     }
     if touched.albums.is_empty() {
         return Ok(());
@@ -918,7 +942,7 @@ pub(crate) fn refresh_albums(tx: &Transaction<'_>, touched: &Touched) -> Result<
                         AND t.missing_ns IS NULL
                       ORDER BY {ALBUM_TRACK_ORDER}
                       LIMIT 1)
-         WHERE id = ?1"
+         WHERE id = :id"
     ))?;
     // Only rewrites when the strings differ, so `execute` returns 1 exactly
     // when the display changed. Rows from schema v1 have no album tag (NULL)
@@ -929,23 +953,24 @@ pub(crate) fn refresh_albums(tx: &Transaction<'_>, touched: &Touched) -> Result<
         "UPDATE albums SET
              album_artist = COALESCE({new_artist}, album_artist),
              title = COALESCE({new_title}, title)
-         WHERE id = ?1
+         WHERE id = :id
            AND (album_artist IS NOT COALESCE({new_artist}, album_artist)
                 OR title IS NOT COALESCE({new_title}, title))"
     ))?;
     // The FTS rows copy the album strings; the tracks' update trigger rebuilds them.
     let mut reindex =
-        tx.prepare_cached("UPDATE tracks SET album_id = album_id WHERE album_id = ?1")?;
+        tx.prepare_cached("UPDATE tracks SET album_id = album_id WHERE album_id = :id")?;
     let mut delete_empty = tx.prepare_cached(
         "DELETE FROM albums
-         WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = ?1)",
+         WHERE id = :id AND NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = :id)",
     )?;
     for id in &touched.albums {
-        update.execute([id])?;
-        if update_display.execute([id])? > 0 {
-            reindex.execute([id])?;
+        let id = named_params! { ":id": id };
+        update.execute(id)?;
+        if update_display.execute(id)? > 0 {
+            reindex.execute(id)?;
         }
-        delete_empty.execute([id])?;
+        delete_empty.execute(id)?;
     }
     Ok(())
 }

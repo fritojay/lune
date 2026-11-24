@@ -44,8 +44,8 @@ fn library_with_tracks(conn: &Connection, ids: &[i64]) {
     for id in ids {
         conn.execute(
             "INSERT INTO tracks (id, path, mtime_ns, size, album_id, duration_ms, codec)
-             VALUES (?1, ?2, 0, 0, 1, 1000, 'mp3')",
-            params![id, format!("{id}.mp3")],
+             VALUES (:id, :path, 0, 0, 1, 1000, 'mp3')",
+            named_params! { ":id": id, ":path": format!("{id}.mp3") },
         )
         .unwrap();
     }
@@ -97,7 +97,7 @@ fn rescans_never_alter_the_saved_queue() {
     save(&mut conn, &queue_of([1, 2], 0)).unwrap();
     conn.execute("DELETE FROM tracks WHERE id = 2", []).unwrap();
     let saved: i64 = conn
-        .query_row("SELECT COUNT(*) FROM queue", [], |r| r.get(0))
+        .query_row("SELECT COUNT(*) AS n FROM queue", [], |r| r.get("n"))
         .unwrap();
     assert_eq!(saved, 2);
 }

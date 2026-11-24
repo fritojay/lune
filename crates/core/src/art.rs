@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, ImageReader, Limits};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, named_params};
 
 use crate::{CoreError, Result};
 
@@ -40,9 +40,11 @@ fn thumbnail_with(
     read_cover: impl Fn(&Path) -> Result<Option<Vec<u8>>>,
 ) -> Result<Option<PathBuf>> {
     let Some(hash) = conn
-        .query_row("SELECT hash FROM art WHERE id = ?1", [art_id], |row| {
-            row.get::<_, String>(0)
-        })
+        .query_row(
+            "SELECT hash FROM art WHERE id = :id",
+            named_params! { ":id": art_id },
+            |row| row.get::<_, String>("hash"),
+        )
         .optional()?
     else {
         return Ok(None);
@@ -58,12 +60,14 @@ fn thumbnail_with(
         return Ok(Some(target));
     }
 
-    let mut stmt =
-        conn.prepare("SELECT path FROM tracks WHERE art_id = ?1 AND missing_ns IS NULL LIMIT ?2")?;
+    let mut stmt = conn.prepare(
+        "SELECT path FROM tracks WHERE art_id = :art_id AND missing_ns IS NULL LIMIT :limit",
+    )?;
     let paths = stmt
-        .query_map([art_id, i64::from(CANDIDATES)], |row| {
-            row.get::<_, String>(0)
-        })?
+        .query_map(
+            named_params! { ":art_id": art_id, ":limit": CANDIDATES },
+            |row| row.get::<_, String>("path"),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for path in paths.iter().map(PathBuf::from) {
         let bytes = match guarded(&path, || read_cover(&path)) {
@@ -94,14 +98,16 @@ pub(crate) fn prune_thumbnails(conn: &Connection, dir: &Path) -> Result<usize> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
         Err(err) => return Err(io_err(err)),
     };
-    let mut known = conn.prepare("SELECT 1 FROM art WHERE hash = ?1")?;
+    let mut known = conn.prepare("SELECT 1 FROM art WHERE hash = :hash")?;
     let mut removed = 0;
     for entry in entries {
         let entry = entry.map_err(io_err)?;
         let Some(hash) = entry.file_name().to_str().and_then(thumbnail_hash) else {
             continue;
         };
-        if !entry.file_type().is_ok_and(|t| t.is_file()) || known.exists([&hash])? {
+        if !entry.file_type().is_ok_and(|t| t.is_file())
+            || known.exists(named_params! { ":hash": hash })?
+        {
             continue;
         }
         #[expect(
