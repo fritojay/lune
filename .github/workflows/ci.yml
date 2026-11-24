@@ -79,6 +79,8 @@ jobs:
     runs-on: windows-latest
     env:
       QT_QPA_PLATFORM: offscreen
+      # aqtinstall 3.3.0 can't find Qt 6.11+ on Windows (its download layout changed), so Windows stays on 6.10 until a release fixes that.
+      QT_VERSION: "6.10.3"
     defaults:
       run:
         shell: bash

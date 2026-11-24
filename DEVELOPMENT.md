@@ -12,8 +12,8 @@ How to set up a machine, build Lune from `main`, and run it. Before changing cod
 | Need | Fedora 44 | macOS | Windows (x64) |
 |---|---|---|---|
 | Rust | `rustup` (the version in `rust-toolchain.toml` installs itself) | same | same (MSVC toolchain) |
-| Qt 6.11 | `qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel` | `aqt install-qt mac desktop 6.11.2 clang_64 -O ~/Qt` | `aqt install-qt windows desktop 6.11.2 win64_msvc2022_64 -O C:\Qt` |
-| `QMAKE` env var | `/usr/bin/qmake6` | `$HOME/Qt/6.11.2/macos/bin/qmake` | `C:\Qt\6.11.2\msvc2022_64\bin\qmake.exe` |
+| Qt 6.11 | `qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel` | `aqt install-qt mac desktop 6.11.2 clang_64 -O ~/Qt` | `aqt install-qt windows desktop 6.10.3 win64_msvc2022_64 -O C:\Qt` |
+| `QMAKE` env var | `/usr/bin/qmake6` | `$HOME/Qt/6.11.2/macos/bin/qmake` | `C:\Qt\6.10.3\msvc2022_64\bin\qmake.exe` |
 | Other | `gcc gcc-c++ lld pkgconf-pkg-config git just alsa-lib-devel dbus-devel` | `xcode-select --install`, `brew install just aqtinstall` | Visual Studio 2022 (or Build Tools) with "Desktop development with C++", Python 3.11+, `pip install aqtinstall==3.3.0` |
 
 Do not use Homebrew's `qt` on macOS. The exact commands are below. A Fedora dev container with everything preinstalled lives in the separate [lune-dev](https://github.com/fritojay/lune-dev) repo.
@@ -32,7 +32,7 @@ CI (`.github/workflows/ci.yml`) follows the same steps.
 
 | Component | Version | Notes |
 |---|---|---|
-| Qt | **6.11.2** | The **minor** version (6.11) must match on every platform. CI checks the exact version. |
+| Qt | **6.11.2** (Windows: **6.10.3**) | The **minor** version (6.11) must match on Linux and macOS. Windows stays on 6.10 because aqtinstall 3.3.0 can't find Qt 6.11+ for Windows (Qt changed its download layout; the fix is merged upstream but not yet released). CI checks the exact version. |
 | Rust | stable | Set by `rust-toolchain.toml`. Minimum is `rust-version` in `Cargo.toml`. |
 | CXX-Qt | 0.10.0 | `cxx-qt`, `cxx-qt-lib`, `cxx-qt-build` are pinned with `=` in the root `Cargo.toml`. |
 | aqtinstall (macOS, Windows) | 3.3.0 | Installs the official Qt binaries. |
@@ -99,13 +99,13 @@ In PowerShell:
 winget install Rustlang.Rustup Python.Python.3.13 Casey.Just
 pip install aqtinstall==3.3.0
 
-# Qt 6.11.2, official MSVC binaries
-aqt install-qt windows desktop 6.11.2 win64_msvc2022_64 -O C:\Qt
+# Qt 6.10.3, official MSVC binaries (not 6.11: see Pinned versions)
+aqt install-qt windows desktop 6.10.3 win64_msvc2022_64 -O C:\Qt
 
 # Point CXX-Qt at it, and put Qt's DLLs on PATH for `just run` (set both permanently in System Properties)
-$env:QMAKE = 'C:\Qt\6.11.2\msvc2022_64\bin\qmake.exe'
-$env:PATH = "C:\Qt\6.11.2\msvc2022_64\bin;$env:PATH"
-& $env:QMAKE -query QT_VERSION   # expect 6.11.2
+$env:QMAKE = 'C:\Qt\6.10.3\msvc2022_64\bin\qmake.exe'
+$env:PATH = "C:\Qt\6.10.3\msvc2022_64\bin;$env:PATH"
+& $env:QMAKE -query QT_VERSION   # expect 6.10.3
 ```
 
 - The base install includes `windeployqt`, used by `just bundle-windows`.

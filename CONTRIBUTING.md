@@ -34,7 +34,7 @@ symphonia (no system FFmpeg), cpal, rubato, rtrb, lofty, rusqlite (`bundled`, FT
 
 ## Build
 
-- Qt is pinned to 6.11 (6.11.2) on every platform: macOS and Windows use official binaries via `aqtinstall` (not Homebrew `qt` on macOS), and Fedora 44 uses `qt6-qtbase-devel` and `qt6-qtdeclarative-devel`. CXX-Qt finds Qt via the `QMAKE` env var.
+- Qt is pinned to 6.11 (6.11.2) on Linux and macOS, and to 6.10.3 on Windows until aqtinstall releases Qt 6.11 support for Windows: macOS and Windows use official binaries via `aqtinstall` (not Homebrew `qt` on macOS), and Fedora 44 uses `qt6-qtbase-devel` and `qt6-qtdeclarative-devel`. CXX-Qt finds Qt via the `QMAKE` env var.
 - Exact setup steps live in `DEVELOPMENT.md`.
 - `justfile` targets: `build`, `test`, `run`, `lint`, `fmt`.
 - `cargo fmt` and `cargo clippy -- -D warnings` must pass.

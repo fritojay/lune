@@ -3,7 +3,7 @@
 # installed: unzip the folder anywhere and run lune.exe. Its data folder makes
 # it portable, so the library and settings are kept there too.
 #
-# Needs x64 Windows with Visual Studio's C++ tools, Python 3.11+, and Qt 6.11
+# Needs x64 Windows with Visual Studio's C++ tools, Python 3.11+, and Qt 6.10
 # (msvc2022_64) from aqtinstall with QMAKE pointing at it (DEVELOPMENT.md).
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -23,7 +23,7 @@ if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
     throw "build-zip.ps1 builds the x64 app on x64 Windows, not $env:PROCESSOR_ARCHITECTURE"
 }
-if (-not $env:QMAKE) { throw 'set QMAKE to the qmake of Qt 6.11, see DEVELOPMENT.md' }
+if (-not $env:QMAKE) { throw 'set QMAKE to the qmake of Qt 6.10, see DEVELOPMENT.md' }
 
 $QtBins = & $env:QMAKE -query QT_INSTALL_BINS
 $TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { "$Root\target" }

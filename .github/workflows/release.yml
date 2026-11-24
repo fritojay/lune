@@ -61,6 +61,9 @@ jobs:
     name: Windows zip
     needs: version
     runs-on: windows-latest
+    env:
+      # aqtinstall 3.3.0 can't find Qt 6.11+ on Windows (its download layout changed), so Windows stays on 6.10 until a release fixes that.
+      QT_VERSION: "6.10.3"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
