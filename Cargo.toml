@@ -4,7 +4,7 @@ members = ["crates/core", "crates/engine", "crates/cli", "crates/app"]
 default-members = ["crates/core", "crates/engine", "crates/cli", "crates/app"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 # Highest MSRV among dependencies (lofty, rusqlite). Checked in CI (msrv job).
 rust-version = "1.89"
