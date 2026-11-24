@@ -110,6 +110,11 @@ const ROLES: &[Role] = &[
     ("missing", |q| {
         QVariant::from(&matches!(q, Queued::Missing(_)))
     }),
+    // -1 for a track not in the library, which has no album to show.
+    ("trackId", |q| match q {
+        Queued::Listed(t) => QVariant::from(&t.id),
+        _ => QVariant::from(&-1_i64),
+    }),
 ];
 
 const COVER_ROLE: i32 = list_model::role_id(ROLES, "cover");

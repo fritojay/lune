@@ -448,6 +448,7 @@ fn tracks_are_found_by_id() {
     let catalog = library();
     assert_eq!(catalog.by_id(5).unwrap().album, "Kid A");
     assert!(catalog.by_id(99).is_none());
+    assert_eq!(catalog.album_of(99), None);
 }
 
 #[test]
@@ -639,6 +640,27 @@ proptest! {
             }
             prop_assert_eq!(end, view.len());
         }
+    }
+
+    #[test]
+    fn a_tracks_album_value_lists_its_album_and_only_it(
+        tracks in arb_tracks(),
+        pick in any::<Index>(),
+    ) {
+        prop_assume!(!tracks.is_empty());
+        let catalog = Catalog::new(tracks);
+        let track = catalog.track(pick.index(catalog.len())).unwrap();
+        let value = catalog.album_of(track.id).unwrap();
+        for filters in [
+            catalog.filters(Grouping::Album, None),
+            catalog.filters_newest_first(Grouping::Album, None),
+        ] {
+            prop_assert_eq!(filters.iter().filter(|f| f.value == value).count(), 1);
+        }
+        let view = catalog.view(Grouping::Album, &value, None);
+        let ids: Vec<i64> = view.tracks.iter().map(|&i| catalog.track(i).unwrap().id).collect();
+        prop_assert!(ids.contains(&track.id));
+        prop_assert!(view.tracks.iter().all(|&i| catalog.track(i).unwrap().album_id == track.album_id));
     }
 
     #[test]

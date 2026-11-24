@@ -61,6 +61,17 @@ pub mod qobject {
         #[qinvokable]
         fn select(self: Pin<&mut FilterModel>, row: i32);
 
+        /// Selects track `track_id`'s album in the Albums grouping, and
+        /// clears the search, which could hide it.
+        #[qinvokable]
+        #[cxx_name = "showAlbum"]
+        fn show_album(self: Pin<&mut FilterModel>, track_id: i64);
+
+        /// The search was dropped here, so QML empties its field.
+        #[qsignal]
+        #[cxx_name = "searchCleared"]
+        fn search_cleared(self: Pin<&mut FilterModel>);
+
         /// A click on column `column`'s heading. Columns go by
         /// `SortColumn::name`; `sortColumn` is empty in album order.
         #[qinvokable]
@@ -231,15 +242,11 @@ impl cxx_qt::Initialize for qobject::FilterModel {
                 else {
                     continue;
                 };
-                let matches = if text.trim().is_empty() {
-                    None
-                } else {
-                    match library.search_ids(&text) {
-                        Ok(ids) => Some(ids),
-                        Err(err) => {
-                            tracing::warn!(%err, "search failed");
-                            continue;
-                        }
+                let matches = match library.search_ids(&text) {
+                    Ok(ids) => ids,
+                    Err(err) => {
+                        tracing::warn!(%err, "search failed");
+                        continue;
                     }
                 };
                 if qt_thread
@@ -273,12 +280,12 @@ impl qobject::FilterModel {
         self.set_loading(false);
     }
 
-    fn apply_search(mut self: Pin<&mut Self>, generation: u64, matches: Option<HashSet<i64>>) {
+    fn apply_search(mut self: Pin<&mut Self>, generation: u64, matches: HashSet<i64>) {
         if generation != self.search_generation {
             return;
         }
         let selected = self.selected().cloned();
-        self.as_mut().rust_mut().matches = matches;
+        self.as_mut().rust_mut().matches = Some(matches);
         self.recompute(selected, true);
     }
 
@@ -286,6 +293,21 @@ impl qobject::FilterModel {
         let Some(grouping) = Grouping::from_name(&grouping.to_string()) else {
             return;
         };
+        self.as_mut().set_grouping(grouping);
+        self.recompute(None, true);
+    }
+
+    fn show_album(mut self: Pin<&mut Self>, track_id: i64) {
+        let Some(album) = session::catalog().and_then(|catalog| catalog.album_of(track_id)) else {
+            return;
+        };
+        self.as_mut().drop_search();
+        self.as_mut().set_grouping(Grouping::Album);
+        self.as_mut().recompute(Some(album), true);
+        self.search_cleared();
+    }
+
+    fn set_grouping(mut self: Pin<&mut Self>, grouping: Grouping) {
         set!(
             self,
             grouping,
@@ -298,7 +320,6 @@ impl qobject::FilterModel {
             album_directional_changed,
             grouping.has_album_direction()
         );
-        self.recompute(None, true);
     }
 
     fn select(mut self: Pin<&mut Self>, row: i32) {
@@ -360,12 +381,30 @@ impl qobject::FilterModel {
         sort_of(&self.sort_column.to_string(), self.sort_descending)
     }
 
+    /// A blank search is applied here rather than by the search thread, so
+    /// emptying an already empty search doesn't rebuild the view.
     fn set_search(mut self: Pin<&mut Self>, text: &QString) {
+        let text = text.to_string();
+        if text.trim().is_empty() {
+            if self.as_mut().drop_search() {
+                let selected = self.selected().cloned();
+                self.recompute(selected, true);
+            }
+            return;
+        }
         let generation = self.search_generation + 1;
         self.as_mut().rust_mut().search_generation = generation;
         if let Some(searches) = &self.searches {
-            let _ = searches.send((generation, text.to_string()));
+            let _ = searches.send((generation, text));
         }
+    }
+
+    /// Forgets the search and any still running. Returns whether it had
+    /// matches, so the view needs a rebuild.
+    fn drop_search(mut self: Pin<&mut Self>) -> bool {
+        let mut this = self.as_mut().rust_mut();
+        this.search_generation += 1;
+        this.matches.take().is_some()
     }
 
     fn grouping_kind(&self) -> Grouping {

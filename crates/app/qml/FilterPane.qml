@@ -10,11 +10,18 @@ ColumnLayout {
     required property int currentRow
     required property url cover
     required property bool hasTrack
+    required property string album
     signal searchEdited(string text)
     signal rowChosen(int row)
+    signal albumRequested()
 
     function focusSearch() {
         search.forceActiveFocus()
+    }
+
+    function clearSearch() {
+        search.clear()
+        filterList.forceActiveFocus()
     }
 
     spacing: 6
@@ -142,5 +149,14 @@ ColumnLayout {
         // The thumbnail is already small, and decoding at the width would decode it
         // again at every step of a resize.
         decodeAtSize: false
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: filterPane.albumRequested()
+            ToolTip.visible: containsMouse
+            ToolTip.text: qsTr("Go to the album “%1”").arg(filterPane.album)
+        }
     }
 }

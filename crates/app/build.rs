@@ -36,6 +36,7 @@ fn main() -> std::io::Result<()> {
         ])
         .qrc_resources([
             "qml/icons/clear.svg",
+            "qml/icons/error.svg",
             "qml/icons/grid.svg",
             "qml/icons/list.svg",
             "qml/icons/missing.svg",

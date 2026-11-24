@@ -102,6 +102,7 @@ ApplicationWindow {
 
     FilterModel {
         id: filters
+        onSearchCleared: filterPane.clearSearch()
     }
 
     AlbumListModel {
@@ -317,8 +318,10 @@ ApplicationWindow {
                 currentRow: filters.currentRow
                 cover: player.cover
                 hasTrack: player.hasTrack
+                album: player.album
                         onSearchEdited: text => filters.setSearch(text)
                 onRowChosen: row => filters.select(row)
+                onAlbumRequested: filters.showAlbum(player.currentTrackId)
             }
 
             ColumnLayout {
@@ -402,6 +405,7 @@ ApplicationWindow {
                 onPlayRequested: row => player.playQueueRow(row)
                 onRemoveRequested: row => player.removeQueueRow(row)
                 onMoveRequested: (from, to) => player.moveQueueRow(from, to)
+                onAlbumRequested: trackId => filters.showAlbum(trackId)
             }
         }
     }

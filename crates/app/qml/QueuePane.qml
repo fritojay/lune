@@ -17,6 +17,7 @@ ColumnLayout {
     signal playRequested(int row)
     signal removeRequested(int row)
     signal moveRequested(int from, int to)
+    signal albumRequested(real trackId)
 
     function showCurrent() {
         queueList.positionViewAtIndex(currentRow, ListView.Contain)
@@ -27,6 +28,7 @@ ColumnLayout {
     Menu {
         id: queueMenu
         property int row: -1
+        property real trackId: -1
         MenuItem {
             text: qsTr("Play")
             onTriggered: queuePane.playRequested(queueMenu.row)
@@ -34,6 +36,12 @@ ColumnLayout {
         MenuItem {
             text: qsTr("Remove")
             onTriggered: queuePane.removeRequested(queueMenu.row)
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: qsTr("Go to Album")
+            enabled: queueMenu.trackId >= 0
+            onTriggered: queuePane.albumRequested(queueMenu.trackId)
         }
         MenuSeparator {}
         MenuItem {
@@ -143,6 +151,7 @@ ColumnLayout {
             onPlayRequested: queuePane.playRequested(queueRow.index)
             onMenuRequested: {
                 queueMenu.row = queueRow.index
+                queueMenu.trackId = queueRow.trackId
                 queueMenu.popup()
             }
             onDragMoved: y => queueList.dropRow = queueList.dropTarget(queueRow, y)

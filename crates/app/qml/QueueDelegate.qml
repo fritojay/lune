@@ -11,6 +11,7 @@ Rectangle {
     required property string duration
     required property url cover
     required property bool missing
+    required property real trackId
 
     required property int currentRow
     required property int rowCount

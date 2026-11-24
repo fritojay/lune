@@ -387,6 +387,11 @@ impl Catalog {
         self.by_id.get(&id).and_then(|&i| self.tracks.get(i))
     }
 
+    /// The [`Grouping::Album`] value that lists track `track_id`.
+    pub fn album_of(&self, track_id: i64) -> Option<FilterValue> {
+        self.by_id(track_id).map(|t| FilterValue::Album(t.album_id))
+    }
+
     /// Whether album `album_id` has more than one disc, so its track numbers
     /// show the disc.
     pub fn is_multi_disc(&self, album_id: i64) -> bool {
