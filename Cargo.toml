@@ -20,6 +20,7 @@ anyhow = "1.0.104"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 clap = { version = "4.6.7", features = ["derive"] }
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 
 # CXX-Qt: pinned exact versions (see CONTRIBUTING.md). Only crates/app may depend on these.
 cxx = "=1.0.205"

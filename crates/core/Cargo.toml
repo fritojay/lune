@@ -26,5 +26,8 @@ unicode-normalization = "0.1.26"
 # Generates fake library rows for UI benchmarks (`Library::generate_synthetic`).
 synthetic = []
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

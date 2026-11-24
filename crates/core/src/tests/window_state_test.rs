@@ -1,6 +1,8 @@
+use proptest::prelude::*;
+
 use super::*;
 use crate::SortColumn;
-use crate::test_util::TempDir;
+use crate::test_util::{TempDir, arb_filter_value, arb_grouping, arb_sort, arb_sort_column};
 
 fn custom() -> WindowState {
     WindowState {
@@ -24,25 +26,6 @@ fn custom() -> WindowState {
     }
 }
 
-fn browsing(selected: FilterValue) -> WindowState {
-    WindowState {
-        browse: BrowseState {
-            grouping: Grouping::Year,
-            selected,
-            sort: None,
-            album_descending: false,
-        },
-        ..WindowState::default()
-    }
-}
-
-fn round_trip(state: &WindowState) -> WindowState {
-    let dir = TempDir::new();
-    let path = dir.path().join("window.toml");
-    state.save(&path).unwrap();
-    WindowState::load(&path).unwrap()
-}
-
 #[test]
 fn a_missing_file_gives_the_defaults() {
     let dir = TempDir::new();
@@ -60,15 +43,6 @@ fn the_state_survives_a_save_and_load_and_creates_the_folder() {
     assert_eq!(WindowState::load(&path).unwrap(), custom());
     let entries = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
     assert_eq!(entries, 1, "no temp file left behind");
-}
-
-#[test]
-fn saving_again_replaces_the_previous_state() {
-    let dir = TempDir::new();
-    let path = dir.path().join("window.toml");
-    custom().save(&path).unwrap();
-    WindowState::default().save(&path).unwrap();
-    assert_eq!(WindowState::load(&path).unwrap(), WindowState::default());
 }
 
 #[test]
@@ -127,35 +101,6 @@ fn an_empty_file_gives_the_defaults() {
 }
 
 #[test]
-fn a_tiny_saved_size_grows_to_the_minimum() {
-    let dir = TempDir::new();
-    let path = dir.write("window.toml", b"width = 0\nheight = 10\n");
-    let state = WindowState::load(&path).unwrap();
-    assert_eq!(
-        (state.width, state.height),
-        (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-    );
-}
-
-#[test]
-fn the_minimum_size_itself_is_kept() {
-    let dir = TempDir::new();
-    let path = dir.path().join("window.toml");
-    WindowState {
-        width: MIN_WINDOW_WIDTH,
-        height: MIN_WINDOW_HEIGHT,
-        ..WindowState::default()
-    }
-    .save(&path)
-    .unwrap();
-    let state = WindowState::load(&path).unwrap();
-    assert_eq!(
-        (state.width, state.height),
-        (MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-    );
-}
-
-#[test]
 fn a_malformed_file_is_an_error() {
     let dir = TempDir::new();
     for (name, text) in [
@@ -183,44 +128,6 @@ fn a_malformed_file_is_reported_as_window_state_not_settings() {
     let message = WindowState::load(&path).unwrap_err().to_string();
     assert!(message.contains("window state"), "{message}");
     assert!(!message.contains("settings"), "{message}");
-}
-
-#[test]
-fn every_kind_of_selected_filter_survives_a_save_and_load() {
-    for selected in [
-        FilterValue::All,
-        FilterValue::Text("björk".into()),
-        FilterValue::Text(String::new()),
-        FilterValue::Album(42),
-        FilterValue::Album(-1),
-        FilterValue::Year(1997),
-        FilterValue::UnknownYear,
-    ] {
-        let state = browsing(selected.clone());
-        assert_eq!(round_trip(&state), state, "{selected:?}");
-    }
-}
-
-#[test]
-fn every_grouping_and_sort_survives_a_save_and_load() {
-    for grouping in Grouping::ALL {
-        for sort in SortColumn::ALL
-            .into_iter()
-            .flat_map(|column| [false, true].map(|descending| Some(Sort { column, descending })))
-            .chain([None])
-        {
-            let state = WindowState {
-                browse: BrowseState {
-                    grouping,
-                    selected: FilterValue::All,
-                    sort,
-                    album_descending: sort.is_none(),
-                },
-                ..WindowState::default()
-            };
-            assert_eq!(round_trip(&state), state, "{grouping:?} {sort:?}");
-        }
-    }
 }
 
 #[test]
@@ -363,88 +270,114 @@ fn a_browse_section_that_is_not_a_table_is_dropped() {
     assert_eq!((state.width, state.browse), (900, BrowseState::default()));
 }
 
-fn sized(width: u32, maximized: bool, filter: u32, queue: u32) -> WindowState {
-    WindowState {
-        width,
-        height: 800,
-        maximized,
-        filter_pane_width: filter,
-        queue_pane_width: queue,
-        ..WindowState::default()
+/// Mostly sizes near the minimums and real screens, sometimes huge ones.
+fn arb_size() -> impl Strategy<Value = u32> {
+    prop_oneof![3 => 0..3000u32, 1 => any::<u32>()]
+}
+
+fn arb_window_state() -> impl Strategy<Value = WindowState> {
+    let browse = (
+        arb_grouping(),
+        arb_filter_value(),
+        proptest::option::of(arb_sort()),
+        any::<bool>(),
+    )
+        .prop_map(|(grouping, selected, sort, album_descending)| BrowseState {
+            grouping,
+            selected,
+            sort,
+            album_descending,
+        });
+    (
+        (arb_size(), arb_size(), arb_size(), arb_size()),
+        (any::<bool>(), any::<bool>(), any::<bool>()),
+        prop::collection::btree_set(arb_sort_column(), 0..=SortColumn::ALL.len()),
+        browse,
+    )
+        .prop_map(
+            |(
+                (width, height, filter_pane_width, queue_pane_width),
+                (maximized, queue_shown, album_grid),
+                hidden_columns,
+                browse,
+            )| {
+                WindowState {
+                    width,
+                    height,
+                    maximized,
+                    filter_pane_width,
+                    queue_pane_width,
+                    queue_shown,
+                    hidden_columns,
+                    album_grid,
+                    browse,
+                }
+            },
+        )
+}
+
+/// A screen size, sometimes unknown (0).
+fn arb_screen() -> impl Strategy<Value = u32> {
+    prop_oneof![Just(0), arb_size()]
+}
+
+proptest! {
+    #[test]
+    fn the_last_saved_state_loads_with_its_size_grown_to_the_minimum(
+        earlier in arb_window_state(),
+        state in arb_window_state(),
+    ) {
+        let dir = TempDir::new();
+        let path = dir.path().join("window.toml");
+        earlier.save(&path).unwrap();
+        state.save(&path).unwrap();
+        prop_assert_eq!(
+            WindowState::load(&path).unwrap(),
+            WindowState {
+                width: state.width.max(MIN_WINDOW_WIDTH),
+                height: state.height.max(MIN_WINDOW_HEIGHT),
+                ..state
+            }
+        );
     }
-}
 
-fn panes(state: &WindowState) -> (u32, u32) {
-    (state.filter_pane_width, state.queue_pane_width)
-}
+    #[test]
+    fn a_fitted_window_and_its_panes_fit_the_screen(
+        state in arb_window_state(),
+        screen_width in arb_screen(),
+        screen_height in arb_screen(),
+        main_pane_width in 0..2000u32,
+    ) {
+        let fitted = state.clone().fitted(screen_width, screen_height, main_pane_width);
+        let fit = |size: u32, screen: u32| if screen == 0 { size } else { size.min(screen) };
+        prop_assert_eq!(fitted.width, fit(state.width, screen_width));
+        prop_assert_eq!(fitted.height, fit(state.height, screen_height));
 
-#[test]
-fn a_layout_that_fits_is_unchanged() {
-    let state = sized(1280, false, 250, 300);
-    assert_eq!(state.clone().fitted(1920, 1080, 400), state);
-}
+        let window = if state.maximized && screen_width > 0 { screen_width } else { fitted.width };
+        let room = u64::from(window.saturating_sub(main_pane_width));
+        let sides = u64::from(state.filter_pane_width) + u64::from(state.queue_pane_width);
+        for (old, new) in [
+            (state.filter_pane_width, fitted.filter_pane_width),
+            (state.queue_pane_width, fitted.queue_pane_width),
+        ] {
+            if sides <= room {
+                prop_assert_eq!(new, old);
+            } else {
+                // Shrunk in proportion, rounding down.
+                let (old, new) = (u64::from(old), u64::from(new));
+                prop_assert!(new * sides <= old * room && old * room < (new + 1) * sides);
+            }
+        }
+        prop_assert!(u64::from(fitted.filter_pane_width) + u64::from(fitted.queue_pane_width) <= room);
 
-#[test]
-fn a_window_bigger_than_the_screen_shrinks_to_it() {
-    let state = WindowState {
-        height: 1400,
-        ..sized(2400, false, 250, 300)
+        let unchanged = WindowState {
+            width: state.width,
+            height: state.height,
+            filter_pane_width: state.filter_pane_width,
+            queue_pane_width: state.queue_pane_width,
+            ..fitted.clone()
+        };
+        prop_assert_eq!(unchanged, state);
+        prop_assert_eq!(fitted.clone().fitted(screen_width, screen_height, main_pane_width), fitted);
     }
-    .fitted(1440, 900, 400);
-    assert_eq!((state.width, state.height), (1440, 900));
-}
-
-#[test]
-fn an_unknown_screen_size_leaves_the_window_alone() {
-    let state = WindowState {
-        height: 1400,
-        ..sized(2400, false, 250, 300)
-    }
-    .fitted(0, 0, 400);
-    assert_eq!((state.width, state.height), (2400, 1400));
-}
-
-#[test]
-fn panes_too_wide_for_the_window_shrink_in_proportion() {
-    let state = sized(2400, false, 1400, 700).fitted(1440, 900, 400);
-    assert_eq!(panes(&state), (693, 346));
-    assert!(state.filter_pane_width + state.queue_pane_width + 400 <= state.width);
-}
-
-#[test]
-fn panes_that_exactly_leave_the_main_pane_its_width_are_kept() {
-    let state = sized(1000, false, 300, 300).fitted(1920, 1080, 400);
-    assert_eq!(panes(&state), (300, 300));
-}
-
-#[test]
-fn a_hidden_queue_still_counts() {
-    let state = WindowState {
-        queue_shown: false,
-        ..sized(1000, false, 400, 400)
-    }
-    .fitted(1920, 1080, 400);
-    assert_eq!(panes(&state), (300, 300));
-}
-
-#[test]
-fn a_maximized_window_fits_its_panes_to_the_screen_not_the_normal_size() {
-    let state = sized(800, true, 600, 600).fitted(2560, 1440, 400);
-    assert_eq!(state.width, 800);
-    assert_eq!(panes(&state), (600, 600));
-
-    let state = sized(800, true, 1200, 1200).fitted(1440, 900, 400);
-    assert_eq!(panes(&state), (520, 520));
-}
-
-#[test]
-fn a_window_narrower_than_the_main_pane_leaves_no_room_for_panes() {
-    let state = sized(400, false, 250, 300).fitted(1920, 1080, 600);
-    assert_eq!(panes(&state), (0, 0));
-}
-
-#[test]
-fn huge_saved_panes_do_not_overflow() {
-    let state = sized(1280, false, u32::MAX, u32::MAX).fitted(1920, 1080, 400);
-    assert_eq!(panes(&state), (440, 440));
 }

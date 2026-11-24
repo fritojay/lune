@@ -1,3 +1,5 @@
+use proptest::prelude::*;
+
 use super::*;
 use crate::test_util::TempDir;
 
@@ -119,29 +121,6 @@ fn an_unreadable_scroll_speed_gets_the_default_and_keeps_the_folders() {
 }
 
 #[test]
-fn adding_a_folder_skips_duplicates_and_folders_already_covered() {
-    let mut list = Vec::new();
-    assert!(add_folder(&mut list, PathBuf::from("/music/rock")));
-    assert!(!add_folder(&mut list, PathBuf::from("/music/rock")));
-    assert!(!add_folder(&mut list, PathBuf::from("/music/rock/old")));
-    assert!(
-        add_folder(&mut list, PathBuf::from("/music/rockabilly")),
-        "not inside /music/rock"
-    );
-    // A parent replaces the folders inside it.
-    assert!(add_folder(&mut list, PathBuf::from("/music")));
-    assert_eq!(list, [PathBuf::from("/music")]);
-}
-
-#[test]
-fn removing_a_folder() {
-    let mut list = vec![PathBuf::from("/a"), PathBuf::from("/b")];
-    assert!(remove_folder(&mut list, Path::new("/a")));
-    assert!(!remove_folder(&mut list, Path::new("/a")));
-    assert_eq!(list, [PathBuf::from("/b")]);
-}
-
-#[test]
 fn a_file_without_a_scroll_speed_gets_the_default() {
     let dir = TempDir::new();
     let path = dir.write("config.toml", b"library_folders = [\"/a\"]\n");
@@ -151,34 +130,53 @@ fn a_file_without_a_scroll_speed_gets_the_default() {
     );
 }
 
-#[test]
-fn an_out_of_range_scroll_speed_in_the_file_is_clamped() {
-    let dir = TempDir::new();
-    for (text, expected) in [
-        ("scroll_speed = 0", *SCROLL_SPEEDS.start()),
-        ("scroll_speed = 1000", *SCROLL_SPEEDS.end()),
-    ] {
-        let path = dir.write("config.toml", text.as_bytes());
-        assert_eq!(
-            Settings::load(&path).unwrap().unwrap().scroll_speed,
-            expected,
-            "{text}"
-        );
-    }
+/// Folders that nest, and one that shares a name prefix without nesting.
+fn arb_folder() -> impl Strategy<Value = PathBuf> {
+    prop::sample::select(&["/m", "/m/a", "/m/a/b", "/m/ab", "/n"][..]).prop_map(PathBuf::from)
 }
 
-#[test]
-fn setting_the_scroll_speed_clamps_it_and_reports_changes() {
-    let mut settings = Settings::default();
-    assert!(settings.set_scroll_speed(5));
-    assert!(!settings.set_scroll_speed(5));
-    assert_eq!(settings.scroll_speed, 5);
-    assert!(settings.set_scroll_speed(0));
-    assert_eq!(settings.scroll_speed, *SCROLL_SPEEDS.start());
-    assert!(settings.set_scroll_speed(u32::MAX));
-    assert_eq!(settings.scroll_speed, *SCROLL_SPEEDS.end());
-    assert!(
-        !settings.set_scroll_speed(u32::MAX),
-        "already at the maximum"
-    );
+proptest! {
+    #[test]
+    fn listed_folders_never_nest_and_cover_every_added_one(
+        edits in prop::collection::vec((any::<bool>(), arb_folder()), 0..20),
+    ) {
+        let mut list: Vec<PathBuf> = Vec::new();
+        for (add, folder) in edits {
+            let before = list.clone();
+            let changed = if add {
+                add_folder(&mut list, folder.clone())
+            } else {
+                remove_folder(&mut list, &folder)
+            };
+            prop_assert_eq!(changed, list != before);
+            if add {
+                prop_assert!(list.iter().any(|f| folder.starts_with(f)));
+            } else {
+                prop_assert!(!list.contains(&folder));
+            }
+            for (i, a) in list.iter().enumerate() {
+                for b in &list[i + 1..] {
+                    prop_assert!(!a.starts_with(b) && !b.starts_with(a), "{a:?} and {b:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_scroll_speed_set_or_loaded_is_clamped_into_range(speed: u32, from in 0..20u32) {
+        let mut settings = Settings::default();
+        settings.set_scroll_speed(from);
+        let before = settings.scroll_speed;
+        let changed = settings.set_scroll_speed(speed);
+        let nearest = speed.max(*SCROLL_SPEEDS.start()).min(*SCROLL_SPEEDS.end());
+        prop_assert_eq!(settings.scroll_speed, nearest);
+        prop_assert_eq!(changed, nearest != before);
+
+        let dir = TempDir::new();
+        let path = dir.write("config.toml", format!("scroll_speed = {speed}").as_bytes());
+        prop_assert_eq!(
+            Settings::load(&path).unwrap().unwrap().scroll_speed,
+            nearest
+        );
+    }
 }

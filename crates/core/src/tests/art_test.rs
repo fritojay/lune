@@ -1,6 +1,7 @@
 use std::cell::Cell;
 
 use image::{ImageFormat, RgbaImage};
+use proptest::prelude::*;
 use rusqlite::params;
 
 use super::*;
@@ -192,22 +193,40 @@ fn a_scanned_cover_can_be_thumbnailed_through_the_library() {
     assert_eq!(dimensions(&thumb.unwrap()), (16, 16));
 }
 
-#[test]
-fn a_malformed_hash_never_names_a_file_outside_the_cache() {
-    let dir = TempDir::new();
-    let outside = dir.write("outside-32.jpg", b"not a cover");
-    // It must exist, or `cache/..` doesn't resolve and nothing escapes.
-    let cache = dir
-        .write("cache/other.jpg", b"")
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let conn = library(b"x", &["1.flac"]);
-    conn.execute("UPDATE art SET hash = '../outside' WHERE id = 1", [])
-        .unwrap();
-    assert!(outside.is_file());
-    let result = thumbnail_with(&conn, 1, &cache, 32, |_| Ok(Some(b"x".to_vec())));
-    assert!(matches!(result, Ok(None)), "{result:?}");
+/// Hashes a database from elsewhere might hold: paths, near misses of a
+/// real hash, and anything else.
+fn arb_malformed_hash() -> impl Strategy<Value = String> {
+    prop_oneof![
+        Just("../outside".to_owned()),
+        "[0-9a-f]{63}",
+        "[0-9a-f]{65}",
+        "[0-9A-F]{64}",
+        "[0-9a-f./]{0,70}",
+        any::<String>(),
+    ]
+    .prop_filter("a well-formed hash", |h| {
+        let lower_hex = |b: u8| b.is_ascii_digit() || (b'a'..=b'f').contains(&b);
+        h.len() != 64 || !h.bytes().all(lower_hex)
+    })
+}
+
+proptest! {
+    #[test]
+    fn a_malformed_hash_never_names_a_file(bad in arb_malformed_hash()) {
+        let dir = TempDir::new();
+        dir.write("outside-32.jpg", b"not a cover");
+        // It must exist, or `cache/..` doesn't resolve and nothing escapes.
+        let cache = dir.write("cache/other.jpg", b"").parent().unwrap().to_path_buf();
+        let conn = library(b"x", &["1.flac"]);
+        conn.execute("UPDATE art SET hash = ?1 WHERE id = 1", [&bad]).unwrap();
+        let read = Cell::new(false);
+        let result = thumbnail_with(&conn, 1, &cache, 32, |_| {
+            read.set(true);
+            Ok(Some(png(64, 64)))
+        });
+        prop_assert!(matches!(result, Ok(None)), "{result:?}");
+        prop_assert!(!read.get(), "no track was read");
+    }
 }
 
 #[test]

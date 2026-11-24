@@ -1,3 +1,6 @@
+use proptest::prelude::*;
+use proptest::sample::select;
+
 use super::*;
 use crate::test_util::qml_values;
 
@@ -13,34 +16,6 @@ fn out_of_range_qml_sizes_saturate() {
     assert_eq!(pixels(-12.0), 0);
     assert_eq!(pixels(f64::NAN), 0);
     assert_eq!(pixels(f64::INFINITY), u32::MAX);
-}
-
-#[test]
-fn hiding_a_column_adds_it_and_showing_it_removes_it() {
-    assert_eq!(
-        with_column_shown(BTreeSet::new(), "file_type", false),
-        Some([SortColumn::FileType].into())
-    );
-    let hidden = [SortColumn::BitRate, SortColumn::FileType].into();
-    assert_eq!(
-        with_column_shown(hidden, "file_type", true),
-        Some([SortColumn::BitRate].into())
-    );
-}
-
-#[test]
-fn a_column_already_in_that_state_changes_nothing() {
-    assert_eq!(
-        with_column_shown([SortColumn::FileType].into(), "file_type", false),
-        None
-    );
-    assert_eq!(with_column_shown(BTreeSet::new(), "file_type", true), None);
-}
-
-#[test]
-fn a_column_that_does_not_exist_changes_nothing() {
-    assert_eq!(with_column_shown(BTreeSet::new(), "nope", false), None);
-    assert_eq!(with_column_shown(BTreeSet::new(), "", false), None);
 }
 
 #[test]
@@ -77,72 +52,6 @@ fn a_wide_row_gives_the_title_what_the_others_leave() {
 }
 
 #[test]
-fn the_artist_takes_at_most_a_quarter_of_the_row() {
-    assert_eq!(widths(800.0, &[])[2], 200.0);
-}
-
-#[test]
-fn a_narrow_row_shrinks_the_hideable_columns_before_the_title() {
-    let w = widths(500.0, &[]);
-    assert!((120.0..125.0).contains(&w[1]), "{w:?}");
-    assert_eq!([w[0], w[5]], [32.0, 56.0]);
-    assert!(
-        w[2..5]
-            .iter()
-            .all(|x| (MIN_SHRUNK_WIDTH..125.0).contains(x)),
-        "{w:?}"
-    );
-    assert!(
-        w.iter().sum::<f64>() + 5.0 * COLUMN_SPACING <= 500.0,
-        "{w:?}"
-    );
-}
-
-#[test]
-fn squeezed_hideable_columns_drop_from_the_right_with_their_gap() {
-    let w = widths(380.0, &[]);
-    assert_eq!(w[4], 0.0, "bit rate goes first: {w:?}");
-    assert!(w[2] > 0.0 && w[3] > 0.0, "{w:?}");
-    let gaps = 4.0 * COLUMN_SPACING;
-    assert!(w.iter().sum::<f64>() + gaps <= 380.0, "{w:?}");
-}
-
-#[test]
-fn the_title_shrinks_only_once_every_hideable_column_is_gone() {
-    assert_eq!(widths(206.0, &[]), [32.0, 98.0, 0.0, 0.0, 0.0, 56.0]);
-}
-
-#[test]
-fn the_number_and_time_keep_their_width_even_when_nothing_fits() {
-    assert_eq!(widths(50.0, &[]), [32.0, 0.0, 0.0, 0.0, 0.0, 56.0]);
-}
-
-#[test]
-fn hidden_columns_get_no_width_entry() {
-    assert_eq!(
-        widths(1000.0, &[SortColumn::FileType, SortColumn::BitRate]),
-        [32.0, 662.0, 220.0, 56.0]
-    );
-}
-
-#[test]
-fn a_row_with_no_hideable_columns_shown_still_fills() {
-    let hidden = [
-        SortColumn::Artist,
-        SortColumn::FileType,
-        SortColumn::BitRate,
-    ];
-    assert_eq!(widths(300.0, &hidden), [32.0, 192.0, 56.0]);
-}
-
-#[test]
-fn a_meaningless_width_is_treated_as_zero() {
-    for available in [f64::NAN, f64::NEG_INFINITY, f64::INFINITY, -10.0] {
-        assert_eq!(widths(available, &[]), [32.0, 0.0, 0.0, 0.0, 0.0, 56.0]);
-    }
-}
-
-#[test]
 fn columns_qml_matches_the_rust_column_sizes() {
     let qml = include_str!("../../qml/Columns.qml");
     let order: Vec<&str> = COLUMN_SIZES.iter().map(|size| size.column.name()).collect();
@@ -160,4 +69,90 @@ fn columns_qml_matches_the_rust_column_sizes() {
         .collect();
     assert_eq!(hideable, expected);
     assert!(qml.contains(&format!("readonly property int spacing: {COLUMN_SPACING}")));
+}
+
+fn arb_hidden() -> impl Strategy<Value = BTreeSet<SortColumn>> {
+    prop::collection::btree_set(select(&SortColumn::ALL[..]), 0..=SortColumn::ALL.len())
+}
+
+/// Row widths around where columns start to squeeze, and nonsense ones.
+fn arb_available() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        4 => 0.0..1200.0,
+        1 => Just(f64::NAN),
+        1 => Just(f64::INFINITY),
+        1 => Just(f64::NEG_INFINITY),
+        1 => -100.0..0.0,
+    ]
+}
+
+proptest! {
+    #[test]
+    fn showing_or_hiding_a_column_changes_only_that_column(
+        hidden in arb_hidden(),
+        name in prop_oneof![select(&SortColumn::ALL[..]).prop_map(SortColumn::name), Just("nope"), Just("")],
+        shown: bool,
+    ) {
+        let result = with_column_shown(hidden.clone(), name, shown);
+        let Some(column) = SortColumn::from_name(name) else {
+            prop_assert_eq!(result, None);
+            return Ok(());
+        };
+        let mut expected = hidden.clone();
+        if shown {
+            expected.remove(&column);
+        } else {
+            expected.insert(column);
+        }
+        prop_assert_eq!(result, (expected != hidden).then_some(expected));
+    }
+
+    #[test]
+    fn columns_squeeze_then_drop_from_the_right_before_the_title_shrinks(
+        available in arb_available(),
+        hidden in arb_hidden(),
+    ) {
+        let widths = column_widths(available, &hidden);
+        let row = if available.is_finite() { available.max(0.0) } else { 0.0 };
+        let shown: Vec<&ColumnSize> = COLUMN_SIZES.iter().filter(|s| !hidden.contains(&s.column)).collect();
+        prop_assert_eq!(widths.len(), shown.len());
+        let mut dropped = false;
+        let mut title = None;
+        for (size, &width) in shown.iter().zip(&widths) {
+            prop_assert!(width >= 0.0 && width.fract() == 0.0, "{widths:?}");
+            let natural = size.max_share.map_or(size.width, |share| size.width.min(row * share));
+            if size.column == SortColumn::Title {
+                title = Some(width);
+            } else if !size.hideable {
+                prop_assert_eq!(width, natural);
+            } else if width == 0.0 {
+                dropped = true;
+            } else {
+                prop_assert!(!dropped, "only the rightmost drop: {widths:?}");
+                prop_assert!((MIN_SHRUNK_WIDTH..=natural).contains(&width), "{widths:?}");
+            }
+        }
+        let kept = widths.iter().filter(|&&w| w > 0.0).count() + usize::from(title == Some(0.0));
+        let gaps = COLUMN_SPACING * kept.saturating_sub(1) as f64;
+        let used = widths.iter().sum::<f64>() + gaps;
+        let hideable_shown = shown.iter().zip(&widths).any(|(s, &w)| s.hideable && w > 0.0);
+        if hideable_shown {
+            prop_assert!(used <= row, "the shown hideable columns fit: {widths:?}");
+        }
+        let title_width = COLUMN_SIZES
+            .iter()
+            .find(|s| s.column == SortColumn::Title)
+            .unwrap()
+            .width;
+        match title {
+            Some(title) if title > 0.0 => {
+                prop_assert!(row - 1.0 < used && used <= row, "the title fills the row: {widths:?}");
+                if hideable_shown {
+                    prop_assert!(title >= title_width, "{widths:?}");
+                }
+            }
+            Some(_) => prop_assert!(!hideable_shown, "{widths:?}"),
+            None => {}
+        }
+    }
 }

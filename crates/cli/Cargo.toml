@@ -23,5 +23,8 @@ tracing-subscriber.workspace = true
 # `gen-library`: fake library rows for UI benchmarks.
 synthetic = ["lune-core/synthetic"]
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

@@ -79,6 +79,15 @@ fn child<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
     children(data).find(|(k, _)| k == kind).map(|(_, p)| p)
 }
 
+/// Fills `buf`, or returns `false` if the stream ends first.
+fn read_full(file: &mut impl Read, buf: &mut [u8]) -> std::io::Result<bool> {
+    match file.read_exact(buf) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// Finds the top-level box `want` in a stream of `len` bytes and returns its
 /// payload. Stops (returning `None`) on any size that doesn't fit the stream.
 fn read_top_level_box(
@@ -90,16 +99,16 @@ fn read_top_level_box(
     while offset < len {
         file.seek(SeekFrom::Start(offset))?;
         let mut head = [0u8; 16];
-        match file.read_exact(&mut head[..8]) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-            Err(e) => return Err(e),
+        if !read_full(file, &mut head[..8])? {
+            return Ok(None);
         }
         let size32 = u32::from_be_bytes([head[0], head[1], head[2], head[3]]);
         let (head_len, total) = match size32 {
             0 => return Ok(None), // box runs to EOF; moov is never like this
             1 => {
-                file.read_exact(&mut head[8..16])?;
+                if !read_full(file, &mut head[8..16])? {
+                    return Ok(None);
+                }
                 let mut size = [0u8; 8];
                 size.copy_from_slice(&head[8..16]);
                 (16u64, u64::from_be_bytes(size))

@@ -1,18 +1,6 @@
+use proptest::prelude::*;
+
 use super::*;
-
-#[test]
-fn durations_are_minutes_and_seconds() {
-    assert_eq!(duration(0), "0:00");
-    assert_eq!(duration(59_999), "0:59");
-    assert_eq!(duration(3_725_000), "62:05");
-}
-
-#[test]
-fn long_durations_add_hours_only_when_needed() {
-    assert_eq!(long_duration(3_599_999), "59:59");
-    assert_eq!(long_duration(3_600_000), "1:00:00");
-    assert_eq!(long_duration(90_061_000), "25:01:01");
-}
 
 #[test]
 fn track_numbers_show_the_disc_only_on_multi_disc_albums() {
@@ -100,4 +88,37 @@ fn file_types_are_upper_case_codec_names() {
 fn bit_rates_are_in_kbps_and_empty_when_unknown() {
     assert_eq!(bit_rate(Some(320)), "320 kbps");
     assert_eq!(bit_rate(None), "");
+}
+
+/// The whole seconds `text` shows, if the first field has no leading zero and
+/// each field after it is two digits under 60.
+fn shown_seconds(text: &str) -> Option<u64> {
+    let mut fields = text.split(':');
+    let first = fields.next()?;
+    if first.len() > 1 && first.starts_with('0') {
+        return None;
+    }
+    let mut secs: u64 = first.parse().ok()?;
+    for field in fields {
+        let value: u64 = field.parse().ok()?;
+        if field.len() != 2 || value >= 60 {
+            return None;
+        }
+        secs = secs * 60 + value;
+    }
+    Some(secs)
+}
+
+proptest! {
+    #[test]
+    fn durations_show_whole_minutes_and_seconds_and_long_ones_add_hours(
+        ms in prop_oneof![0..10_000_000u64, 3_599_000..3_601_000u64, any::<u64>()],
+    ) {
+        let short = duration(ms);
+        prop_assert_eq!(short.matches(':').count(), 1);
+        prop_assert_eq!(shown_seconds(&short), Some(ms / 1000));
+        let long = long_duration(ms);
+        prop_assert_eq!(long.matches(':').count(), if ms < 3_600_000 { 1 } else { 2 });
+        prop_assert_eq!(shown_seconds(&long), Some(ms / 1000));
+    }
 }

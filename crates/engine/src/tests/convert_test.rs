@@ -1,3 +1,5 @@
+use proptest::prelude::*;
+
 use super::*;
 
 #[test]
@@ -83,4 +85,26 @@ fn surround_downmix_keeps_center_and_surrounds_and_drops_lfe() {
 fn other_layouts_keep_the_first_channels() {
     assert_eq!(map(&[1.0, 2.0, 3.0, 4.0], 4, 2), [1.0, 2.0]);
     assert_eq!(map(&[1.0, 2.0], 2, 3), [1.0, 2.0, 0.0]);
+}
+
+proptest! {
+    #[test]
+    fn mapped_audio_has_whole_frames_scales_by_the_gain_and_never_clips(
+        in_ch in 1..=8usize,
+        out_ch in 1..=8usize,
+        frames in prop::collection::vec(prop::collection::vec(-1.0f32..=1.0, 8), 0..4),
+        gain in 0.0f32..=1.0,
+    ) {
+        let samples: Vec<f32> = frames.iter().flat_map(|f| f[..in_ch].to_vec()).collect();
+        let unscaled = map(&samples, in_ch, out_ch);
+        prop_assert_eq!(unscaled.len(), frames.len() * out_ch);
+        prop_assert!(unscaled.iter().all(|s| s.abs() <= 1.0 + 1e-6), "{unscaled:?}");
+        let mut scaled = Vec::new();
+        map_channels(&samples, in_ch, out_ch, gain, &mut scaled);
+        let expected: Vec<f32> = unscaled.iter().map(|s| s * gain).collect();
+        prop_assert_eq!(scaled, expected);
+        if in_ch == out_ch {
+            prop_assert_eq!(unscaled, samples);
+        }
+    }
 }

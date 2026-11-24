@@ -1,5 +1,12 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use proptest::prelude::*;
+use proptest::sample::select;
+
+use crate::browse::{FilterValue, Grouping, Sort, SortColumn};
+use crate::normalize;
+use crate::query::ListTrack;
 use crate::tags::TrackMeta;
 
 pub struct TempDir(PathBuf);
@@ -143,6 +150,130 @@ pub fn flac_with_cover(cover: &[u8], mime: &str) -> Vec<u8> {
     b.extend_from_slice(&(picture.len() as u32).to_be_bytes()[1..]);
     b.extend_from_slice(&picture);
     b
+}
+
+/// Few, clashing values (case, spacing, and composition variants of one
+/// name, and blanks), so generated tracks share keys and tie.
+const NAMES: [&str; 7] = [
+    "Air",
+    "air",
+    "  AIR ",
+    "Beck",
+    "",
+    "Beyonc\u{e9}",
+    "BEYONCE\u{301}",
+];
+
+pub fn arb_grouping() -> impl Strategy<Value = Grouping> {
+    select(&Grouping::ALL[..])
+}
+
+pub fn arb_sort_column() -> impl Strategy<Value = SortColumn> {
+    select(&SortColumn::ALL[..])
+}
+
+pub fn arb_sort() -> impl Strategy<Value = Sort> {
+    (arb_sort_column(), any::<bool>()).prop_map(|(column, descending)| Sort { column, descending })
+}
+
+pub fn arb_filter_value() -> impl Strategy<Value = FilterValue> {
+    prop_oneof![
+        Just(FilterValue::All),
+        any::<String>().prop_map(FilterValue::Text),
+        any::<i64>().prop_map(FilterValue::Album),
+        any::<i32>().prop_map(FilterValue::Year),
+        Just(FilterValue::UnknownYear),
+    ]
+}
+
+fn arb_name() -> impl Strategy<Value = String> {
+    select(&NAMES[..]).prop_map(str::to_owned)
+}
+
+/// A track of an album, without the album's fields or an id.
+fn arb_album_track() -> impl Strategy<Value = ListTrack> {
+    (
+        (
+            arb_name(),
+            prop::option::of(arb_name()),
+            prop::option::of(arb_name()),
+        ),
+        (prop::option::of(1..=2u32), prop::option::of(1..=3u32)),
+        select(&[0, 1000, 90_000][..]),
+        select(&["mp3", "flac", "aac"][..]),
+        prop::option::of(select(&[128, 320][..])),
+        (prop::option::of(0..3i64), prop::option::of(0..3i64)),
+    )
+        .prop_map(
+            |(
+                (title, artist, genre),
+                (disc_no, track_no),
+                duration_ms,
+                codec,
+                bitrate_kbps,
+                (added_ns, played_ns),
+            )| {
+                ListTrack {
+                    title,
+                    artist,
+                    genre,
+                    disc_no,
+                    track_no,
+                    duration_ms,
+                    codec: codec.to_owned(),
+                    bitrate_kbps,
+                    added_ns,
+                    played_ns,
+                    ..Default::default()
+                }
+            },
+        )
+}
+
+/// A library's tracks in [`crate::Library::track_list`] order, as
+/// [`crate::Catalog::new`] needs them, with ids from 1.
+pub fn arb_tracks() -> impl Strategy<Value = Vec<ListTrack>> {
+    let album = (
+        arb_name(),
+        arb_name(),
+        prop::option::of(select(&[1994, 2000][..])),
+        prop::collection::vec(arb_album_track(), 1..4),
+    );
+    prop::collection::vec(album, 0..6).prop_map(|albums| {
+        let mut albums: Vec<_> = albums.into_iter().zip(1..).collect();
+        albums.sort_by_cached_key(|((artist, title, year, _), id)| {
+            (
+                normalize::key(artist),
+                year.is_none(),
+                *year,
+                normalize::key(title),
+                *id,
+            )
+        });
+        let mut tracks = Vec::new();
+        for ((album_artist, album, album_year, album_tracks), album_id) in albums {
+            for track in album_tracks {
+                let id = tracks.len() as i64 + 1;
+                tracks.push(ListTrack {
+                    id,
+                    path: PathBuf::from(format!("{id}.mp3")),
+                    album_id,
+                    album_key: normalize::key(&album),
+                    album: album.clone(),
+                    album_artist_key: normalize::key(&album_artist),
+                    album_artist: album_artist.clone(),
+                    album_year,
+                    ..track
+                });
+            }
+        }
+        tracks
+    })
+}
+
+/// Search results over [`arb_tracks`]' ids, or none.
+pub fn arb_matches() -> impl Strategy<Value = Option<HashSet<i64>>> {
+    prop::option::of(prop::collection::hash_set(1..20i64, 0..20))
 }
 
 /// A new directory `<prefix>-<pid>-<n>` in `parent`. `create_dir` fails on

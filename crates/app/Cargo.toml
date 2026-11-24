@@ -27,5 +27,8 @@ souvlaki = "0.9.3"
 [build-dependencies]
 cxx-qt-build.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

@@ -1,4 +1,5 @@
 use clap::Parser;
+use proptest::prelude::*;
 
 use super::*;
 
@@ -10,30 +11,6 @@ struct Play {
 
 fn play(words: &[&str]) -> Result<Args, clap::Error> {
     Play::try_parse_from(std::iter::once("play").chain(words.iter().copied())).map(|p| p.args)
-}
-
-#[test]
-fn files_alone_play_on_the_device_in_real_time_at_the_default_rate() {
-    assert_eq!(
-        play(&["a.flac", "b.m4a"]).unwrap(),
-        Args {
-            capture: None,
-            null: false,
-            fast: false,
-            rate: None,
-            files: vec![PathBuf::from("a.flac"), PathBuf::from("b.m4a")],
-        }
-    );
-}
-
-#[test]
-fn capture_null_fast_and_rate_are_read_wherever_they_appear() {
-    let args = play(&["a.flac", "--capture", "out.WAV", "--fast", "--rate=44100"]).unwrap();
-    assert_eq!(args.capture, Some(PathBuf::from("out.WAV")));
-    assert!(args.fast);
-    assert_eq!(args.rate, Some(44_100));
-
-    assert!(play(&["--null", "--fast", "a.flac"]).unwrap().null);
 }
 
 #[test]
@@ -82,4 +59,69 @@ fn a_capture_path_need_not_be_utf8() {
 fn a_capture_path_without_a_wav_extension_is_refused_before_playing() {
     let err = run(play(&["--capture", "out.mp3", "a.flac"]).unwrap()).unwrap_err();
     assert!(err.to_string().contains("must end in .wav"), "{err}");
+}
+
+/// `--name value` or `--name=value`.
+fn option(name: &str, value: String, joined: bool) -> Vec<String> {
+    if joined {
+        vec![format!("--{name}={value}")]
+    } else {
+        vec![format!("--{name}"), value]
+    }
+}
+
+/// What to play on: the device, a capture file, or nowhere (`--null`).
+fn arb_sink() -> impl Strategy<Value = (Option<PathBuf>, bool)> {
+    prop_oneof![
+        Just((None, false)),
+        Just((None, true)),
+        prop::sample::select(&["out.wav", "out.WAV", "a b.wav"][..])
+            .prop_map(|p| (Some(PathBuf::from(p)), false)),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn options_are_read_in_either_form_wherever_they_appear(
+        (capture, null) in arb_sink(),
+        fast: bool,
+        rate in prop::option::of(prop::sample::select(&[8_000u32, 44_100, 768_000][..])),
+        files in prop::collection::vec("[a-z][a-z .]{0,8}", 1..4),
+        joined: [bool; 2],
+        places: [prop::sample::Index; 4],
+    ) {
+        let device = capture.is_none() && !null;
+        let (fast, rate) = if device { (false, None) } else { (fast, rate) };
+        let mut options: Vec<Vec<String>> = Vec::new();
+        if let Some(path) = &capture {
+            options.push(option("capture", path.display().to_string(), joined[0]));
+        }
+        if null {
+            options.push(vec!["--null".to_owned()]);
+        }
+        if fast {
+            options.push(vec!["--fast".to_owned()]);
+        }
+        if let Some(rate) = rate {
+            options.push(option("rate", rate.to_string(), joined[1]));
+        }
+        // Each option goes before the file at its place, or after them all.
+        let mut words: Vec<(usize, Vec<String>)> = files.iter().cloned().map(|f| vec![f]).enumerate().collect();
+        for (option, place) in options.into_iter().zip(places) {
+            words.push((place.index(files.len() + 1), option));
+        }
+        words.sort_by_key(|&(place, ref w)| (place, !w[0].starts_with("--")));
+        let words: Vec<String> = words.into_iter().flat_map(|(_, w)| w).collect();
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        prop_assert_eq!(
+            play(&words).unwrap(),
+            Args {
+                capture,
+                null,
+                fast,
+                rate,
+                files: files.into_iter().map(PathBuf::from).collect(),
+            }
+        );
+    }
 }

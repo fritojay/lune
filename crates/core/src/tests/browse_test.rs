@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
+use proptest::prelude::*;
+use proptest::sample::Index;
+
 use super::*;
+use crate::test_util::{arb_grouping, arb_matches, arb_sort_column, arb_tracks};
 
 /// Tracks must be passed in catalog (album artist) order, like `track_list`.
 fn track(id: i64, album_artist: &str, album_id: i64, album: &str, year: Option<i32>) -> ListTrack {
@@ -222,18 +226,11 @@ fn newest_first_puts_each_album_artists_newest_album_first_and_unknown_last() {
         track(6, "B", 20, "Old", Some(1980)),
         track(7, "B", 21, "New", Some(2020)),
     ]);
-    for grouping in [Grouping::AlbumArtist, Grouping::Album, Grouping::Genre] {
-        let view = catalog.view(grouping, &FilterValue::All, None);
-        let view = catalog.newest_first(view, grouping);
-        // Artists stay A to Z, and same-year albums keep title order.
-        assert_eq!(ids(&catalog, &view), [2, 3, 1, 4, 7, 5, 6], "{grouping:?}");
-        assert_eq!(view.albums, [0..1, 1..2, 2..3, 3..4, 4..5, 5..7]);
-        assert_eq!(view.sort, None);
-    }
-    let b = FilterValue::Text(normalize::key("B"));
-    let view = catalog.view(Grouping::AlbumArtist, &b, None);
+    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
     let view = catalog.newest_first(view, Grouping::AlbumArtist);
-    assert_eq!(ids(&catalog, &view), [7, 5, 6]);
+    // Artists stay A to Z, and same-year albums keep title order.
+    assert_eq!(ids(&catalog, &view), [2, 3, 1, 4, 7, 5, 6]);
+    assert_eq!(view.albums, [0..1, 1..2, 2..3, 3..4, 4..5, 5..7]);
 }
 
 #[test]
@@ -253,45 +250,6 @@ fn newest_first_puts_the_newest_year_first_in_the_year_view() {
 }
 
 #[test]
-fn newest_first_leaves_groupings_ordered_by_date_alone() {
-    let catalog = Catalog::new(vec![
-        added(track(1, "A", 10, "Old", Some(1990)), 2),
-        added(track(2, "B", 20, "New", Some(2020)), 1),
-    ]);
-    let view = catalog.view(Grouping::RecentlyAdded, &FilterValue::All, None);
-    assert_eq!(
-        catalog.newest_first(view.clone(), Grouping::RecentlyAdded),
-        view
-    );
-}
-
-#[test]
-fn newest_first_of_an_empty_view_is_empty() {
-    let catalog = library();
-    let view = catalog.newest_first(View::default(), Grouping::AlbumArtist);
-    assert_eq!(view, View::default());
-}
-
-#[test]
-fn year_filters_newest_first_keep_all_first_and_unknown_last() {
-    let filters = library().filters_newest_first(Grouping::Year, None);
-    let values: Vec<FilterValue> = filters.into_iter().map(|f| f.value).collect();
-    assert_eq!(
-        values,
-        [
-            FilterValue::All,
-            FilterValue::Year(2000),
-            FilterValue::Year(1997),
-            FilterValue::Year(1994),
-            FilterValue::UnknownYear,
-        ]
-    );
-
-    let filters = Catalog::new(Vec::new()).filters_newest_first(Grouping::Year, None);
-    assert_eq!(filters.len(), 1);
-}
-
-#[test]
 fn album_filters_newest_first_follow_the_newest_first_view() {
     let catalog = Catalog::new(vec![
         track(1, "A", 10, "Alpha", Some(1990)),
@@ -300,35 +258,13 @@ fn album_filters_newest_first_follow_the_newest_first_view() {
         track(4, "B", 20, "Old", Some(1980)),
         track(5, "B", 21, "New", Some(2020)),
     ]);
-    let labels = |filters: Vec<Filter>| -> Vec<String> {
-        filters.into_iter().skip(1).map(|f| f.label).collect()
-    };
-    assert_eq!(
-        labels(catalog.filters_newest_first(Grouping::Album, None)),
-        ["Beta", "Alpha", "Undated", "New", "Old"]
-    );
-    let matches = HashSet::from([1, 2, 4]);
-    let filters = catalog.filters_newest_first(Grouping::Album, Some(&matches));
-    assert_eq!(filters[0].tracks, 3);
-    assert_eq!(labels(filters), ["Beta", "Alpha", "Old"]);
-}
-
-#[test]
-fn other_filters_newest_first_are_unchanged() {
-    let catalog = library();
-    for grouping in [
-        Grouping::AlbumArtist,
-        Grouping::Artist,
-        Grouping::Genre,
-        Grouping::RecentlyAdded,
-        Grouping::RecentlyPlayed,
-    ] {
-        assert_eq!(
-            catalog.filters_newest_first(grouping, None),
-            catalog.filters(grouping, None),
-            "{grouping:?}"
-        );
-    }
+    let labels: Vec<String> = catalog
+        .filters_newest_first(Grouping::Album, None)
+        .into_iter()
+        .skip(1)
+        .map(|f| f.label)
+        .collect();
+    assert_eq!(labels, ["Beta", "Alpha", "Undated", "New", "Old"]);
 }
 
 #[test]
@@ -514,197 +450,6 @@ fn tracks_are_found_by_id() {
     assert!(catalog.by_id(99).is_none());
 }
 
-fn sort(column: SortColumn, descending: bool) -> Sort {
-    Sort { column, descending }
-}
-
-fn titled(mut t: ListTrack, title: &str) -> ListTrack {
-    t.title = title.to_owned();
-    t
-}
-
-#[test]
-fn clicking_a_heading_sorts_ascending_then_descending_then_restores_album_order() {
-    let title = Sort::after_click(None, SortColumn::Title);
-    assert_eq!(title, Some(sort(SortColumn::Title, false)));
-    let title = Sort::after_click(title, SortColumn::Title);
-    assert_eq!(title, Some(sort(SortColumn::Title, true)));
-    assert_eq!(Sort::after_click(title, SortColumn::Title), None);
-}
-
-#[test]
-fn clicking_another_heading_sorts_by_it_ascending() {
-    for current in [
-        sort(SortColumn::Title, false),
-        sort(SortColumn::Title, true),
-    ] {
-        assert_eq!(
-            Sort::after_click(Some(current), SortColumn::Duration),
-            Some(sort(SortColumn::Duration, false))
-        );
-    }
-}
-
-#[test]
-fn sorting_by_title_ignores_case_and_gives_each_track_its_own_row() {
-    let catalog = Catalog::new(vec![
-        titled(track(1, "A", 10, "One", None), "banana"),
-        titled(track(2, "A", 10, "One", None), "Cherry"),
-        titled(track(3, "B", 20, "Two", None), "Apple"),
-    ]);
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-
-    let view = catalog.sorted(all.clone(), sort(SortColumn::Title, false));
-    assert_eq!(ids(&catalog, &view), [3, 1, 2]);
-    assert_eq!(view.albums, [0..1, 1..2, 2..3]);
-    assert_eq!(view.sort, Some(sort(SortColumn::Title, false)));
-    assert_eq!(view.sort, Some(sort(SortColumn::Title, false)));
-
-    let view = catalog.sorted(all, sort(SortColumn::Title, true));
-    assert_eq!(ids(&catalog, &view), [2, 1, 3]);
-}
-
-#[test]
-fn equal_values_keep_album_order_in_both_directions() {
-    let catalog = library();
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-    for descending in [false, true] {
-        let view = catalog.sorted(all.clone(), sort(SortColumn::Duration, descending));
-        assert_eq!(ids(&catalog, &view), ids(&catalog, &all));
-    }
-}
-
-#[test]
-fn sorting_by_duration_orders_by_length() {
-    let catalog = Catalog::new(
-        [(1, 300_000), (2, 90_000), (3, 3_600_000)]
-            .into_iter()
-            .map(|(id, ms)| ListTrack {
-                duration_ms: ms,
-                ..track(id, "A", 10, "One", None)
-            })
-            .collect(),
-    );
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-    let view = catalog.sorted(all.clone(), sort(SortColumn::Duration, false));
-    assert_eq!(ids(&catalog, &view), [2, 1, 3]);
-    let view = catalog.sorted(all, sort(SortColumn::Duration, true));
-    assert_eq!(ids(&catalog, &view), [3, 1, 2]);
-}
-
-#[test]
-fn tracks_without_a_number_sort_last_in_both_directions() {
-    let catalog = Catalog::new(
-        [(1, Some(2)), (2, None), (3, Some(1)), (4, Some(2))]
-            .into_iter()
-            .map(|(id, no)| ListTrack {
-                track_no: no,
-                ..track(id, "A", 10, "One", None)
-            })
-            .collect(),
-    );
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-    let view = catalog.sorted(all.clone(), sort(SortColumn::TrackNumber, false));
-    assert_eq!(ids(&catalog, &view), [3, 1, 4, 2]);
-    let view = catalog.sorted(all, sort(SortColumn::TrackNumber, true));
-    assert_eq!(ids(&catalog, &view), [1, 4, 3, 2]);
-}
-
-#[test]
-fn track_numbers_sort_by_disc_then_track_with_no_disc_as_the_first() {
-    let catalog = Catalog::new(
-        [
-            (1, Some(2), 1),
-            (2, Some(1), 2),
-            (3, None, 1),
-            (4, Some(1), 1),
-        ]
-        .into_iter()
-        .map(|(id, disc, no)| ListTrack {
-            disc_no: disc,
-            track_no: Some(no),
-            ..track(id, "A", 10, "One", None)
-        })
-        .collect(),
-    );
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-    let view = catalog.sorted(all.clone(), sort(SortColumn::TrackNumber, false));
-    assert_eq!(ids(&catalog, &view), [3, 4, 2, 1]);
-    let view = catalog.sorted(all, sort(SortColumn::TrackNumber, true));
-    assert_eq!(ids(&catalog, &view), [1, 2, 3, 4]);
-}
-
-#[test]
-fn sorting_by_artist_ignores_case_and_puts_tracks_without_one_last() {
-    let catalog = Catalog::new(vec![
-        with_artist(track(1, "A", 10, "One", None), Some("beck")),
-        with_artist(track(2, "A", 10, "One", None), None),
-        with_artist(track(3, "A", 10, "One", None), Some("Air")),
-        with_artist(track(4, "A", 10, "One", None), Some("Cake")),
-        with_artist(track(5, "A", 10, "One", None), Some("BECK")),
-        with_artist(track(6, "A", 10, "One", None), Some("  ")),
-    ]);
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-    let view = catalog.sorted(all.clone(), sort(SortColumn::Artist, false));
-    assert_eq!(ids(&catalog, &view), [3, 1, 5, 4, 2, 6]);
-    let view = catalog.sorted(all, sort(SortColumn::Artist, true));
-    assert_eq!(ids(&catalog, &view), [4, 1, 5, 3, 2, 6]);
-}
-
-#[test]
-fn tracks_of_unknown_length_sort_last_in_both_directions() {
-    let catalog = Catalog::new(
-        [(1, 300_000), (2, 0), (3, 90_000)]
-            .into_iter()
-            .map(|(id, ms)| ListTrack {
-                duration_ms: ms,
-                ..track(id, "A", 10, "One", None)
-            })
-            .collect(),
-    );
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-    let view = catalog.sorted(all.clone(), sort(SortColumn::Duration, false));
-    assert_eq!(ids(&catalog, &view), [3, 1, 2]);
-    let view = catalog.sorted(all, sort(SortColumn::Duration, true));
-    assert_eq!(ids(&catalog, &view), [1, 3, 2]);
-}
-
-#[test]
-fn sorting_by_bit_rate_puts_tracks_of_unknown_rate_last_in_both_directions() {
-    let catalog = Catalog::new(
-        [(1, Some(256)), (2, None), (3, Some(1411)), (4, Some(128))]
-            .into_iter()
-            .map(|(id, kbps)| ListTrack {
-                bitrate_kbps: kbps,
-                ..track(id, "A", 10, "One", None)
-            })
-            .collect(),
-    );
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-    let view = catalog.sorted(all.clone(), sort(SortColumn::BitRate, false));
-    assert_eq!(ids(&catalog, &view), [4, 1, 3, 2]);
-    let view = catalog.sorted(all, sort(SortColumn::BitRate, true));
-    assert_eq!(ids(&catalog, &view), [3, 1, 4, 2]);
-}
-
-#[test]
-fn sorting_by_file_type_groups_each_codec_keeping_album_order_within_it() {
-    let catalog = Catalog::new(
-        [(1, "mp3"), (2, "flac"), (3, "mp3"), (4, "aac")]
-            .into_iter()
-            .map(|(id, codec)| ListTrack {
-                codec: codec.to_owned(),
-                ..track(id, "A", 10, "One", None)
-            })
-            .collect(),
-    );
-    let all = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
-    let view = catalog.sorted(all.clone(), sort(SortColumn::FileType, false));
-    assert_eq!(ids(&catalog, &view), [4, 2, 1, 3]);
-    let view = catalog.sorted(all, sort(SortColumn::FileType, true));
-    assert_eq!(ids(&catalog, &view), [1, 3, 2, 4]);
-}
-
 #[test]
 fn an_album_view_has_no_sort() {
     let catalog = library();
@@ -733,24 +478,6 @@ fn an_album_is_multi_disc_when_any_track_is_past_the_first_disc() {
     assert!(!catalog.is_multi_disc(20));
     assert!(!catalog.is_multi_disc(30));
     assert!(!catalog.is_multi_disc(99));
-}
-
-#[test]
-fn sorting_keeps_only_the_filtered_and_searched_tracks() {
-    let catalog = library();
-    let matches = HashSet::from([4, 5, 6]);
-    let radiohead = FilterValue::Text(normalize::key("Radiohead"));
-    let view = catalog.view(Grouping::AlbumArtist, &radiohead, Some(&matches));
-    let view = catalog.sorted(view, sort(SortColumn::TrackNumber, true));
-    assert_eq!(ids(&catalog, &view), [5, 4]);
-}
-
-#[test]
-fn sorting_an_empty_view_gives_an_empty_view() {
-    let catalog = library();
-    let view = catalog.sorted(View::default(), sort(SortColumn::Title, false));
-    assert!(view.is_empty());
-    assert!(view.albums.is_empty());
 }
 
 #[test]
@@ -831,21 +558,187 @@ fn an_unknown_grouping_name_is_no_grouping() {
     assert_eq!(Grouping::from_name("albums"), None);
 }
 
+/// What `column` sorts `track` by; `None` sorts last in both directions.
+fn sort_key(track: &ListTrack, column: SortColumn) -> Option<(u64, u64, String)> {
+    let number = |n: u64| Some((n, 0, String::new()));
+    let text = |s: &str| Some((0, 0, normalize::key(s)));
+    match column {
+        SortColumn::TrackNumber => track
+            .track_no
+            .map(|no| (track.disc_no.unwrap_or(1).into(), no.into(), String::new())),
+        SortColumn::Title => text(&track.title),
+        SortColumn::Artist => {
+            text(track.artist.as_deref().unwrap_or_default()).filter(|(_, _, key)| !key.is_empty())
+        }
+        // lofty reports 0 when it can't read the length.
+        SortColumn::Duration => number(track.duration_ms).filter(|_| track.duration_ms > 0),
+        SortColumn::FileType => text(&track.codec),
+        SortColumn::BitRate => track.bitrate_kbps.and_then(|kbps| number(kbps.into())),
+    }
+}
+
+fn picked_view(
+    catalog: &Catalog,
+    grouping: Grouping,
+    pick: Index,
+    matches: Option<&HashSet<i64>>,
+) -> View {
+    let filters = catalog.filters(grouping, matches);
+    let value = &filters[pick.index(filters.len())].value;
+    catalog.view(grouping, value, matches)
+}
+
 #[test]
-fn every_filters_count_is_the_size_of_its_view() {
-    let catalog = Catalog::new(vec![
-        with_genre(added(track(1, "A", 10, "One", Some(1999)), 5), Some("Rock")),
-        played(with_artist(track(2, "A", 10, "One", Some(1999)), None), 7),
-        with_genre(added(track(3, "B", 20, "Two", None), 6), None),
-        track(4, "B", 30, "Three", Some(2005)),
-    ]);
-    let matches = HashSet::from([1, 3, 4]);
-    for grouping in Grouping::ALL {
-        for matches in [None, Some(&matches)] {
-            for filter in catalog.filters(grouping, matches) {
-                let view = catalog.view(grouping, &filter.value, matches);
-                assert_eq!(view.len(), filter.tracks, "{grouping:?} {:?}", filter.value);
+fn clicking_a_heading_sorts_ascending_then_descending_then_restores_album_order() {
+    let states = SortColumn::ALL
+        .into_iter()
+        .flat_map(|column| [false, true].map(|descending| Some(Sort { column, descending })));
+    for current in states.chain([None]) {
+        for column in SortColumn::ALL {
+            let ascending = Some(Sort {
+                column,
+                descending: false,
+            });
+            let descending = Some(Sort {
+                column,
+                descending: true,
+            });
+            let next = Sort::after_click(current, column);
+            let expected = match current {
+                Some(sort) if sort.column != column => ascending,
+                _ if current == ascending => descending,
+                _ if current == descending => None,
+                _ => ascending,
+            };
+            assert_eq!(next, expected, "{current:?} then {column:?}");
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn every_filters_count_is_the_size_of_its_view_of_whole_album_runs(
+        tracks in arb_tracks(),
+        grouping in arb_grouping(),
+        matches in arb_matches(),
+    ) {
+        let catalog = Catalog::new(tracks);
+        for filter in catalog.filters(grouping, matches.as_ref()) {
+            let view = catalog.view(grouping, &filter.value, matches.as_ref());
+            prop_assert_eq!(view.len(), filter.tracks);
+            prop_assert_eq!(view.sort, None);
+            let mut end = 0;
+            for album in &view.albums {
+                prop_assert_eq!(album.start, end);
+                end = album.end;
+                let ids: HashSet<i64> = view.tracks[album.clone()]
+                    .iter()
+                    .map(|&i| catalog.track(i).unwrap().album_id)
+                    .collect();
+                prop_assert_eq!(ids.len(), 1);
             }
+            prop_assert_eq!(end, view.len());
+        }
+    }
+
+    #[test]
+    fn sorting_orders_by_the_column_with_unknowns_last_and_ties_in_view_order(
+        tracks in arb_tracks(),
+        grouping in arb_grouping(),
+        pick in any::<Index>(),
+        matches in arb_matches(),
+        column in arb_sort_column(),
+        descending: bool,
+    ) {
+        let catalog = Catalog::new(tracks);
+        let view = picked_view(&catalog, grouping, pick, matches.as_ref());
+        let key = |i: usize| sort_key(catalog.track(i).unwrap(), column);
+        let mut expected = view.tracks.clone();
+        expected.sort_by(|&a, &b| {
+            let (a, b) = (key(a), key(b));
+            a.is_none().cmp(&b.is_none()).then(if descending { b.cmp(&a) } else { a.cmp(&b) })
+        });
+        let sort = Sort { column, descending };
+        let sorted = catalog.sorted(view, sort);
+        prop_assert_eq!(&sorted.tracks, &expected);
+        prop_assert_eq!(sorted.albums, (0..expected.len()).map(|i| i..i + 1).collect::<Vec<_>>());
+        prop_assert_eq!(sorted.sort, Some(sort));
+    }
+
+    #[test]
+    fn newest_first_reorders_whole_albums_by_year_descending_with_unknown_last(
+        tracks in arb_tracks(),
+        grouping in arb_grouping(),
+        pick in any::<Index>(),
+        matches in arb_matches(),
+    ) {
+        let catalog = Catalog::new(tracks);
+        let view = picked_view(&catalog, grouping, pick, matches.as_ref());
+        let newest = catalog.newest_first(view.clone(), grouping);
+        if matches!(grouping, Grouping::RecentlyAdded | Grouping::RecentlyPlayed) {
+            prop_assert_eq!(newest, view);
+            return Ok(());
+        }
+        let by_year = grouping == Grouping::Year;
+        let mut runs: Vec<&[usize]> = view.albums.iter().map(|a| &view.tracks[a.clone()]).collect();
+        runs.sort_by_key(|run| {
+            let first = catalog.track(run[0]).unwrap();
+            let artist = if by_year { "" } else { first.album_artist_key.as_str() };
+            (artist, first.album_year.is_none(), std::cmp::Reverse(first.album_year))
+        });
+        prop_assert_eq!(&newest.tracks, &runs.concat());
+        let mut start = 0;
+        let albums: Vec<Range<usize>> = runs
+            .iter()
+            .map(|run| {
+                start += run.len();
+                start - run.len()..start
+            })
+            .collect();
+        prop_assert_eq!(newest.albums, albums);
+        prop_assert_eq!(newest.sort, None);
+    }
+
+    #[test]
+    fn filters_newest_first_list_the_same_values_in_the_newest_first_order(
+        tracks in arb_tracks(),
+        grouping in arb_grouping(),
+        matches in arb_matches(),
+    ) {
+        let catalog = Catalog::new(tracks);
+        let filters = catalog.filters(grouping, matches.as_ref());
+        let newest = catalog.filters_newest_first(grouping, matches.as_ref());
+        prop_assert_eq!(&newest[0], &filters[0]);
+        let mut same = newest.clone();
+        same.sort_by(|a, b| a.value.cmp(&b.value));
+        let mut sorted = filters.clone();
+        sorted.sort_by(|a, b| a.value.cmp(&b.value));
+        prop_assert_eq!(same, sorted);
+        match grouping {
+            Grouping::Year => {
+                let mut years: Vec<FilterValue> = filters[1..]
+                    .iter()
+                    .map(|f| f.value.clone())
+                    .filter(|v| matches!(v, FilterValue::Year(_)))
+                    .collect();
+                years.reverse();
+                years.extend(filters.iter().map(|f| f.value.clone()).filter(|v| *v == FilterValue::UnknownYear));
+                let values: Vec<FilterValue> = newest[1..].iter().map(|f| f.value.clone()).collect();
+                prop_assert_eq!(values, years);
+            }
+            Grouping::Album | Grouping::RecentlyAdded | Grouping::RecentlyPlayed => {
+                let view = catalog.view(grouping, &FilterValue::All, matches.as_ref());
+                let mut albums: Vec<FilterValue> = Vec::new();
+                for &i in &catalog.newest_first(view, grouping).tracks {
+                    let album = FilterValue::Album(catalog.track(i).unwrap().album_id);
+                    if !albums.contains(&album) {
+                        albums.push(album);
+                    }
+                }
+                let values: Vec<FilterValue> = newest[1..].iter().map(|f| f.value.clone()).collect();
+                prop_assert_eq!(values, albums);
+            }
+            _ => prop_assert_eq!(newest, filters),
         }
     }
 }

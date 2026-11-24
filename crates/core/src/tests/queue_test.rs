@@ -1,3 +1,6 @@
+use proptest::prelude::*;
+use proptest::sample::Index;
+
 use super::*;
 use crate::db;
 
@@ -11,142 +14,10 @@ fn ids(queue: &Queue) -> Vec<i64> {
     queue.items().iter().map(|item| item.track_id).collect()
 }
 
-fn slot_of(queue: &Queue, track_id: i64) -> SlotId {
-    queue
-        .items()
-        .iter()
-        .find(|item| item.track_id == track_id)
-        .unwrap()
-        .slot
-}
-
 fn queue_of(ids: impl IntoIterator<Item = i64>, start: usize) -> Queue {
     let mut queue = Queue::default();
     queue.replace(tracks(ids), start);
     queue
-}
-
-#[test]
-fn replace_snapshots_the_list_and_starts_at_the_clicked_track() {
-    let mut queue = queue_of([1, 2, 3], 0);
-    let started = queue.replace(tracks([10, 11, 12, 13]), 2).unwrap();
-    assert_eq!(started.track_id, 12);
-    assert_eq!(ids(&queue), [10, 11, 12, 13]);
-    assert_eq!(queue.current_index(), Some(2));
-    assert_eq!(queue.next_after(slot_of(&queue, 12)).unwrap().track_id, 13);
-    assert_eq!(
-        queue.previous_before(slot_of(&queue, 12)).unwrap().track_id,
-        11
-    );
-}
-
-#[test]
-fn replace_with_nothing_or_a_bad_start_leaves_nothing_current() {
-    let mut queue = Queue::default();
-    assert!(queue.replace(Vec::new(), 0).is_none());
-    assert!(queue.is_empty());
-    assert!(queue.replace(tracks([1, 2]), 5).is_none());
-    assert_eq!(queue.current_index(), None);
-}
-
-#[test]
-fn the_ends_of_the_queue_have_no_next_or_previous() {
-    let queue = queue_of([1], 0);
-    let only = slot_of(&queue, 1);
-    assert!(queue.next_after(only).is_none());
-    assert!(queue.previous_before(only).is_none());
-    assert!(queue.next_after(SlotId(999)).is_none());
-}
-
-#[test]
-fn the_same_track_can_be_queued_twice_in_separate_slots() {
-    let mut queue = queue_of([1, 2], 0);
-    queue.add(tracks([1]));
-    assert_eq!(ids(&queue), [1, 2, 1]);
-    let slots: HashSet<SlotId> = queue.items().iter().map(|i| i.slot).collect();
-    assert_eq!(slots.len(), 3);
-    queue.set_current(queue.items()[2].slot);
-    assert_eq!(queue.current_index(), Some(2));
-}
-
-#[test]
-fn play_next_inserts_after_the_current_track_and_changes_what_plays_next() {
-    let mut queue = queue_of([1, 2, 3], 1);
-    queue.play_next(tracks([7, 8]));
-    assert_eq!(ids(&queue), [1, 2, 7, 8, 3]);
-    assert_eq!(queue.next_after(slot_of(&queue, 2)).unwrap().track_id, 7);
-    assert_eq!(queue.current().unwrap().track_id, 2);
-}
-
-#[test]
-fn play_next_with_nothing_current_inserts_at_the_front() {
-    let mut queue = Queue::default();
-    queue.add(tracks([1, 2]));
-    queue.play_next(tracks([9]));
-    assert_eq!(ids(&queue), [9, 1, 2]);
-}
-
-#[test]
-fn add_to_queue_appends() {
-    let mut queue = queue_of([1, 2], 0);
-    queue.add(tracks([3]));
-    assert_eq!(ids(&queue), [1, 2, 3]);
-    queue.add(Vec::new());
-    assert_eq!(ids(&queue), [1, 2, 3]);
-}
-
-#[test]
-fn removing_tracks_before_the_current_one_keeps_it_current() {
-    let mut queue = queue_of([1, 2, 3, 4], 2);
-    queue.remove(&[slot_of(&queue, 1), slot_of(&queue, 4)]);
-    assert_eq!(ids(&queue), [2, 3]);
-    assert_eq!(queue.current().unwrap().track_id, 3);
-}
-
-#[test]
-fn removing_the_playing_track_continues_with_the_one_that_took_its_place() {
-    let mut queue = queue_of([1, 2, 3], 1);
-    let playing = slot_of(&queue, 2);
-    queue.remove(&[playing]);
-    assert_eq!(ids(&queue), [1, 3]);
-    assert!(queue.current().is_none());
-    assert_eq!(queue.next_after(playing).unwrap().track_id, 3);
-    assert_eq!(queue.previous_before(playing).unwrap().track_id, 1);
-    // Play Next still lands right after where the removed track was.
-    queue.play_next(tracks([9]));
-    assert_eq!(ids(&queue), [1, 9, 3]);
-}
-
-#[test]
-fn removing_the_last_playing_track_leaves_nothing_next() {
-    let mut queue = queue_of([1, 2], 1);
-    let playing = slot_of(&queue, 2);
-    queue.remove(&[playing]);
-    assert!(queue.next_after(playing).is_none());
-}
-
-#[test]
-fn move_to_reorders_and_keeps_the_current_track() {
-    let mut queue = queue_of([1, 2, 3, 4, 5], 2);
-    // Drag 4 and 1 (in queue order: 1, 4) to before 3.
-    queue.move_to(&[slot_of(&queue, 4), slot_of(&queue, 1)], 2);
-    assert_eq!(ids(&queue), [2, 1, 4, 3, 5]);
-    assert_eq!(queue.current().unwrap().track_id, 3);
-    assert_eq!(queue.next_after(slot_of(&queue, 3)).unwrap().track_id, 5);
-
-    queue.move_to(&[slot_of(&queue, 2)], 99);
-    assert_eq!(ids(&queue), [1, 4, 3, 5, 2]);
-    queue.move_to(&[slot_of(&queue, 2)], 0);
-    assert_eq!(ids(&queue), [2, 1, 4, 3, 5]);
-    assert_eq!(queue.current().unwrap().track_id, 3);
-}
-
-#[test]
-fn clear_empties_the_queue() {
-    let mut queue = queue_of([1, 2], 0);
-    queue.clear();
-    assert!(queue.is_empty());
-    assert!(queue.current().is_none());
 }
 
 #[test]
@@ -161,52 +32,6 @@ fn shuffle_is_a_permutation_with_the_current_track_first() {
     assert_ne!(shuffled, list, "50 tracks came back in order");
     shuffled.sort_unstable();
     assert_eq!(shuffled, list);
-}
-
-#[test]
-fn turning_shuffle_off_restores_the_original_order_and_keeps_the_current_track() {
-    let mut queue = queue_of(1..=10, 3);
-    queue.set_shuffle(true);
-    let other = queue.items()[5].slot;
-    queue.set_current(other);
-    let current = queue.current().unwrap().track_id;
-    queue.set_shuffle(false);
-    assert_eq!(ids(&queue), (1..=10).collect::<Vec<_>>());
-    assert_eq!(queue.current().unwrap().track_id, current);
-}
-
-#[test]
-fn edits_while_shuffled_are_kept_when_shuffle_is_turned_off() {
-    let mut queue = queue_of(1..=5, 1);
-    queue.set_shuffle(true);
-    queue.play_next(tracks([20]));
-    assert_eq!(queue.items()[1].track_id, 20, "plays next even shuffled");
-    queue.add(tracks([30]));
-    queue.remove(&[slot_of(&queue, 4)]);
-    queue.set_shuffle(false);
-    assert_eq!(ids(&queue), [1, 2, 20, 3, 5, 30]);
-}
-
-#[test]
-fn replacing_while_shuffled_shuffles_the_new_list_from_the_clicked_track() {
-    let mut queue = Queue::default();
-    queue.set_shuffle(true);
-    let started = queue.replace(tracks(1..=20), 7).unwrap().track_id;
-    assert_eq!(started, 8);
-    assert_eq!(queue.items()[0].track_id, 8);
-    queue.set_shuffle(false);
-    assert_eq!(ids(&queue), (1..=20).collect::<Vec<_>>());
-    assert_eq!(queue.current().unwrap().track_id, 8);
-}
-
-#[test]
-fn shuffling_an_empty_or_single_queue_works() {
-    let mut queue = Queue::default();
-    queue.set_shuffle(true);
-    queue.set_shuffle(false);
-    let mut queue = queue_of([1], 0);
-    queue.set_shuffle(true);
-    assert_eq!(ids(&queue), [1]);
 }
 
 fn library_with_tracks(conn: &Connection, ids: &[i64]) {
@@ -232,42 +57,6 @@ fn an_empty_database_loads_an_empty_queue() {
     let queue = load(&conn).unwrap();
     assert!(queue.is_empty());
     assert!(!queue.shuffle());
-}
-
-#[test]
-fn the_queue_and_cursor_survive_a_save_and_load() {
-    let mut conn = db::open_in_memory().unwrap();
-    library_with_tracks(&conn, &[1, 2, 3]);
-    let mut queue = queue_of([3, 1, 2, 1], 2);
-    save(&mut conn, &queue).unwrap();
-    let loaded = load(&conn).unwrap();
-    assert_eq!(ids(&loaded), [3, 1, 2, 1]);
-    assert_eq!(loaded.current_index(), Some(2));
-    assert_eq!(loaded.items()[0].path, PathBuf::from("3.mp3"));
-
-    queue.set_current(queue.items()[3].slot);
-    save_cursor(&conn, &queue).unwrap();
-    assert_eq!(load(&conn).unwrap().current_index(), Some(3));
-
-    queue.clear();
-    save(&mut conn, &queue).unwrap();
-    assert!(load(&conn).unwrap().is_empty());
-}
-
-#[test]
-fn a_shuffled_queue_restores_both_orders() {
-    let mut conn = db::open_in_memory().unwrap();
-    library_with_tracks(&conn, &(1..=10).collect::<Vec<_>>());
-    let mut queue = queue_of(1..=10, 4);
-    queue.set_shuffle(true);
-    save(&mut conn, &queue).unwrap();
-    let mut loaded = load(&conn).unwrap();
-    assert!(loaded.shuffle());
-    assert_eq!(ids(&loaded), ids(&queue));
-    assert_eq!(loaded.current().unwrap().track_id, 5);
-    loaded.set_shuffle(false);
-    assert_eq!(ids(&loaded), (1..=10).collect::<Vec<_>>());
-    assert_eq!(loaded.current().unwrap().track_id, 5);
 }
 
 #[test]
@@ -323,4 +112,274 @@ fn missing_tracks_stay_in_the_loaded_queue() {
     let queue = load(&conn).unwrap();
     assert_eq!(ids(&queue), [1, 2, 3]);
     assert_eq!(queue.current_index(), Some(1), "the cursor stays on it");
+}
+
+#[derive(Debug, Clone)]
+enum Op {
+    Replace(Vec<i64>, usize),
+    PlayNext(Vec<i64>),
+    Add(Vec<i64>),
+    Remove(Vec<Index>),
+    MoveTo(Vec<Index>, usize),
+    SetCurrent(Index),
+    Clear,
+    Shuffle(bool),
+}
+
+fn arb_track_ids() -> impl Strategy<Value = Vec<i64>> {
+    prop::collection::vec(1..=5i64, 0..5)
+}
+
+fn arb_op() -> impl Strategy<Value = Op> {
+    let picks = || prop::collection::vec(any::<Index>(), 0..3);
+    prop_oneof![
+        (arb_track_ids(), 0..6usize).prop_map(|(ids, start)| Op::Replace(ids, start)),
+        arb_track_ids().prop_map(Op::PlayNext),
+        arb_track_ids().prop_map(Op::Add),
+        picks().prop_map(Op::Remove),
+        (picks(), 0..8usize).prop_map(|(picks, to)| Op::MoveTo(picks, to)),
+        any::<Index>().prop_map(Op::SetCurrent),
+        Just(Op::Clear),
+        any::<bool>().prop_map(Op::Shuffle),
+    ]
+}
+
+/// The queue as plain lists: what plays in order, the order to restore when
+/// shuffle goes off, and where the current item is (or was, once removed).
+#[derive(Default)]
+struct Model {
+    items: Vec<(SlotId, i64)>,
+    original: Option<Vec<SlotId>>,
+    current: Option<SlotId>,
+    place: usize,
+}
+
+impl Model {
+    fn position(&self, slot: SlotId) -> Option<usize> {
+        self.items.iter().position(|&(s, _)| s == slot)
+    }
+
+    fn current_index(&self) -> Option<usize> {
+        self.current.and_then(|c| self.position(c))
+    }
+
+    fn slots(&self, picks: &[Index]) -> Vec<SlotId> {
+        if self.items.is_empty() {
+            return Vec::new();
+        }
+        picks
+            .iter()
+            .map(|pick| self.items[pick.index(self.items.len())].0)
+            .collect()
+    }
+
+    /// Takes the order `queue` shuffled into, after checking it is a
+    /// permutation with the current item first.
+    fn adopt_shuffle(&mut self, queue: &Queue) {
+        let shuffled: Vec<(SlotId, i64)> =
+            queue.items().iter().map(|i| (i.slot, i.track_id)).collect();
+        let (mut a, mut b) = (shuffled.clone(), self.items.clone());
+        a.sort_by_key(|&(s, _)| s.0);
+        b.sort_by_key(|&(s, _)| s.0);
+        assert_eq!(a, b, "shuffling keeps every item");
+        if self.current_index().is_some() {
+            assert_eq!(
+                Some(shuffled[0].0),
+                self.current,
+                "the current item goes first"
+            );
+            self.place = 0;
+        }
+        self.items = shuffled;
+    }
+
+    fn apply(&mut self, op: &Op, queue: &mut Queue) {
+        let new = |queue: &Queue, from: usize| -> Vec<(SlotId, i64)> {
+            queue.items()[from..]
+                .iter()
+                .map(|i| (i.slot, i.track_id))
+                .collect()
+        };
+        match op {
+            Op::Replace(ids, start) => {
+                let started = queue
+                    .replace(tracks(ids.clone()), *start)
+                    .map(|i| i.track_id);
+                assert_eq!(started, ids.get(*start).copied());
+                let mut items = queue.items().to_vec();
+                // Shuffle may have reordered them; slots count up as items are added.
+                items.sort_by_key(|i| i.slot.0);
+                self.items = items.iter().map(|i| (i.slot, i.track_id)).collect();
+                assert_eq!(self.items.iter().map(|&(_, t)| t).collect::<Vec<_>>(), *ids);
+                self.current = self.items.get(*start).map(|&(s, _)| s);
+                self.place = if self.current.is_some() { *start } else { 0 };
+                if self.original.is_some() {
+                    self.original = Some(self.items.iter().map(|&(s, _)| s).collect());
+                    self.adopt_shuffle(queue);
+                }
+            }
+            Op::PlayNext(ids) => {
+                let at = match self.current_index() {
+                    Some(i) => i + 1,
+                    None if self.current.is_some() => self.place.min(self.items.len()),
+                    None => 0,
+                };
+                queue.play_next(tracks(ids.clone()));
+                let added: Vec<(SlotId, i64)> =
+                    new(queue, at).into_iter().take(ids.len()).collect();
+                assert_eq!(added.iter().map(|&(_, t)| t).collect::<Vec<_>>(), *ids);
+                if let Some(original) = &mut self.original {
+                    let after = self
+                        .current
+                        .and_then(|c| original.iter().position(|&s| s == c));
+                    let o = after.map_or(0, |i| i + 1);
+                    original.splice(o..o, added.iter().map(|&(s, _)| s));
+                }
+                self.items.splice(at..at, added);
+            }
+            Op::Add(ids) => {
+                let from = self.items.len();
+                queue.add(tracks(ids.clone()));
+                let added = new(queue, from);
+                assert_eq!(added.iter().map(|&(_, t)| t).collect::<Vec<_>>(), *ids);
+                if let Some(original) = &mut self.original {
+                    original.extend(added.iter().map(|&(s, _)| s));
+                }
+                self.items.extend(added);
+            }
+            Op::Remove(picks) => {
+                let slots = self.slots(picks);
+                queue.remove(&slots);
+                let gone = |s: &SlotId| slots.contains(s);
+                self.place -= self.items[..self.place.min(self.items.len())]
+                    .iter()
+                    .filter(|(s, _)| gone(s))
+                    .count();
+                self.items.retain(|(s, _)| !gone(s));
+                if let Some(original) = &mut self.original {
+                    original.retain(|s| !gone(s));
+                }
+            }
+            Op::MoveTo(picks, to) => {
+                let slots = self.slots(picks);
+                queue.move_to(&slots, *to);
+                let to = (*to).min(self.items.len());
+                let (moved, mut rest): (Vec<_>, Vec<_>) =
+                    self.items.iter().partition(|(s, _)| slots.contains(s));
+                let at = to
+                    - self.items[..to]
+                        .iter()
+                        .filter(|(s, _)| slots.contains(s))
+                        .count();
+                rest.splice(at..at, moved);
+                self.items = rest;
+                if let Some(i) = self.current_index() {
+                    self.place = i;
+                }
+            }
+            Op::SetCurrent(pick) => {
+                if let Some(&slot) = self.slots(&[*pick]).first() {
+                    queue.set_current(slot);
+                    self.current = Some(slot);
+                    self.place = self.position(slot).unwrap();
+                }
+            }
+            Op::Clear => {
+                queue.clear();
+                *self = Model {
+                    original: self.original.as_ref().map(|_| Vec::new()),
+                    ..Model::default()
+                };
+            }
+            Op::Shuffle(on) => {
+                queue.set_shuffle(*on);
+                match (*on, self.original.take()) {
+                    (true, None) => {
+                        self.original = Some(self.items.iter().map(|&(s, _)| s).collect());
+                        self.adopt_shuffle(queue);
+                    }
+                    (false, Some(original)) => {
+                        let track = |slot| self.items.iter().find(|&&(s, _)| s == slot).unwrap().1;
+                        self.items = original.iter().map(|&s| (s, track(s))).collect();
+                        if let Some(i) = self.current_index() {
+                            self.place = i;
+                        }
+                    }
+                    (_, original) => self.original = original,
+                }
+            }
+        }
+    }
+
+    fn check(&self, queue: &Queue) {
+        let items: Vec<(SlotId, i64)> =
+            queue.items().iter().map(|i| (i.slot, i.track_id)).collect();
+        assert_eq!(items, self.items);
+        for item in queue.items() {
+            assert_eq!(item.path, PathBuf::from(format!("{}.mp3", item.track_id)));
+        }
+        let slots: HashSet<SlotId> = items.iter().map(|&(s, _)| s).collect();
+        assert_eq!(slots.len(), items.len(), "every item has its own slot");
+        assert_eq!(queue.shuffle(), self.original.is_some());
+        assert_eq!(queue.current_index(), self.current_index());
+        let never_handed_out = SlotId(u64::MAX);
+        assert!(queue.next_after(never_handed_out).is_none());
+        assert!(queue.previous_before(never_handed_out).is_none());
+        let Some(current) = self.current else { return };
+        let (next, previous) = match self.current_index() {
+            Some(i) => (i + 1, i.checked_sub(1)),
+            None => (self.place, self.place.checked_sub(1)),
+        };
+        let track = |i: Option<usize>| i.and_then(|i| self.items.get(i)).map(|&(_, t)| t);
+        assert_eq!(
+            queue.next_after(current).map(|i| i.track_id),
+            track(Some(next))
+        );
+        assert_eq!(
+            queue.previous_before(current).map(|i| i.track_id),
+            track(previous)
+        );
+    }
+}
+
+proptest! {
+    #[test]
+    fn every_edit_matches_the_list_model(ops in prop::collection::vec(arb_op(), 0..30)) {
+        let mut queue = Queue::default();
+        let mut model = Model::default();
+        for op in &ops {
+            model.apply(op, &mut queue);
+            model.check(&queue);
+        }
+        model.apply(&Op::Shuffle(false), &mut queue);
+        model.check(&queue);
+    }
+
+    #[test]
+    fn the_queue_and_its_cursor_survive_a_save_and_load(
+        ops in prop::collection::vec(arb_op(), 0..30),
+        cursor: Index,
+    ) {
+        let mut conn = db::open_in_memory().unwrap();
+        library_with_tracks(&conn, &[1, 2, 3, 4, 5]);
+        let mut queue = Queue::default();
+        let mut model = Model::default();
+        for op in &ops {
+            model.apply(op, &mut queue);
+        }
+        save(&mut conn, &queue).unwrap();
+        model.apply(&Op::SetCurrent(cursor), &mut queue);
+        save_cursor(&conn, &queue).unwrap();
+        let mut loaded = load(&conn).unwrap();
+        let entries = |queue: &Queue| -> Vec<(i64, PathBuf)> {
+            queue.items().iter().map(|i| (i.track_id, i.path.clone())).collect()
+        };
+        prop_assert_eq!(entries(&loaded), entries(&queue));
+        prop_assert_eq!(loaded.current_index(), queue.current_index());
+        prop_assert_eq!(loaded.shuffle(), queue.shuffle());
+        queue.set_shuffle(false);
+        loaded.set_shuffle(false);
+        prop_assert_eq!(ids(&loaded), ids(&queue));
+        prop_assert_eq!(loaded.current_index(), queue.current_index());
+    }
 }

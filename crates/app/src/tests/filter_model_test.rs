@@ -21,125 +21,6 @@ fn album_order_and_unknown_columns_have_no_sort() {
 }
 
 #[test]
-fn three_clicks_on_a_heading_sort_ascending_descending_then_album_order() {
-    let state = after_click(None, "title").unwrap();
-    assert_eq!(state, sort(SortColumn::Title, false));
-    let state = after_click(state, "title").unwrap();
-    assert_eq!(state, sort(SortColumn::Title, true));
-    assert_eq!(after_click(state, "title"), Some(None));
-}
-
-#[test]
-fn clicking_another_heading_sorts_by_it_ascending() {
-    assert_eq!(
-        after_click(sort(SortColumn::Title, true), "artist"),
-        Some(sort(SortColumn::Artist, false))
-    );
-}
-
-#[test]
-fn clicking_a_heading_that_does_not_exist_changes_nothing() {
-    assert_eq!(after_click(sort(SortColumn::Title, true), "nope"), None);
-    assert_eq!(after_click(None, ""), None);
-}
-
-#[test]
-fn the_menu_sets_any_column_and_direction() {
-    assert_eq!(
-        chosen(None, "artist", true),
-        Some(sort(SortColumn::Artist, true))
-    );
-    assert_eq!(
-        chosen(sort(SortColumn::Title, true), "track_number", false),
-        Some(sort(SortColumn::TrackNumber, false))
-    );
-    assert_eq!(
-        chosen(sort(SortColumn::Title, false), "title", true),
-        Some(sort(SortColumn::Title, true))
-    );
-}
-
-#[test]
-fn the_menu_restores_album_order() {
-    assert_eq!(
-        chosen(sort(SortColumn::Duration, true), "", true),
-        Some(None)
-    );
-}
-
-#[test]
-fn the_menu_ignores_a_column_that_does_not_exist() {
-    assert_eq!(chosen(None, "nope", false), None);
-    assert_eq!(chosen(sort(SortColumn::Title, false), "-1", false), None);
-}
-
-#[test]
-fn the_menu_ignores_the_sort_already_in_effect() {
-    assert_eq!(chosen(sort(SortColumn::Artist, true), "artist", true), None);
-    assert_eq!(chosen(None, "", false), None);
-    assert_eq!(chosen(None, "", true), None);
-}
-
-fn album(descending: bool) -> Option<MenuChoice> {
-    Some(MenuChoice::AlbumDescending(descending))
-}
-
-fn column(sort: Option<Sort>) -> Option<MenuChoice> {
-    Some(MenuChoice::Sort(sort))
-}
-
-#[test]
-fn in_album_order_the_menu_sets_its_direction() {
-    assert_eq!(menu_choice(None, false, true, "", true), album(true));
-    assert_eq!(menu_choice(None, true, true, "", false), album(false));
-}
-
-#[test]
-fn in_album_order_the_menu_ignores_the_direction_in_effect() {
-    assert_eq!(menu_choice(None, false, true, "", false), None);
-    assert_eq!(menu_choice(None, true, true, "", true), None);
-}
-
-#[test]
-fn the_menu_ignores_album_direction_in_groupings_without_one() {
-    assert_eq!(menu_choice(None, false, false, "", true), None);
-    assert_eq!(menu_choice(None, true, false, "", false), None);
-}
-
-#[test]
-fn from_a_column_sort_album_order_comes_back_without_changing_its_direction() {
-    for album_descending in [false, true] {
-        for descending in [false, true] {
-            assert_eq!(
-                menu_choice(
-                    sort(SortColumn::Title, true),
-                    album_descending,
-                    true,
-                    "",
-                    descending
-                ),
-                column(None)
-            );
-        }
-    }
-}
-
-#[test]
-fn the_menu_sorts_by_a_column_in_any_album_direction() {
-    for album_descending in [false, true] {
-        assert_eq!(
-            menu_choice(None, album_descending, true, "artist", false),
-            column(sort(SortColumn::Artist, false))
-        );
-        assert_eq!(
-            menu_choice(None, album_descending, false, "artist", true),
-            column(sort(SortColumn::Artist, true))
-        );
-    }
-    assert_eq!(menu_choice(None, true, true, "nope", true), None);
-}
-
-#[test]
 fn groupings_qml_has_every_grouping_once() {
     let mut ids = qml_values(include_str!("../../qml/Groupings.qml"), "id");
     ids.sort_unstable();
@@ -148,17 +29,109 @@ fn groupings_qml_has_every_grouping_once() {
     assert_eq!(ids, names);
 }
 
+fn every_sort() -> impl Iterator<Item = Option<Sort>> {
+    SortColumn::ALL
+        .into_iter()
+        .flat_map(|column| [false, true].map(|descending| sort(column, descending)))
+        .chain([None])
+}
+
+/// Every column name QML can send: real ones, album order, and junk.
+fn every_name() -> impl Iterator<Item = &'static str> {
+    SortColumn::ALL
+        .into_iter()
+        .map(SortColumn::name)
+        .chain(["", "nope", "-1"])
+}
+
 #[test]
-fn a_saved_sort_maps_back_to_the_same_sort() {
-    for descending in [false, true] {
-        let saved = sort(SortColumn::FileType, descending);
-        let (column, descending) = sort_state(saved, !descending);
-        assert_eq!(sort_of(column, descending), saved);
+fn a_heading_click_on_a_known_column_follows_the_click_cycle() {
+    let title = after_click(None, "title").unwrap();
+    assert_eq!(title, sort(SortColumn::Title, false));
+    let title = after_click(title, "title").unwrap();
+    assert_eq!(title, sort(SortColumn::Title, true));
+    assert_eq!(after_click(title, "title"), Some(None));
+    assert_eq!(
+        after_click(title, "artist"),
+        Some(sort(SortColumn::Artist, false))
+    );
+
+    for current in every_sort() {
+        for name in every_name() {
+            let expected = SortColumn::from_name(name).map(|c| Sort::after_click(current, c));
+            assert_eq!(after_click(current, name), expected, "{current:?} {name:?}");
+        }
     }
 }
 
 #[test]
-fn album_order_is_saved_as_no_column_in_its_direction() {
-    assert_eq!(sort_state(None, false), ("", false));
-    assert_eq!(sort_state(None, true), ("", true));
+fn the_menu_reaches_what_was_picked_and_reports_only_changes() {
+    let album = |descending| Some(MenuChoice::AlbumDescending(descending));
+    let column = |sort| Some(MenuChoice::Sort(sort));
+    assert_eq!(menu_choice(None, false, true, "", true), album(true));
+    assert_eq!(menu_choice(None, false, true, "", false), None);
+    assert_eq!(menu_choice(None, false, false, "", true), None);
+    let title = sort(SortColumn::Title, true);
+    assert_eq!(menu_choice(title, false, true, "", true), column(None));
+    assert_eq!(
+        menu_choice(None, true, false, "artist", true),
+        column(sort(SortColumn::Artist, true))
+    );
+    assert_eq!(menu_choice(None, true, true, "nope", true), None);
+
+    for current in every_sort() {
+        for album_descending in [false, true] {
+            for directional in [false, true] {
+                for name in every_name() {
+                    for descending in [false, true] {
+                        let case = format!(
+                            "{current:?} {album_descending} {directional} {name:?} {descending}"
+                        );
+                        let choice =
+                            menu_choice(current, album_descending, directional, name, descending);
+                        let picked = match name {
+                            "" => None,
+                            name => match SortColumn::from_name(name) {
+                                Some(column) => Some(Sort { column, descending }),
+                                None => {
+                                    assert_eq!(choice, None, "{case}");
+                                    continue;
+                                }
+                            },
+                        };
+                        let picked_direction =
+                            if picked.is_none() && current.is_none() && directional {
+                                descending
+                            } else {
+                                album_descending
+                            };
+                        let after = match choice {
+                            Some(MenuChoice::Sort(sort)) => (sort, album_descending),
+                            Some(MenuChoice::AlbumDescending(d)) => (current, d),
+                            None => (current, album_descending),
+                        };
+                        assert_eq!(after, (picked, picked_direction), "{case}");
+                        assert_eq!(
+                            choice.is_some(),
+                            after != (current, album_descending),
+                            "{case}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_saved_sort_or_album_direction_maps_back_to_itself() {
+    for saved in every_sort() {
+        for album_descending in [false, true] {
+            let (column, descending) = sort_state(saved, album_descending);
+            assert_eq!(sort_of(column, descending), saved);
+            if saved.is_none() {
+                assert_eq!((column, descending), ("", album_descending));
+            }
+        }
+    }
 }

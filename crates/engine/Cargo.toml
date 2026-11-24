@@ -23,5 +23,8 @@ symphonia = { version = "0.6.1", default-features = false, features = [
 thiserror.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true
