@@ -211,6 +211,134 @@ fn the_year_view_orders_albums_by_max_year_and_keeps_album_track_order() {
     assert_eq!(ids(&catalog, &view), [4]);
 }
 
+#[test]
+fn newest_first_puts_each_album_artists_newest_album_first_and_unknown_last() {
+    let catalog = Catalog::new(vec![
+        track(1, "A", 10, "Alpha", Some(1990)),
+        track(2, "A", 11, "Beta", Some(2000)),
+        track(3, "A", 12, "Gamma", Some(2000)),
+        track(4, "A", 13, "Undated", None),
+        track(5, "B", 20, "Old", Some(1980)),
+        track(6, "B", 20, "Old", Some(1980)),
+        track(7, "B", 21, "New", Some(2020)),
+    ]);
+    for grouping in [Grouping::AlbumArtist, Grouping::Album, Grouping::Genre] {
+        let view = catalog.view(grouping, &FilterValue::All, None);
+        let view = catalog.newest_first(view, grouping);
+        // Artists stay A to Z, and same-year albums keep title order.
+        assert_eq!(ids(&catalog, &view), [2, 3, 1, 4, 7, 5, 6], "{grouping:?}");
+        assert_eq!(view.albums, [0..1, 1..2, 2..3, 3..4, 4..5, 5..7]);
+        assert_eq!(view.sort, None);
+    }
+    let b = FilterValue::Text(normalize::key("B"));
+    let view = catalog.view(Grouping::AlbumArtist, &b, None);
+    let view = catalog.newest_first(view, Grouping::AlbumArtist);
+    assert_eq!(ids(&catalog, &view), [7, 5, 6]);
+}
+
+#[test]
+fn newest_first_puts_the_newest_year_first_in_the_year_view() {
+    let catalog = Catalog::new(vec![
+        track(1, "A", 10, "Late", Some(2010)),
+        track(2, "A", 10, "Late", Some(2010)),
+        track(3, "B", 20, "Early", Some(1990)),
+        track(4, "C", 30, "Undated", None),
+        track(5, "D", 40, "Same Year", Some(1990)),
+    ]);
+    let view = catalog.view(Grouping::Year, &FilterValue::All, None);
+    let view = catalog.newest_first(view, Grouping::Year);
+    // 2010, 1990 (B, then D by album artist), then Unknown.
+    assert_eq!(ids(&catalog, &view), [1, 2, 3, 5, 4]);
+    assert_eq!(view.albums, [0..2, 2..3, 3..4, 4..5]);
+}
+
+#[test]
+fn newest_first_leaves_groupings_ordered_by_date_alone() {
+    let catalog = Catalog::new(vec![
+        added(track(1, "A", 10, "Old", Some(1990)), 2),
+        added(track(2, "B", 20, "New", Some(2020)), 1),
+    ]);
+    let view = catalog.view(Grouping::RecentlyAdded, &FilterValue::All, None);
+    assert_eq!(
+        catalog.newest_first(view.clone(), Grouping::RecentlyAdded),
+        view
+    );
+}
+
+#[test]
+fn newest_first_of_an_empty_view_is_empty() {
+    let catalog = library();
+    let view = catalog.newest_first(View::default(), Grouping::AlbumArtist);
+    assert_eq!(view, View::default());
+}
+
+#[test]
+fn year_filters_newest_first_keep_all_first_and_unknown_last() {
+    let filters = library().filters_newest_first(Grouping::Year, None);
+    let values: Vec<FilterValue> = filters.into_iter().map(|f| f.value).collect();
+    assert_eq!(
+        values,
+        [
+            FilterValue::All,
+            FilterValue::Year(2000),
+            FilterValue::Year(1997),
+            FilterValue::Year(1994),
+            FilterValue::UnknownYear,
+        ]
+    );
+
+    let filters = Catalog::new(Vec::new()).filters_newest_first(Grouping::Year, None);
+    assert_eq!(filters.len(), 1);
+}
+
+#[test]
+fn album_filters_newest_first_follow_the_newest_first_view() {
+    let catalog = Catalog::new(vec![
+        track(1, "A", 10, "Alpha", Some(1990)),
+        track(2, "A", 11, "Beta", Some(2000)),
+        track(3, "A", 12, "Undated", None),
+        track(4, "B", 20, "Old", Some(1980)),
+        track(5, "B", 21, "New", Some(2020)),
+    ]);
+    let labels = |filters: Vec<Filter>| -> Vec<String> {
+        filters.into_iter().skip(1).map(|f| f.label).collect()
+    };
+    assert_eq!(
+        labels(catalog.filters_newest_first(Grouping::Album, None)),
+        ["Beta", "Alpha", "Undated", "New", "Old"]
+    );
+    let matches = HashSet::from([1, 2, 4]);
+    let filters = catalog.filters_newest_first(Grouping::Album, Some(&matches));
+    assert_eq!(filters[0].tracks, 3);
+    assert_eq!(labels(filters), ["Beta", "Alpha", "Old"]);
+}
+
+#[test]
+fn other_filters_newest_first_are_unchanged() {
+    let catalog = library();
+    for grouping in [
+        Grouping::AlbumArtist,
+        Grouping::Artist,
+        Grouping::Genre,
+        Grouping::RecentlyAdded,
+        Grouping::RecentlyPlayed,
+    ] {
+        assert_eq!(
+            catalog.filters_newest_first(grouping, None),
+            catalog.filters(grouping, None),
+            "{grouping:?}"
+        );
+    }
+}
+
+#[test]
+fn only_groupings_ordered_by_date_have_no_album_direction() {
+    for grouping in Grouping::ALL {
+        let by_date = matches!(grouping, Grouping::RecentlyAdded | Grouping::RecentlyPlayed);
+        assert_eq!(grouping.has_album_direction(), !by_date, "{grouping:?}");
+    }
+}
+
 fn added(mut t: ListTrack, at: i64) -> ListTrack {
     t.added_ns = Some(at);
     t

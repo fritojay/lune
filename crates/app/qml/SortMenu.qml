@@ -6,10 +6,11 @@ Menu {
     id: sortMenu
     required property string sortColumn
     required property bool sortDescending
-    required property var hiddenColumns
+    // Whether album order has a direction in this grouping.
+    required property bool albumDirectional
     readonly property bool sorted: sortColumn !== ""
+    readonly property bool directional: sorted || albumDirectional
     signal sortChosen(string column, bool descending)
-    signal columnToggled(string column, bool shown)
 
     component SortMenuItem: MenuItem {
         id: sortItem
@@ -25,22 +26,10 @@ Menu {
         }
     }
 
-    component ColumnMenuItem: MenuItem {
-        id: columnItem
-        required property string column
-        required property bool shown
-        checkable: true
-        checked: shown
-        onTriggered: {
-            (menu as SortMenu).columnToggled(columnItem.column, !columnItem.shown)
-            checked = Qt.binding(() => columnItem.shown)
-        }
-    }
-
     SortMenuItem {
         text: qsTr("Album Order")
         column: ""
-        descending: false
+        descending: sortMenu.sortDescending
         selected: !sortMenu.sorted
     }
     MenuSeparator {}
@@ -50,33 +39,24 @@ Menu {
             required property var modelData
             text: modelData.menuTitle ?? modelData.title
             column: modelData.id
-            descending: sortMenu.sortDescending
+            // Album order's direction is about years, not columns.
+            descending: sortMenu.sorted && sortMenu.sortDescending
             selected: sortMenu.sortColumn === column
         }
     }
     MenuSeparator {}
     SortMenuItem {
         text: qsTr("Ascending")
-        enabled: sortMenu.sorted
+        enabled: sortMenu.directional
         column: sortMenu.sortColumn
         descending: false
-        selected: sortMenu.sorted && !sortMenu.sortDescending
+        selected: sortMenu.directional && !sortMenu.sortDescending
     }
     SortMenuItem {
         text: qsTr("Descending")
-        enabled: sortMenu.sorted
+        enabled: sortMenu.directional
         column: sortMenu.sortColumn
         descending: true
-        selected: sortMenu.sorted && sortMenu.sortDescending
-    }
-    MenuSeparator {}
-    Repeater {
-        model: Columns.hideable
-        ColumnMenuItem {
-            required property var modelData
-            text: qsTr("Show %1").arg(modelData.title)
-            column: modelData.id
-            shown: !sortMenu.hiddenColumns.includes(modelData.id)
-        }
+        selected: sortMenu.directional && sortMenu.sortDescending
     }
 }

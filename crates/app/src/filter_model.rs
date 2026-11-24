@@ -47,6 +47,8 @@ pub mod qobject {
         #[qproperty(i32, track_count, cxx_name = "trackCount", READ, NOTIFY)]
         #[qproperty(QString, sort_column, cxx_name = "sortColumn", READ, NOTIFY)]
         #[qproperty(bool, sort_descending, cxx_name = "sortDescending", READ, NOTIFY)]
+        /// Whether album order has a direction to pick in this grouping.
+        #[qproperty(bool, album_directional, cxx_name = "albumDirectional", READ, NOTIFY)]
         type FilterModel = super::FilterModelRust;
     }
 
@@ -65,7 +67,7 @@ pub mod qobject {
         #[cxx_name = "sortBy"]
         fn sort_by(self: Pin<&mut FilterModel>, column: &QString);
 
-        /// Sorts by `column`, or restores album order for "".
+        /// A pick from the sort menu; see `menu_choice`.
         #[qinvokable]
         #[cxx_name = "setSort"]
         fn set_sort(self: Pin<&mut FilterModel>, column: &QString, descending: bool);
@@ -117,9 +119,12 @@ fn sort_of(column: &str, descending: bool) -> Option<Sort> {
     Some(Sort { column, descending })
 }
 
-/// `sortColumn` and `sortDescending` for `sort`.
-fn sort_state(sort: Option<Sort>) -> (&'static str, bool) {
-    sort.map_or(("", false), |sort| (sort.column.name(), sort.descending))
+/// `sortColumn` and `sortDescending` for `sort`, or for album order in
+/// direction `album_descending`.
+fn sort_state(sort: Option<Sort>, album_descending: bool) -> (&'static str, bool) {
+    sort.map_or(("", album_descending), |sort| {
+        (sort.column.name(), sort.descending)
+    })
 }
 
 /// The sort after a click on heading `clicked`, or `None` for a heading
@@ -139,6 +144,32 @@ fn chosen(current: Option<Sort>, column: &str, descending: bool) -> Option<Optio
     (sort != current).then_some(sort)
 }
 
+/// What a pick from the sort menu changes.
+#[derive(Debug, PartialEq, Eq)]
+enum MenuChoice {
+    Sort(Option<Sort>),
+    /// Album order's direction, where descending puts the newest albums first.
+    AlbumDescending(bool),
+}
+
+/// What picking `column` and `descending` from the sort menu changes, or
+/// `None` for a column that doesn't exist or what's already in effect. ""
+/// is album order: from a column sort it comes back in the direction it
+/// had, and in album order it sets that direction if it is `directional`.
+fn menu_choice(
+    current: Option<Sort>,
+    album_descending: bool,
+    directional: bool,
+    column: &str,
+    descending: bool,
+) -> Option<MenuChoice> {
+    if !column.is_empty() || current.is_some() {
+        return chosen(current, column, descending).map(MenuChoice::Sort);
+    }
+    (directional && descending != album_descending)
+        .then_some(MenuChoice::AlbumDescending(descending))
+}
+
 pub struct FilterModelRust {
     loading: bool,
     grouping: QString,
@@ -146,7 +177,10 @@ pub struct FilterModelRust {
     title: QString,
     track_count: i32,
     sort_column: QString,
+    /// The direction of `sortColumn`'s sort, or of album order without one.
     sort_descending: bool,
+    album_directional: bool,
+    album_descending: bool,
     rows: Vec<Filter>,
     /// Track ids matching the search; `None` without a search.
     matches: Option<HashSet<i64>>,
@@ -159,7 +193,7 @@ pub struct FilterModelRust {
 impl Default for FilterModelRust {
     fn default() -> Self {
         let saved = session::browse();
-        let (sort_column, sort_descending) = sort_state(saved.sort);
+        let (sort_column, sort_descending) = sort_state(saved.sort, saved.album_descending);
         Self {
             loading: true,
             grouping: QString::from(saved.grouping.name()),
@@ -168,6 +202,8 @@ impl Default for FilterModelRust {
             track_count: 0,
             sort_column: QString::from(sort_column),
             sort_descending,
+            album_directional: saved.grouping.has_album_direction(),
+            album_descending: saved.album_descending,
             rows: Vec::new(),
             matches: None,
             search_generation: 0,
@@ -256,6 +292,12 @@ impl qobject::FilterModel {
             grouping_changed,
             QString::from(grouping.name())
         );
+        set!(
+            self,
+            album_directional,
+            album_directional_changed,
+            grouping.has_album_direction()
+        );
         self.recompute(None, true);
     }
 
@@ -279,16 +321,31 @@ impl qobject::FilterModel {
         self.apply_sort(sort);
     }
 
-    fn set_sort(self: Pin<&mut Self>, column: &QString, descending: bool) {
-        let sort = chosen(self.sort(), &column.to_string(), descending);
-        self.apply_sort(sort);
+    fn set_sort(mut self: Pin<&mut Self>, column: &QString, descending: bool) {
+        let choice = menu_choice(
+            self.sort(),
+            self.album_descending,
+            self.album_directional,
+            &column.to_string(),
+            descending,
+        );
+        match choice {
+            Some(MenuChoice::Sort(sort)) => self.apply_sort(Some(sort)),
+            Some(MenuChoice::AlbumDescending(descending)) => {
+                self.as_mut().rust_mut().album_descending = descending;
+                set!(self, sort_descending, sort_descending_changed, descending);
+                let selected = self.selected().cloned();
+                self.recompute(selected, true);
+            }
+            None => {}
+        }
     }
 
     fn apply_sort(mut self: Pin<&mut Self>, sort: Option<Option<Sort>>) {
         let Some(sort) = sort else {
             return;
         };
-        let (column, descending) = sort_state(sort);
+        let (column, descending) = sort_state(sort, self.album_descending);
         set!(
             self,
             sort_column,
@@ -329,7 +386,11 @@ impl qobject::FilterModel {
         let Some(catalog) = session::catalog() else {
             return;
         };
-        let rows = catalog.filters(self.grouping_kind(), self.matches.as_ref());
+        let rows = if self.album_descending {
+            catalog.filters_newest_first(self.grouping_kind(), self.matches.as_ref())
+        } else {
+            catalog.filters(self.grouping_kind(), self.matches.as_ref())
+        };
         let row = keep
             .and_then(|value| rows.iter().position(|f| f.value == value))
             .unwrap_or(0);
@@ -354,14 +415,18 @@ impl qobject::FilterModel {
                 format::filter_label(&all(self.grouping_kind())),
             ),
         };
-        let mut view = catalog.view(self.grouping_kind(), &value, self.matches.as_ref());
-        if let Some(sort) = self.sort() {
-            view = catalog.sorted(view, sort);
-        }
+        let grouping = self.grouping_kind();
+        let view = catalog.view(grouping, &value, self.matches.as_ref());
+        let view = match self.sort() {
+            Some(sort) => catalog.sorted(view, sort),
+            None if self.album_descending => catalog.newest_first(view, grouping),
+            None => view,
+        };
         session::set_browse(BrowseState {
-            grouping: self.grouping_kind(),
+            grouping,
             selected: value,
             sort: self.sort(),
+            album_descending: self.album_descending,
         });
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
         session::set_view(view, reset);

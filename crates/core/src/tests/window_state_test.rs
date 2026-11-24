@@ -19,6 +19,7 @@ fn custom() -> WindowState {
                 column: SortColumn::Duration,
                 descending: true,
             }),
+            album_descending: true,
         },
     }
 }
@@ -29,6 +30,7 @@ fn browsing(selected: FilterValue) -> WindowState {
             grouping: Grouping::Year,
             selected,
             sort: None,
+            album_descending: false,
         },
         ..WindowState::default()
     }
@@ -212,6 +214,7 @@ fn every_grouping_and_sort_survives_a_save_and_load() {
                     grouping,
                     selected: FilterValue::All,
                     sort,
+                    album_descending: sort.is_none(),
                 },
                 ..WindowState::default()
             };
@@ -263,29 +266,92 @@ fn a_hand_written_browse_section_is_read() {
                 column: SortColumn::Title,
                 descending: false,
             }),
+            album_descending: false,
         }
     );
 }
 
 #[test]
-fn an_unreadable_browse_section_is_dropped_but_the_window_size_is_kept() {
+fn album_order_direction_is_read_and_defaults_to_ascending() {
     let dir = TempDir::new();
-    for (name, browse) in [
-        ("unknown-grouping.toml", "grouping = \"composer\""),
-        ("unknown-filter.toml", "selected = { composer = \"bach\" }"),
+    let path = dir.write(
+        "window.toml",
+        b"[browse]
+album_descending = true
+",
+    );
+    assert!(WindowState::load(&path).unwrap().browse.album_descending);
+    let path = dir.write(
+        "window.toml",
+        b"[browse]
+grouping = \"year\"
+",
+    );
+    assert!(!WindowState::load(&path).unwrap().browse.album_descending);
+}
+
+#[test]
+fn an_unreadable_browse_value_falls_back_to_its_default_and_keeps_the_rest() {
+    let dir = TempDir::new();
+    let kept = "grouping = \"year\"\nselected = { year = 1997 }\nalbum_descending = true\n";
+    let saved = BrowseState {
+        grouping: Grouping::Year,
+        selected: FilterValue::Year(1997),
+        sort: None,
+        album_descending: true,
+    };
+    for (name, unreadable, expected) in [
+        (
+            "unknown-grouping.toml",
+            "grouping = \"composer\"",
+            BrowseState {
+                grouping: Grouping::default(),
+                ..saved.clone()
+            },
+        ),
+        (
+            "unknown-filter.toml",
+            "selected = { composer = \"bach\" }",
+            BrowseState {
+                selected: FilterValue::All,
+                ..saved.clone()
+            },
+        ),
+        (
+            "wrong-type-filter.toml",
+            "selected = 5",
+            BrowseState {
+                selected: FilterValue::All,
+                ..saved.clone()
+            },
+        ),
         (
             "unknown-column.toml",
             "sort = { column = \"bpm\", descending = true }",
+            saved.clone(),
         ),
-        ("wrong-type.toml", "selected = 5"),
+        (
+            "wrong-type-direction.toml",
+            "album_descending = \"yes\"",
+            BrowseState {
+                album_descending: false,
+                ..saved.clone()
+            },
+        ),
     ] {
+        let key = unreadable.split(' ').next().unwrap();
+        let rest: String = kept
+            .lines()
+            .filter(|line| !line.starts_with(key))
+            .map(|line| format!("{line}\n"))
+            .collect();
         let path = dir.write(
             name,
-            format!("width = 900\n[browse]\n{browse}\n").as_bytes(),
+            format!("width = 900\n[browse]\n{rest}{unreadable}\n").as_bytes(),
         );
         let state = WindowState::load(&path).unwrap();
         assert_eq!(state.width, 900, "{name}");
-        assert_eq!(state.browse, BrowseState::default(), "{name}");
+        assert_eq!(state.browse, expected, "{name}");
     }
 }
 

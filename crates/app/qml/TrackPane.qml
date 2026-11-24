@@ -19,6 +19,7 @@ ColumnLayout {
     required property bool loading
     required property string sortColumn
     required property bool sortDescending
+    required property bool albumDirectional
     required property bool hasFolders
     required property string scanStatus
     required property real currentTrackId
@@ -166,9 +167,15 @@ ColumnLayout {
         id: sortMenu
         sortColumn: trackPane.sortColumn
         sortDescending: trackPane.sortDescending
-        hiddenColumns: trackPane.hiddenColumns
+        albumDirectional: trackPane.albumDirectional
         onSortChosen: (column, descending) => trackPane.sortChosen(column, descending)
-        onColumnToggled: (column, shown) => trackPane.columnToggled(column, shown)
+
+        MenuSeparator {}
+        ColumnsMenu {
+            title: qsTr("Columns")
+            hiddenColumns: trackPane.hiddenColumns
+            onColumnToggled: (column, shown) => trackPane.columnToggled(column, shown)
+        }
     }
 
     component ViewButton: ToolButton {

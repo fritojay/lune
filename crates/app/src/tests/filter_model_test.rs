@@ -80,6 +80,65 @@ fn the_menu_ignores_the_sort_already_in_effect() {
     assert_eq!(chosen(None, "", true), None);
 }
 
+fn album(descending: bool) -> Option<MenuChoice> {
+    Some(MenuChoice::AlbumDescending(descending))
+}
+
+fn column(sort: Option<Sort>) -> Option<MenuChoice> {
+    Some(MenuChoice::Sort(sort))
+}
+
+#[test]
+fn in_album_order_the_menu_sets_its_direction() {
+    assert_eq!(menu_choice(None, false, true, "", true), album(true));
+    assert_eq!(menu_choice(None, true, true, "", false), album(false));
+}
+
+#[test]
+fn in_album_order_the_menu_ignores_the_direction_in_effect() {
+    assert_eq!(menu_choice(None, false, true, "", false), None);
+    assert_eq!(menu_choice(None, true, true, "", true), None);
+}
+
+#[test]
+fn the_menu_ignores_album_direction_in_groupings_without_one() {
+    assert_eq!(menu_choice(None, false, false, "", true), None);
+    assert_eq!(menu_choice(None, true, false, "", false), None);
+}
+
+#[test]
+fn from_a_column_sort_album_order_comes_back_without_changing_its_direction() {
+    for album_descending in [false, true] {
+        for descending in [false, true] {
+            assert_eq!(
+                menu_choice(
+                    sort(SortColumn::Title, true),
+                    album_descending,
+                    true,
+                    "",
+                    descending
+                ),
+                column(None)
+            );
+        }
+    }
+}
+
+#[test]
+fn the_menu_sorts_by_a_column_in_any_album_direction() {
+    for album_descending in [false, true] {
+        assert_eq!(
+            menu_choice(None, album_descending, true, "artist", false),
+            column(sort(SortColumn::Artist, false))
+        );
+        assert_eq!(
+            menu_choice(None, album_descending, false, "artist", true),
+            column(sort(SortColumn::Artist, true))
+        );
+    }
+    assert_eq!(menu_choice(None, true, true, "nope", true), None);
+}
+
 #[test]
 fn groupings_qml_has_every_grouping_once() {
     let mut ids = qml_values(include_str!("../../qml/Groupings.qml"), "id");
@@ -93,12 +152,13 @@ fn groupings_qml_has_every_grouping_once() {
 fn a_saved_sort_maps_back_to_the_same_sort() {
     for descending in [false, true] {
         let saved = sort(SortColumn::FileType, descending);
-        let (column, descending) = sort_state(saved);
+        let (column, descending) = sort_state(saved, !descending);
         assert_eq!(sort_of(column, descending), saved);
     }
 }
 
 #[test]
-fn album_order_is_saved_as_no_column() {
-    assert_eq!(sort_state(None), ("", false));
+fn album_order_is_saved_as_no_column_in_its_direction() {
+    assert_eq!(sort_state(None, false), ("", false));
+    assert_eq!(sort_state(None, true), ("", true));
 }

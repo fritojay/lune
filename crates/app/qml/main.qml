@@ -69,6 +69,19 @@ ApplicationWindow {
                 checked: layout.albumGrid
                 onTriggered: layout.albumGrid = true
             }
+            MenuSeparator {}
+            SortMenu {
+                title: qsTr("&Sort")
+                sortColumn: filters.sortColumn
+                sortDescending: filters.sortDescending
+                albumDirectional: filters.albumDirectional
+                onSortChosen: (column, descending) => filters.setSort(column, descending)
+            }
+            ColumnsMenu {
+                title: qsTr("&Columns")
+                hiddenColumns: layout.hiddenColumns
+                onColumnToggled: (column, shown) => layout.setColumnShown(column, shown)
+            }
         }
         Menu {
             title: qsTr("&Help")
@@ -327,6 +340,7 @@ ApplicationWindow {
                     loading: filters.loading
                     sortColumn: filters.sortColumn
                     sortDescending: filters.sortDescending
+                    albumDirectional: filters.albumDirectional
                     hasFolders: library.folders.length > 0
                     scanStatus: library.busy ? library.status : ""
                                 currentTrackId: player.currentTrackId

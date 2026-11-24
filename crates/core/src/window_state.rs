@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{CoreError, FilterValue, Grouping, Result, Sort, SortColumn};
@@ -35,13 +36,19 @@ pub struct WindowState {
 }
 
 /// What the main pane shows: the grouping, the filter value selected in it,
-/// and the column sort (`None` is album order).
+/// the column sort (`None` is album order), and the direction of album
+/// order's years, which a column sort leaves as it was.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BrowseState {
+    #[serde(deserialize_with = "or_default")]
     pub grouping: Grouping,
+    #[serde(deserialize_with = "or_default")]
     pub selected: FilterValue,
+    #[serde(deserialize_with = "or_default")]
     pub sort: Option<Sort>,
+    #[serde(deserialize_with = "or_default")]
+    pub album_descending: bool,
 }
 
 impl Default for WindowState {
@@ -128,8 +135,8 @@ impl WindowState {
     }
 }
 
-/// A browse section this version can't read, such as a grouping from a newer
-/// one, falls back to the defaults without losing the window's size.
+/// A browse section that isn't a table falls back to the defaults without
+/// losing the window's size.
 fn browse_or_default<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<BrowseState, D::Error> {
@@ -137,6 +144,18 @@ fn browse_or_default<'de, D: Deserializer<'de>>(
     Ok(value.try_into().unwrap_or_else(|err| {
         tracing::warn!(%err, "the saved browse position is ignored");
         BrowseState::default()
+    }))
+}
+
+/// A browse value this version can't read, such as a grouping from a newer
+/// one, falls back to its default without losing the others.
+fn or_default<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(
+    deserializer: D,
+) -> std::result::Result<T, D::Error> {
+    let value = toml::Value::deserialize(deserializer)?;
+    Ok(value.try_into().unwrap_or_else(|err| {
+        tracing::warn!(%err, "a saved browse value is ignored");
+        T::default()
     }))
 }
 

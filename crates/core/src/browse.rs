@@ -57,6 +57,13 @@ impl Grouping {
         self.def().1
     }
 
+    /// Whether its album order lists years in a direction the user picks,
+    /// which [`Catalog::newest_first`] reverses. Groupings ordered by date
+    /// are always newest first.
+    pub fn has_album_direction(self) -> bool {
+        matches!(self.def().0, Order::Catalog | Order::Year)
+    }
+
     /// The order its values are listed in, and what they are.
     fn def(self) -> (Order, Field) {
         match self {
@@ -389,11 +396,50 @@ impl Catalog {
     /// The filter pane for `grouping`: `All` first, then every value that has
     /// tracks. With `matches` (search results), only tracks in it count.
     pub fn filters(&self, grouping: Grouping, matches: Option<&HashSet<i64>>) -> Vec<Filter> {
+        self.filters_in(self.order(grouping), grouping.field(), matches)
+    }
+
+    /// [`Catalog::filters`] to go with [`Catalog::newest_first`]: albums in
+    /// the order it shows them, and years newest first. `All` stays first and
+    /// Unknown last.
+    pub fn filters_newest_first(
+        &self,
+        grouping: Grouping,
+        matches: Option<&HashSet<i64>>,
+    ) -> Vec<Filter> {
         let field = grouping.field();
+        // Only albums take their order from the tracks; other values would
+        // only take their labels from a different first track.
+        let mut filters = if field == Field::Album {
+            let view = self.view(grouping, &FilterValue::All, matches);
+            let order = self.newest_first(view, grouping).tracks.into_iter();
+            self.filters_in(order, field, matches)
+        } else {
+            self.filters(grouping, matches)
+        };
+        if field == Field::Year {
+            let years = filters
+                .iter()
+                .filter(|f| matches!(f.value, FilterValue::Year(_)))
+                .count();
+            if let Some(years) = filters.get_mut(1..=years) {
+                years.reverse();
+            }
+        }
+        filters
+    }
+
+    /// The filter pane for `field`'s values, taking albums in `order`.
+    fn filters_in(
+        &self,
+        order: impl Iterator<Item = usize>,
+        field: Field,
+        matches: Option<&HashSet<i64>>,
+    ) -> Vec<Filter> {
         let mut all = 0;
         // Each value with the position of its first track.
         let mut values: HashMap<Key<'_>, (usize, Filter)> = HashMap::new();
-        for (position, i) in self.order(grouping).enumerate() {
+        for (position, i) in order.enumerate() {
             let track = &self.tracks[i];
             if matches.is_some_and(|m| !m.contains(&track.id)) {
                 continue;
@@ -473,6 +519,34 @@ impl Catalog {
         view.albums = (0..view.tracks.len()).map(|i| i..i + 1).collect();
         view.sort = Some(sort);
         view
+    }
+
+    /// `view`, in album order for `grouping`, with years descending: each
+    /// album artist's albums newest first, or for [`Grouping::Year`] the
+    /// newest year first. Unknown years stay last. Groupings ordered by date
+    /// are returned unchanged.
+    pub fn newest_first(&self, view: View, grouping: Grouping) -> View {
+        let first = |album: &Range<usize>| &self.tracks[view.tracks[album.start]];
+        let year = |album: &Range<usize>| {
+            let year = first(album).album_year;
+            (year.is_none(), Reverse(year))
+        };
+        let mut albums = view.albums.clone();
+        match grouping.def().0 {
+            // Stable, so album title order is kept within each year.
+            Order::Catalog => {
+                albums.sort_by_key(|album| (first(album).album_artist_key.as_str(), year(album)));
+            }
+            Order::Year => albums.sort_by_key(year),
+            Order::Added | Order::Played => return view,
+        }
+        let mut newest = View::default();
+        for album in albums {
+            let at = newest.tracks.len();
+            newest.tracks.extend_from_slice(&view.tracks[album]);
+            newest.albums.push(at..newest.tracks.len());
+        }
+        newest
     }
 
     fn order(&self, grouping: Grouping) -> Box<dyn Iterator<Item = usize> + '_> {
