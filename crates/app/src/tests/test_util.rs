@@ -47,7 +47,6 @@ impl TempDir {
     }
 }
 
-/// Unix sets times through any descriptor the owner holds.
 #[cfg(unix)]
 fn open_for_times(path: &Path) -> std::fs::File {
     std::fs::File::open(path).unwrap()

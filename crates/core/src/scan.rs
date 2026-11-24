@@ -607,7 +607,6 @@ pub(crate) fn unix_ns(t: SystemTime) -> i64 {
 struct Stored {
     mtime_ns: i64,
     size: i64,
-    /// Whether it has a date added.
     dated: bool,
     missing_ns: Option<i64>,
     /// Read by an older [`READER_VERSION`].
