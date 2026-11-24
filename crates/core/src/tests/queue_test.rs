@@ -122,6 +122,7 @@ enum Op {
     Remove(Vec<Index>),
     MoveTo(Vec<Index>, usize),
     SetCurrent(Index),
+    SetResume(Index, Duration),
     Clear,
     Shuffle(bool),
 }
@@ -139,6 +140,8 @@ fn arb_op() -> impl Strategy<Value = Op> {
         picks().prop_map(Op::Remove),
         (picks(), 0..8usize).prop_map(|(picks, to)| Op::MoveTo(picks, to)),
         any::<Index>().prop_map(Op::SetCurrent),
+        (any::<Index>(), any::<u32>())
+            .prop_map(|(pick, ms)| Op::SetResume(pick, Duration::from_millis(ms.into()))),
         Just(Op::Clear),
         any::<bool>().prop_map(Op::Shuffle),
     ]
@@ -152,6 +155,7 @@ struct Model {
     original: Option<Vec<SlotId>>,
     current: Option<SlotId>,
     place: usize,
+    resume: Option<(SlotId, Duration)>,
 }
 
 impl Model {
@@ -282,6 +286,13 @@ impl Model {
                     queue.set_current(slot);
                     self.current = Some(slot);
                     self.place = self.position(slot).unwrap();
+                    self.resume = None;
+                }
+            }
+            Op::SetResume(pick, position) => {
+                if let Some(&slot) = self.slots(&[*pick]).first() {
+                    queue.set_resume_position(slot, *position);
+                    self.resume = Some((slot, *position));
                 }
             }
             Op::Clear => {
@@ -322,6 +333,15 @@ impl Model {
         assert_eq!(slots.len(), items.len(), "every item has its own slot");
         assert_eq!(queue.shuffle(), self.original.is_some());
         assert_eq!(queue.current_index(), self.current_index());
+        let resume = match self.resume {
+            Some((slot, position))
+                if self.current_index().is_some() && self.current == Some(slot) =>
+            {
+                position
+            }
+            _ => Duration::ZERO,
+        };
+        assert_eq!(queue.resume_position(), resume);
         let never_handed_out = SlotId(u64::MAX);
         assert!(queue.next_after(never_handed_out).is_none());
         assert!(queue.previous_before(never_handed_out).is_none());
@@ -359,6 +379,7 @@ proptest! {
     fn the_queue_and_its_cursor_survive_a_save_and_load(
         ops in prop::collection::vec(arb_op(), 0..30),
         cursor: Index,
+        resume_ms: u32,
     ) {
         let mut conn = db::open_in_memory().unwrap();
         library_with_tracks(&conn, &[1, 2, 3, 4, 5]);
@@ -369,6 +390,7 @@ proptest! {
         }
         save(&mut conn, &queue).unwrap();
         model.apply(&Op::SetCurrent(cursor), &mut queue);
+        model.apply(&Op::SetResume(cursor, Duration::from_millis(resume_ms.into())), &mut queue);
         save_cursor(&conn, &queue).unwrap();
         let mut loaded = load(&conn).unwrap();
         let entries = |queue: &Queue| -> Vec<(i64, PathBuf)> {
@@ -377,6 +399,7 @@ proptest! {
         prop_assert_eq!(entries(&loaded), entries(&queue));
         prop_assert_eq!(loaded.current_index(), queue.current_index());
         prop_assert_eq!(loaded.shuffle(), queue.shuffle());
+        prop_assert_eq!(loaded.resume_position(), queue.resume_position());
         queue.set_shuffle(false);
         loaded.set_shuffle(false);
         prop_assert_eq!(ids(&loaded), ids(&queue));

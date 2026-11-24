@@ -135,6 +135,7 @@ fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
          ALTER TABLE tracks DROP COLUMN reader_version;
          ALTER TABLE tracks DROP COLUMN genre;
          ALTER TABLE albums DROP COLUMN genre;
+         ALTER TABLE queue_state DROP COLUMN resume_ms;
          PRAGMA user_version = 7;",
     )
     .unwrap();
@@ -166,6 +167,7 @@ fn a_v8_database_rereads_every_file_once() {
         "ALTER TABLE tracks DROP COLUMN reader_version;
          ALTER TABLE tracks DROP COLUMN genre;
          ALTER TABLE albums DROP COLUMN genre;
+         ALTER TABLE queue_state DROP COLUMN resume_ms;
          PRAGMA user_version = 8;",
     )
     .unwrap();
@@ -198,6 +200,7 @@ fn a_v9_database_rereads_every_file_once_to_fill_in_genres() {
         "ALTER TABLE tracks DROP COLUMN genre;
          ALTER TABLE albums DROP COLUMN genre;
          UPDATE tracks SET reader_version = 1;
+         ALTER TABLE queue_state DROP COLUMN resume_ms;
          PRAGMA user_version = 9;",
     )
     .unwrap();
@@ -208,4 +211,27 @@ fn a_v9_database_rereads_every_file_once_to_fill_in_genres() {
     let jazz = Some("Jazz".to_owned());
     assert_eq!(genres(&conn), (jazz.clone(), jazz));
     assert_eq!(quick(&mut conn).updated, 0);
+}
+
+#[test]
+fn a_v10_database_keeps_its_queue_and_resumes_from_the_start() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(&format!(
+        "BEGIN; {}; PRAGMA user_version = 10; COMMIT;",
+        MIGRATIONS[..10].join(";")
+    ))
+    .unwrap();
+    conn.execute_batch(
+        "INSERT INTO albums (id, album_artist, album_artist_key, title, title_key)
+         VALUES (1, 'A', 'a', 'T', 't');
+         INSERT INTO tracks (id, path, mtime_ns, size, album_id, duration_ms, codec)
+         VALUES (1, '/x.mp3', 0, 0, 1, 1000, 'mp3');
+         INSERT INTO queue (position, track_id) VALUES (0, 1);
+         INSERT INTO queue_state (id, cursor) VALUES (1, 0);",
+    )
+    .unwrap();
+    migrate(&conn).unwrap();
+    let queue = crate::queue::load(&conn).unwrap();
+    assert_eq!(queue.current_index(), Some(0));
+    assert_eq!(queue.resume_position(), Duration::ZERO);
 }

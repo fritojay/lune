@@ -119,8 +119,12 @@ impl Player {
     }
 
     pub fn play(&self, entry: QueueEntry) -> Result<()> {
+        self.play_from(entry, Duration::ZERO)
+    }
+
+    pub fn play_from(&self, entry: QueueEntry, position: Duration) -> Result<()> {
         self.shared.starting.store(true, Ordering::Release);
-        self.send(Command::Play(entry))
+        self.send(Command::Play(entry, position))
     }
 
     pub fn pause(&self) {

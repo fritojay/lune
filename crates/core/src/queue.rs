@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::hash::{BuildHasher, RandomState};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -33,6 +34,8 @@ pub struct Queue {
     /// stays where the item was, so playback continues with whatever took
     /// its place.
     cursor: usize,
+    /// How far into this slot playback had got, to continue from there.
+    resume: Option<(SlotId, Duration)>,
     next_slot: u64,
     rng: u64,
 }
@@ -44,6 +47,7 @@ impl Default for Queue {
             original: None,
             current: None,
             cursor: 0,
+            resume: None,
             next_slot: 0,
             // Odd and nonzero, as xorshift needs.
             rng: RandomState::new().hash_one(0u8) | 1,
@@ -81,12 +85,25 @@ impl Queue {
         }
     }
 
-    /// Marks `slot` as the one playing (the engine reports it).
+    /// Marks `slot` as the one playing (the engine reports it), from its start.
     pub fn set_current(&mut self, slot: SlotId) {
         if let Some(i) = self.index_of(slot) {
             self.current = Some(slot);
             self.cursor = i;
+            self.resume = None;
         }
+    }
+
+    /// Where to start the current item when playback starts again.
+    pub fn resume_position(&self) -> Duration {
+        match (self.current(), self.resume) {
+            (Some(item), Some((slot, position))) if item.slot == slot => position,
+            _ => Duration::ZERO,
+        }
+    }
+
+    pub fn set_resume_position(&mut self, slot: SlotId, position: Duration) {
+        self.resume = Some((slot, position));
     }
 
     /// Replaces the whole queue with `tracks` and makes `tracks[start]`
@@ -227,6 +244,7 @@ impl Queue {
         tracks: Vec<(i64, PathBuf)>,
         original: Option<Vec<usize>>,
         cursor: Option<usize>,
+        resume: Duration,
     ) -> Self {
         let mut queue = Self::default();
         queue.items = queue.new_items(tracks);
@@ -241,6 +259,7 @@ impl Queue {
         if let Some(item) = cursor.and_then(|c| queue.items.get(c)) {
             queue.current = Some(item.slot);
             queue.cursor = cursor.unwrap_or(0);
+            queue.resume = Some((item.slot, resume));
         }
         queue
     }
@@ -336,17 +355,22 @@ pub(crate) fn save(conn: &mut Connection, queue: &Queue) -> Result<()> {
     Ok(())
 }
 
-/// Saves only which item is current and the shuffle flag: cheap enough to
-/// run on every track change.
+/// Saves only which item is current, where to resume it, and the shuffle
+/// flag: cheap enough to run on every track change.
 pub(crate) fn save_cursor(conn: &Connection, queue: &Queue) -> Result<()> {
     save_state(conn, queue)
 }
 
 fn save_state(conn: &Connection, queue: &Queue) -> Result<()> {
     conn.execute(
-        "INSERT INTO queue_state (id, cursor, shuffle) VALUES (1, ?1, ?2)
-         ON CONFLICT (id) DO UPDATE SET cursor = excluded.cursor, shuffle = excluded.shuffle",
-        params![queue.current_index().map(|i| i as i64), queue.shuffle()],
+        "INSERT INTO queue_state (id, cursor, shuffle, resume_ms) VALUES (1, ?1, ?2, ?3)
+         ON CONFLICT (id) DO UPDATE SET cursor = excluded.cursor, shuffle = excluded.shuffle,
+             resume_ms = excluded.resume_ms",
+        params![
+            queue.current_index().map(|i| i as i64),
+            queue.shuffle(),
+            i64::try_from(queue.resume_position().as_millis()).unwrap_or(i64::MAX),
+        ],
     )?;
     Ok(())
 }
@@ -354,14 +378,14 @@ fn save_state(conn: &Connection, queue: &Queue) -> Result<()> {
 /// Loads the saved queue. Tracks deleted from the library since are dropped;
 /// missing ones stay, as their files may come back (playback skips them).
 pub(crate) fn load(conn: &Connection) -> Result<Queue> {
-    let (cursor, shuffle): (Option<i64>, bool) = conn
+    let (cursor, shuffle, resume_ms): (Option<i64>, bool, i64) = conn
         .query_row(
-            "SELECT cursor, shuffle FROM queue_state WHERE id = 1",
+            "SELECT cursor, shuffle, resume_ms FROM queue_state WHERE id = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?
-        .unwrap_or((None, false));
+        .unwrap_or((None, false, 0));
     let mut stmt = conn.prepare(
         "SELECT q.position, q.track_id, t.path, q.original_position
          FROM queue q JOIN tracks t ON t.id = q.track_id
@@ -396,7 +420,8 @@ pub(crate) fn load(conn: &Connection) -> Result<Queue> {
         }
         positions
     });
-    Ok(Queue::restore(tracks, original, new_cursor))
+    let resume = Duration::from_millis(u64::try_from(resume_ms).unwrap_or(0));
+    Ok(Queue::restore(tracks, original, new_cursor, resume))
 }
 
 #[cfg(test)]

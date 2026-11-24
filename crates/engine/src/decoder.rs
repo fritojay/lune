@@ -25,7 +25,7 @@ const MAX_OPEN_ATTEMPTS: usize = 32;
 const PREVIOUS_RESTART_AFTER: Duration = Duration::from_secs(3);
 
 pub(crate) enum Command {
-    Play(QueueEntry),
+    Play(QueueEntry, Duration),
     Stop,
     Seek(Duration),
     Next,
@@ -169,10 +169,14 @@ impl Decoder {
     fn handle(&mut self, command: Command) -> bool {
         match command {
             Command::Shutdown => return false,
-            Command::Play(entry) => {
+            Command::Play(entry, position) => {
                 self.discard_all();
                 self.shared.paused.store(false, Ordering::Relaxed);
-                self.start_entry(Some(entry), Duration::ZERO);
+                if position.is_zero() {
+                    self.start_entry(Some(entry), Duration::ZERO);
+                } else {
+                    self.seek(entry, position);
+                }
                 self.shared.starting.store(false, Ordering::Release);
             }
             Command::Stop => {

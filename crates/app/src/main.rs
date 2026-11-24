@@ -152,6 +152,10 @@ fn run(started: Instant) -> anyhow::Result<()> {
         anyhow::bail!("failed to create the Qt application");
     };
     let code = app_ref.exec();
+    // Before the library loads, the queue in memory is empty, not the saved one.
+    if session::catalog().is_some() {
+        session::save(session::Save::Cursor);
+    }
     session::finish_saving();
     if code != 0 {
         anyhow::bail!("Qt event loop exited with code {code}");

@@ -139,6 +139,10 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE tracks ADD COLUMN genre TEXT;
     ALTER TABLE albums ADD COLUMN genre TEXT;  -- the first genre in album order
     "#,
+    // v11: where in the current track playback resumes.
+    r#"
+    ALTER TABLE queue_state ADD COLUMN resume_ms INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

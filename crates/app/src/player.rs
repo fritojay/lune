@@ -339,18 +339,18 @@ impl qobject::PlayerController {
             player.toggle_pause();
             return;
         }
-        // Stopped: start the current track, or the first one.
-        let entry = {
+        // Stopped: continue the current track, or start the first one.
+        let (entry, resume) = {
             let mut queue = session::lock_queue();
             if queue.current().is_none()
                 && let Some(slot) = queue.items().first().map(|i| i.slot)
             {
                 queue.set_current(slot);
             }
-            queue.current().map(session::entry)
+            (queue.current().map(session::entry), queue.resume_position())
         };
         if let Some(entry) = entry {
-            log_err(player.play(entry));
+            log_err(player.play_from(entry, resume));
         }
         self.as_mut().update_now_playing();
     }
@@ -460,6 +460,9 @@ impl qobject::PlayerController {
             self.as_mut().error_changed();
         }
         if status.entry != self.playing_entry {
+            if let (Some(stopped), None) = (self.playing_entry, status.entry) {
+                session::lock_queue().set_resume_position(SlotId(stopped.0), Duration::ZERO);
+            }
             self.as_mut().rust_mut().playing_entry = status.entry;
             if let Some(entry) = status.entry {
                 let track_id = {
@@ -480,12 +483,17 @@ impl qobject::PlayerController {
             playing_changed,
             status.state == PlaybackState::Playing
         );
-        set!(
-            self,
-            position,
-            position_changed,
-            status.position.as_secs_f64()
-        );
+        let position = {
+            let mut queue = session::lock_queue();
+            match status.entry {
+                Some(entry) => {
+                    queue.set_resume_position(SlotId(entry.0), status.position);
+                    status.position
+                }
+                None => queue.resume_position(),
+            }
+        };
+        set!(self, position, position_changed, position.as_secs_f64());
         if let Some(duration) = status.duration {
             set!(self, duration, duration_changed, duration.as_secs_f64());
         }

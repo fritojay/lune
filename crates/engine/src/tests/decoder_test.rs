@@ -108,7 +108,10 @@ fn a_queue_edit_keeps_the_end_of_the_playing_track() {
         let queue = Arc::new(VecQueue::from_paths([a, b, c.clone()]));
         let mut sim = Sim::new(queue.clone(), 4096);
         let first = queue.first().unwrap();
-        assert!(sim.decoder.handle(Command::Play(first.clone())));
+        assert!(
+            sim.decoder
+                .handle(Command::Play(first.clone(), Duration::ZERO))
+        );
 
         // Advance until B has a boundary, rendering only a trickle so the
         // ring stays nearly full.
@@ -157,7 +160,10 @@ fn mixed_rates_play_at_the_exact_total_length() {
         .collect();
     let queue = Arc::new(VecQueue::from_paths(paths));
     let mut sim = Sim::new(queue.clone(), 8192);
-    assert!(sim.decoder.handle(Command::Play(queue.first().unwrap())));
+    assert!(
+        sim.decoder
+            .handle(Command::Play(queue.first().unwrap(), Duration::ZERO))
+    );
     sim.run_to_end();
     // Same-rate neighbours share a stream, so round per stream.
     let stream = |rate: u64, frames: u64| (frames * u64::from(OUT_RATE) + rate / 2) / rate;
@@ -176,7 +182,10 @@ fn skipping_many_unplayable_entries_yields_between_batches() {
     paths.push(good);
     let queue = Arc::new(VecQueue::from_paths(paths));
     let mut sim = Sim::new(queue.clone(), 8192);
-    assert!(sim.decoder.handle(Command::Play(queue.first().unwrap())));
+    assert!(
+        sim.decoder
+            .handle(Command::Play(queue.first().unwrap(), Duration::ZERO))
+    );
     assert_eq!(
         sim.decoder.resume_skip.as_ref().map(|e| e.id),
         Some(EntryId(32))
@@ -204,7 +213,10 @@ fn previous_skips_unplayable_entries_back_to_a_playable_one() {
     ]));
     let mut sim = Sim::new(queue.clone(), 8192);
     let last_entry = queue.next_after(EntryId(2)).unwrap();
-    assert!(sim.decoder.handle(Command::Play(last_entry)));
+    assert!(
+        sim.decoder
+            .handle(Command::Play(last_entry, Duration::ZERO))
+    );
     assert!(sim.decoder.handle(Command::Previous));
     assert_eq!(current_id(&sim), Some(EntryId(0)));
 }
@@ -217,7 +229,10 @@ fn previous_restarts_the_track_when_only_unplayable_entries_precede_it() {
     let queue = Arc::new(VecQueue::from_paths([dir.join("missing.wav"), last]));
     let mut sim = Sim::new(queue.clone(), 8192);
     let last_entry = queue.next_after(EntryId(0)).unwrap();
-    assert!(sim.decoder.handle(Command::Play(last_entry)));
+    assert!(
+        sim.decoder
+            .handle(Command::Play(last_entry, Duration::ZERO))
+    );
     assert!(sim.decoder.handle(Command::Previous));
     assert_eq!(current_id(&sim), Some(EntryId(1)));
     sim.run_to_end();
@@ -231,7 +246,10 @@ fn a_discard_wakes_the_output_so_a_sleeping_stream_still_applies_it() {
     write_wav(&a, 48_000, 2, 0, 48_000);
     let queue = Arc::new(VecQueue::from_paths([a]));
     let mut sim = Sim::new(queue.clone(), 8192);
-    assert!(sim.decoder.handle(Command::Play(queue.first().unwrap())));
+    assert!(
+        sim.decoder
+            .handle(Command::Play(queue.first().unwrap(), Duration::ZERO))
+    );
     for _ in 0..100 {
         sim.pump();
     }
@@ -256,7 +274,10 @@ fn audio_arriving_after_a_discard_wakes_the_output() {
     write_wav(&a, 48_000, 2, 0, 48_000);
     let queue = Arc::new(VecQueue::from_paths([a]));
     let mut sim = Sim::new(queue.clone(), 8192);
-    assert!(sim.decoder.handle(Command::Play(queue.first().unwrap())));
+    assert!(
+        sim.decoder
+            .handle(Command::Play(queue.first().unwrap(), Duration::ZERO))
+    );
     assert!(
         sim.decoder
             .handle(Command::Seek(Duration::from_millis(500)))
@@ -270,4 +291,24 @@ fn audio_arriving_after_a_discard_wakes_the_output() {
         matches!(sim.wakes.try_recv(), Ok(Signal::Wake)),
         "the refill did not wake the output"
     );
+}
+
+#[test]
+fn play_from_a_position_plays_only_the_rest_of_the_track() {
+    let dir = TempDir::new();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, OUT_RATE, 2, 0, 48_000);
+    write_wav(&b, OUT_RATE, 2, 0, 1000);
+    let queue = Arc::new(VecQueue::from_paths([a, b]));
+    let mut sim = Sim::new(queue.clone(), 8192);
+    assert!(sim.decoder.handle(Command::Play(
+        queue.first().unwrap(),
+        Duration::from_millis(500)
+    )));
+    assert_eq!(
+        sim.decoder.playing().map(|(e, at)| (e.id, at)),
+        Some((EntryId(0), Duration::from_millis(500)))
+    );
+    sim.run_to_end();
+    assert_eq!(sim.captured, 24_000 + 1000);
 }
