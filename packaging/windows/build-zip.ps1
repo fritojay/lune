@@ -41,9 +41,12 @@ Copy-Item "$TargetDir\release\lune.exe" $App
 
 # Qt's DLLs, plugins, and the QML modules the app's QML files import. Windows
 # 10 and later have the D3D compiler, and the RHI doesn't need software OpenGL.
+# lune.exe doesn't link Qt Svg, so windeployqt only adds it and its image
+# format plugin, which loads the icons, when asked to.
 Invoke-Native "$QtBins\windeployqt.exe" --release --qmldir "$Root\crates\app\qml" `
-    --no-translations --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime `
+    --svg --no-translations --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime `
     --verbose 1 "$App\lune.exe"
+if (-not (Test-Path "$App\imageformats\qsvg.dll")) { throw 'windeployqt left out the SVG plugin' }
 
 # The MSVC runtime, app-local, so nothing needs installing. windeployqt would
 # only add the vc_redist installer.

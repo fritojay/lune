@@ -6,12 +6,12 @@ import QtQuick.Controls
 ScrollBar {
     readonly property real gutter: size < 1 ? width : 0
 
-    // Linux runs Fusion (see main.rs), whose handle uses palette.mid; a tint of the
+    // The app runs Fusion (see main.rs), whose handle uses palette.mid; a tint of the
     // text color, like Theme's stripes, shows in light and dark mode. High contrast
     // gets the full text color. The check guards a style picked through
     // QT_QUICK_CONTROLS_STYLE whose handle isn't a Rectangle.
     Component.onCompleted: {
-        if (Qt.platform.os === "linux" && contentItem instanceof Rectangle)
+        if (contentItem instanceof Rectangle)
             contentItem.color = Qt.binding(() => {
                 if (Application.styleHints.accessibility.contrastPreference === Qt.HighContrast)
                     return pressed ? palette.highlight : palette.text

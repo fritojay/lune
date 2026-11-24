@@ -123,11 +123,13 @@ fn run(started: Instant) -> anyhow::Result<()> {
         anyhow::bail!("failed to create the Qt application");
     };
     app_ref.set_application_version(&QString::from(env!("CARGO_PKG_VERSION")));
-    // Fusion on every Linux desktop, so the look doesn't depend on the
-    // platform theme: KDE's picks a style that can't load the icons in our
-    // QML module and runs menu shortcuts into their text. A non-empty env var
-    // still overrides this, for trying other styles; Qt ignores an empty one.
-    #[cfg(target_os = "linux")]
+    // Fusion everywhere, so the app looks and behaves the same on every
+    // platform and follows the system palette, dark mode included. The
+    // platform styles don't: KDE's can't load the icons in our QML module and
+    // runs menu shortcuts into their text, Windows' draw their own light or
+    // dark controls under the app's palette-tinted text and backgrounds, and
+    // macOS's can't be restyled. A non-empty env var still overrides this, for
+    // trying other styles; Qt ignores an empty one.
     if std::env::var_os("QT_QUICK_CONTROLS_STYLE").is_none_or(|style| style.is_empty()) {
         cxx_qt_lib::QQuickStyle::set_style(&cxx_qt_lib::QString::from("Fusion"));
     }
