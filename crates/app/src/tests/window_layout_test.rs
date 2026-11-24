@@ -57,6 +57,15 @@ fn saved_hidden_columns_reach_qml_by_name() {
     assert_eq!(names, ["artist", "bit_rate"]);
 }
 
+#[test]
+fn the_saved_album_grid_reaches_qml() {
+    let state = WindowState {
+        album_grid: true,
+        ..WindowState::default()
+    };
+    assert!(WindowLayoutRust::from(&state).album_grid);
+}
+
 fn widths(available: f64, hidden: &[SortColumn]) -> Vec<f64> {
     column_widths(available, &hidden.iter().copied().collect())
 }

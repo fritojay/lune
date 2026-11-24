@@ -1,6 +1,7 @@
 //! The main pane's track list (`session::view`), one row per album so QML
 //! can draw the cover beside the album's tracks. A track's place in the
-//! view is its album's `firstIndex` plus its position in the album.
+//! view is its album's `firstIndex` plus its position in the album. With
+//! `oneAlbum` set, it shows only the view's rows of album `albumId`.
 
 #![expect(
     unsafe_code,
@@ -44,6 +45,9 @@ pub mod qobject {
         #[qml_element]
         #[base = QAbstractListModel]
         #[qproperty(i32, album_count, cxx_name = "albumCount", READ, NOTIFY)]
+        #[qproperty(bool, one_album, cxx_name = "oneAlbum", READ, WRITE = set_one_album, NOTIFY)]
+        /// With `oneAlbum`, the album shown; -1 shows none.
+        #[qproperty(i64, album_id, cxx_name = "albumId", READ, WRITE = set_album_id, NOTIFY)]
         type AlbumListModel = super::AlbumListModelRust;
     }
 
@@ -53,10 +57,9 @@ pub mod qobject {
         #[qsignal]
         fn refreshed(self: Pin<&mut AlbumListModel>, reset: bool);
 
-        /// The row of the album holding view index `index`, or -1.
-        #[qinvokable]
-        #[cxx_name = "rowOf"]
-        fn row_of(self: &AlbumListModel, index: i32) -> i32;
+        fn set_one_album(self: Pin<&mut AlbumListModel>, one_album: bool);
+
+        fn set_album_id(self: Pin<&mut AlbumListModel>, album_id: i64);
 
         #[qinvokable]
         #[cxx_override]
@@ -87,7 +90,7 @@ pub mod qobject {
 }
 
 /// An album of the view, as its roles read it.
-struct Album<'a> {
+pub struct Album<'a> {
     catalog: &'a Catalog,
     view: &'a View,
     range: Range<usize>,
@@ -104,9 +107,9 @@ impl Album<'_> {
 }
 
 /// Not [`list_model::Role`], whose row type can't borrow for any lifetime.
-type Role = (&'static str, fn(&Album<'_>) -> QVariant);
+pub type Role = (&'static str, fn(&Album<'_>) -> QVariant);
 
-const ROLES: &[Role] = &[
+pub const ROLES: &[Role] = &[
     ("albumTitle", |a| text(&format::album(&a.first.album))),
     ("albumArtist", |a| {
         text(&format::artist(&a.first.album_artist))
@@ -117,6 +120,7 @@ const ROLES: &[Role] = &[
     }),
     ("duration", |a| text(&total_duration(&a.tracks()))),
     ("cover", |a| covers::url(shown_cover(a.view, a.first))),
+    ("albumId", |a| QVariant::from(&a.first.album_id)),
     ("firstIndex", |a| {
         QVariant::from(&i32::try_from(a.range.start).unwrap_or(i32::MAX))
     }),
@@ -135,13 +139,30 @@ const ROLES: &[Role] = &[
 
 const COVER_ROLE: i32 = list_model::role_id(ROLES, "cover");
 
-#[derive(Default)]
 pub struct AlbumListModelRust {
     album_count: i32,
+    one_album: bool,
+    album_id: i64,
     catalog: Option<Rc<Catalog>>,
     view: Rc<View>,
+    /// The view's album indices, one per row.
+    rows: Vec<usize>,
     /// The rows showing each cover, so a finished cover doesn't scan every album.
     cover_rows: HashMap<i64, Vec<i32>>,
+}
+
+impl Default for AlbumListModelRust {
+    fn default() -> Self {
+        Self {
+            album_count: 0,
+            one_album: false,
+            album_id: -1,
+            catalog: None,
+            view: Rc::default(),
+            rows: Vec::new(),
+            cover_rows: HashMap::new(),
+        }
+    }
 }
 
 impl cxx_qt::Initialize for qobject::AlbumListModel {
@@ -156,38 +177,42 @@ impl cxx_qt::Initialize for qobject::AlbumListModel {
 }
 
 impl qobject::AlbumListModel {
+    fn set_one_album(mut self: Pin<&mut Self>, one_album: bool) {
+        if self.one_album != one_album {
+            self.as_mut().rust_mut().one_album = one_album;
+            self.as_mut().one_album_changed();
+            self.refresh(true);
+        }
+    }
+
+    fn set_album_id(mut self: Pin<&mut Self>, album_id: i64) {
+        if self.album_id != album_id {
+            self.as_mut().rust_mut().album_id = album_id;
+            self.as_mut().album_id_changed();
+            self.refresh(true);
+        }
+    }
+
     fn refresh(mut self: Pin<&mut Self>, reset: bool) {
         let view = session::view();
-        let count = i32::try_from(view.albums.len()).unwrap_or(i32::MAX);
         let catalog = session::catalog();
+        let rows = shown_rows(catalog.as_deref(), &view, self.one_album, self.album_id);
+        let count = i32::try_from(rows.len()).unwrap_or(i32::MAX);
         let cover_rows = catalog
             .as_deref()
-            .map(|catalog| cover_rows(catalog, &view))
+            .map(|catalog| cover_rows(catalog, &view, &rows))
             .unwrap_or_default();
         self.as_mut().begin_reset_model();
         {
             let mut rust = self.as_mut().rust_mut();
             rust.catalog = catalog;
             rust.view = view;
+            rust.rows = rows;
             rust.cover_rows = cover_rows;
         }
         self.as_mut().end_reset_model();
         set!(self, album_count, album_count_changed, count);
         self.refreshed(reset);
-    }
-
-    fn row_of(&self, index: i32) -> i32 {
-        let Ok(index) = usize::try_from(index) else {
-            return -1;
-        };
-        // Albums are consecutive ranges in view order.
-        let albums = &self.view.albums;
-        let row = albums.partition_point(|album| album.end <= index);
-        if albums.get(row).is_some_and(|a| a.contains(&index)) {
-            i32::try_from(row).unwrap_or(-1)
-        } else {
-            -1
-        }
     }
 
     fn cover_ready(self: Pin<&mut Self>, art_id: i64) {
@@ -196,30 +221,35 @@ impl qobject::AlbumListModel {
         }
     }
 
-    fn album(&self, row: usize) -> Option<Album<'_>> {
-        let catalog = self.catalog.as_deref()?;
-        Some(Album {
-            catalog,
-            view: &self.view,
-            range: self.view.albums.get(row)?.clone(),
-            first: first_track(Some(catalog), &self.view, row)?,
-        })
-    }
-
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
         let album = usize::try_from(index.row())
             .ok()
-            .and_then(|row| self.album(row));
+            .and_then(|row| self.rows.get(row))
+            .and_then(|&album| album_at(self.catalog.as_deref(), &self.view, album));
         list_model::data(ROLES, album.as_ref(), role)
     }
 
     fn row_count(&self, parent: &QModelIndex) -> i32 {
-        list_model::row_count(self.view.albums.len(), parent)
+        list_model::row_count(self.rows.len(), parent)
     }
 
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
         list_model::role_names(ROLES)
     }
+}
+
+pub fn album_at<'a>(
+    catalog: Option<&'a Catalog>,
+    view: &'a View,
+    album: usize,
+) -> Option<Album<'a>> {
+    let catalog = catalog?;
+    Some(Album {
+        catalog,
+        view,
+        range: view.albums.get(album)?.clone(),
+        first: first_track(Some(catalog), view, album)?,
+    })
 }
 
 /// The first track of album `row` in `view`; its fields describe the album.
@@ -283,11 +313,28 @@ fn shown_cover(view: &View, first: &ListTrack) -> Option<i64> {
     first.art_id.filter(|_| view.sort.is_none())
 }
 
-/// For each cover in `view`, the album rows that show it.
-pub fn cover_rows(catalog: &Catalog, view: &View) -> HashMap<i64, Vec<i32>> {
+/// The indices of `view`'s albums: with `one_album`, those whose album id
+/// is `album_id` (none for -1), otherwise all of them.
+fn shown_rows(
+    catalog: Option<&Catalog>,
+    view: &View,
+    one_album: bool,
+    album_id: i64,
+) -> Vec<usize> {
+    if !one_album {
+        return (0..view.albums.len()).collect();
+    }
+    (0..view.albums.len())
+        .filter(|&album| first_track(catalog, view, album).is_some_and(|t| t.album_id == album_id))
+        .collect()
+}
+
+/// For each cover of `view`'s albums at `rows`, the rows that show it.
+pub fn cover_rows(catalog: &Catalog, view: &View, rows: &[usize]) -> HashMap<i64, Vec<i32>> {
     covers::rows_by_cover(
-        (0..view.albums.len())
-            .map(|row| first_track(Some(catalog), view, row).and_then(|t| shown_cover(view, t))),
+        rows.iter().map(|&album| {
+            first_track(Some(catalog), view, album).and_then(|t| shown_cover(view, t))
+        }),
     )
 }
 

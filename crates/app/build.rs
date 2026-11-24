@@ -21,6 +21,7 @@ fn main() -> std::io::Result<()> {
     // Qt is found via `qmake`; the QMAKE env var picks which one (DEVELOPMENT.md).
     CxxQtBuilder::new_qml_module(module)
         .files([
+            "src/album_grid_model.rs",
             "src/album_model.rs",
             "src/bench.rs",
             "src/desktop_entry.rs",
@@ -35,6 +36,8 @@ fn main() -> std::io::Result<()> {
         ])
         .qrc_resources([
             "qml/icons/clear.svg",
+            "qml/icons/grid.svg",
+            "qml/icons/list.svg",
             "qml/icons/missing.svg",
             "qml/icons/next.svg",
             "qml/icons/previous.svg",

@@ -11,6 +11,7 @@ fn custom() -> WindowState {
         queue_pane_width: 410,
         queue_shown: false,
         hidden_columns: [SortColumn::FileType, SortColumn::BitRate].into(),
+        album_grid: true,
         browse: BrowseState {
             grouping: Grouping::Artist,
             selected: FilterValue::Text("radiohead".into()),
@@ -88,6 +89,11 @@ fn missing_fields_keep_their_defaults_and_unknown_ones_are_ignored() {
 #[test]
 fn every_column_is_shown_by_default() {
     assert!(WindowState::default().hidden_columns.is_empty());
+}
+
+#[test]
+fn albums_are_a_list_by_default() {
+    assert!(!WindowState::default().album_grid);
 }
 
 #[test]

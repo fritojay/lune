@@ -109,8 +109,8 @@ Item {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 6
-                    anchors.rightMargin: 6 + album.gutter
+                    anchors.leftMargin: Theme.cellInset
+                    anchors.rightMargin: Theme.cellInset + album.gutter
                     spacing: Columns.spacing
                     Repeater {
                         model: Columns.shown(album.hiddenColumns)

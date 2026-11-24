@@ -28,6 +28,8 @@ pub struct WindowState {
     /// ones so a column added in a later version starts out shown.
     #[serde(deserialize_with = "columns_or_default")]
     pub hidden_columns: BTreeSet<SortColumn>,
+    /// The main pane shows albums as a grid of covers rather than a list.
+    pub album_grid: bool,
     #[serde(deserialize_with = "browse_or_default")]
     pub browse: BrowseState,
 }
@@ -52,6 +54,7 @@ impl Default for WindowState {
             queue_pane_width: 300,
             queue_shown: true,
             hidden_columns: BTreeSet::new(),
+            album_grid: false,
             browse: BrowseState::default(),
         }
     }

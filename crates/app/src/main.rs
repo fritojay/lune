@@ -1,3 +1,4 @@
+mod album_grid_model;
 mod album_model;
 mod bench;
 mod covers;

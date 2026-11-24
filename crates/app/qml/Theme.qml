@@ -5,6 +5,8 @@ QtObject {
     readonly property int rowHeight: 24
     readonly property int coverSize: 160
     readonly property int albumPadding: 12
+    // Between a track row's edges and its first and last cells.
+    readonly property int cellInset: 6
     // Qt's default of 2500 px/s caps a fling well short of the end of a long
     // list. BenchRun flicks at that default, so raising this doesn't skew it.
     readonly property real maxFlickVelocity: 10000

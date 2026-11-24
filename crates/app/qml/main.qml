@@ -54,6 +54,23 @@ ApplicationWindow {
             }
         }
         Menu {
+            title: qsTr("&View")
+            Action {
+                text: qsTr("Albums as &List")
+                shortcut: listKey.sequence
+                checkable: true
+                checked: !layout.albumGrid
+                onTriggered: layout.albumGrid = false
+            }
+            Action {
+                text: qsTr("Albums as &Grid")
+                shortcut: gridKey.sequence
+                checkable: true
+                checked: layout.albumGrid
+                onTriggered: layout.albumGrid = true
+            }
+        }
+        Menu {
             title: qsTr("&Help")
             Action {
                 text: qsTr("&Keyboard Shortcuts")
@@ -77,9 +94,20 @@ ApplicationWindow {
     AlbumListModel {
         id: albums
         // A rescan keeps the list where it was.
-        property real keptY
-        onModelAboutToBeReset: keptY = trackPane.list.contentY
-        onRefreshed: reset => trackPane.resetView(reset, keptY)
+        onModelAboutToBeReset: trackPane.keepPosition()
+        onRefreshed: reset => trackPane.resetView(reset)
+    }
+
+    AlbumGridModel {
+        id: albumGrid
+        onModelAboutToBeReset: trackPane.keepGridPosition()
+        onRefreshed: reset => trackPane.resetGrid(reset)
+    }
+
+    AlbumListModel {
+        id: openAlbum
+        oneAlbum: true
+        albumId: trackPane.shownAlbumId
     }
 
     QueueModel {
@@ -135,11 +163,21 @@ ApplicationWindow {
         sequences: [StandardKey.Find]
         onActivated: filterPane.focusSearch()
     }
-    // Only names the Preferences menu item's key for the shortcut list, which reads
+    // Only name the menu items' keys for the shortcut list, which reads
     // each key from its Shortcut so it shows what this platform binds.
     Shortcut {
         id: preferencesKey
         sequences: [StandardKey.Preferences]
+        enabled: false
+    }
+    Shortcut {
+        id: listKey
+        sequence: "Ctrl+1"
+        enabled: false
+    }
+    Shortcut {
+        id: gridKey
+        sequence: "Ctrl+2"
         enabled: false
     }
 
@@ -159,6 +197,8 @@ ApplicationWindow {
             [qsTr("Return"), qsTr("Press the focused speaker or queue button")],
             [qsTr("Up / Down"), qsTr("Change the volume (while its slider is open)")],
             [qsTr("Esc"), qsTr("Close the volume slider")],
+            [listKey.nativeText, qsTr("Show albums as a list")],
+            [gridKey.nativeText, qsTr("Show albums as a grid")],
             [preferencesKey.nativeText, qsTr("Preferences")],
         ]
     }
@@ -279,6 +319,8 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     model: albums
+                    gridModel: albumGrid
+                    openAlbumModel: openAlbum
                     albumCount: albums.albumCount
                     trackCount: filters.trackCount
                     title: filters.title
@@ -290,6 +332,8 @@ ApplicationWindow {
                                 currentTrackId: player.currentTrackId
                     hiddenColumns: layout.hiddenColumns
                     columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
+                    albumGrid: layout.albumGrid
+                    onAlbumGridChosen: grid => layout.albumGrid = grid
                     onSortClicked: column => filters.sortBy(column)
                     onSortChosen: (column, descending) => filters.setSort(column, descending)
                     onColumnToggled: (column, shown) => layout.setColumnShown(column, shown)

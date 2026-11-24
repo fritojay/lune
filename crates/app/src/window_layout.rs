@@ -38,6 +38,7 @@ pub mod qobject {
         #[qproperty(bool, queue_shown, cxx_name = "queueShown", READ, CONSTANT)]
         /// The main pane's hidden columns, by `SortColumn::name`.
         #[qproperty(QStringList, hidden_columns, cxx_name = "hiddenColumns", READ, NOTIFY)]
+        #[qproperty(bool, album_grid, cxx_name = "albumGrid", READ, WRITE, NOTIFY)]
         type WindowLayout = super::WindowLayoutRust;
     }
 
@@ -84,6 +85,7 @@ pub struct WindowLayoutRust {
     queue_pane_width: i32,
     queue_shown: bool,
     hidden_columns: QStringList,
+    album_grid: bool,
 }
 
 impl From<&WindowState> for WindowLayoutRust {
@@ -96,6 +98,7 @@ impl From<&WindowState> for WindowLayoutRust {
             queue_pane_width: qml_int(state.queue_pane_width),
             queue_shown: state.queue_shown,
             hidden_columns: names(&state.hidden_columns),
+            album_grid: state.album_grid,
         }
     }
 }
@@ -156,6 +159,7 @@ impl qobject::WindowLayout {
             queue_pane_width: pixels(queue_pane_width),
             queue_shown,
             hidden_columns: self.hidden(),
+            album_grid: self.album_grid,
             browse: session::browse(),
         };
         if let Err(err) = state.save(&config.window_state_path) {
