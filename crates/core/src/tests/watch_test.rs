@@ -208,7 +208,14 @@ fn reading_files_in_a_watched_folder_is_not_reported() {
             .count();
         std::fs::read(&track).unwrap();
     }
-    assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
+    std::thread::sleep(Duration::from_millis(500));
+    // Windows can report the settle marker more than once.
+    let artist = std::fs::canonicalize(dir.path().join("Artist")).unwrap();
+    let reported: Vec<PathBuf> = rx.try_iter().flatten().collect();
+    assert!(
+        !reported.iter().any(|d| artist.starts_with(d)),
+        "{reported:?}"
+    );
 }
 
 #[test]

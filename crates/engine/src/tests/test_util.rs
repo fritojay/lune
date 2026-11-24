@@ -1,16 +1,27 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::{OutputKind, PlayQueue, PlaybackState, Player, PlayerConfig};
+
+/// Each test gets a name no earlier one had: Windows can't create a
+/// directory where a dropped one is still pending deletion.
+static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
 /// A directory under the system temp dir, removed on drop.
 pub struct TempDir(PathBuf);
 
 impl TempDir {
     pub fn new() -> Self {
-        let path = create_fresh_dir(&std::env::temp_dir(), "lune-engine-test");
+        let path = create_fresh_dir(
+            &std::env::temp_dir(),
+            &format!(
+                "lune-engine-test-{}",
+                NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed)
+            ),
+        );
         Self(path)
     }
 

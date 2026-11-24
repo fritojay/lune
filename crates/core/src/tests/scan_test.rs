@@ -17,17 +17,14 @@ fn scan_with(
 
 /// Scans `dir` with fake tags: each file's name maps to its metadata.
 fn scan_tags(conn: &mut Connection, dir: &TempDir, tags: &[(&str, TrackMeta)]) -> ScanReport {
-    let tags: HashMap<String, TrackMeta> = tags
-        .iter()
-        .map(|(rel, m)| (dir.path().join(rel).to_str().unwrap().to_owned(), m.clone()))
-        .collect();
+    // Paths arrive canonicalized.
     let root = std::fs::canonicalize(dir.path()).unwrap();
-    let canonical_dir = dir.path().to_str().unwrap().to_owned();
-    let root = root.to_str().unwrap().to_owned();
+    let tags: HashMap<PathBuf, TrackMeta> = tags
+        .iter()
+        .map(|(rel, m)| (root.join(rel), m.clone()))
+        .collect();
     scan_with(conn, dir.path(), ScanMode::Thorough, move |path: &Path| {
-        // Paths arrive canonicalized; map them back to the fixture names.
-        let key = path.to_str().unwrap().replacen(&root, &canonical_dir, 1);
-        tags.get(&key)
+        tags.get(path)
             .cloned()
             .ok_or(CoreError::NotADirectory(path.to_path_buf()))
     })
@@ -695,7 +692,7 @@ fn folder_scans_are_none_until_recorded_and_keep_the_latest() {
     );
 
     let first = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let second = first + Duration::from_nanos(1);
+    let second = first + Duration::from_secs(1);
     record_folder_scan(&conn, &a, first).unwrap();
     assert_eq!(
         folder_scans(&conn, &[b.clone(), a.clone()]).unwrap(),
@@ -704,7 +701,7 @@ fn folder_scans_are_none_until_recorded_and_keep_the_latest() {
     record_folder_scan(&conn, &a, second).unwrap();
     assert_eq!(
         folder_scans(&conn, &[a]).unwrap(),
-        [Some(1_700_000_000_000_000_001)]
+        [Some(1_700_000_001_000_000_000)]
     );
 }
 

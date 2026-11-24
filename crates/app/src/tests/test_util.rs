@@ -1,12 +1,23 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lune_core::ListTrack;
+
+/// Each test gets a name no earlier one had: Windows can't create a
+/// directory where a dropped one is still pending deletion.
+static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
 pub struct TempDir(PathBuf);
 
 impl TempDir {
     pub fn new() -> Self {
-        let path = create_fresh_dir(&std::env::temp_dir(), "lune-app-test");
+        let path = create_fresh_dir(
+            &std::env::temp_dir(),
+            &format!(
+                "lune-app-test-{}",
+                NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed)
+            ),
+        );
         // Canonical, like the paths the scanner stores.
         Self(std::fs::canonicalize(path).unwrap())
     }
