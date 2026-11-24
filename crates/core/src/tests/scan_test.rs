@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
 use crate::query::ListTrack;
-use crate::test_util::{TempDir, meta, wav_bytes};
+use crate::test_util::{TempDir, meta, non_utf8_name, wav_bytes};
 use crate::{db, query};
 
 fn scan_with(
@@ -717,13 +717,10 @@ fn a_folder_scan_before_the_epoch_round_trips() {
     );
 }
 
-// Making a non-UTF-8 path needs `std::os::unix`; the code under test is portable.
-#[cfg(unix)]
 #[test]
 fn a_non_utf8_folder_scan_is_not_recorded() {
-    use std::os::unix::ffi::OsStrExt;
     let conn = db::open_in_memory().unwrap();
-    let folder = PathBuf::from(std::ffi::OsStr::from_bytes(b"/music/\xff"));
+    let folder = PathBuf::from("/music").join(non_utf8_name());
     record_folder_scan(&conn, &folder, UNIX_EPOCH).unwrap();
     assert_eq!(folder_scans(&conn, &[folder]).unwrap(), [None]);
 }
@@ -896,6 +893,19 @@ fn the_prefix_range_covers_exactly_the_paths_under_a_root() {
         ("/music/".to_owned(), "/music0".to_owned())
     );
     assert_eq!(path_prefix_range("/"), ("/".to_owned(), "0".to_owned()));
+}
+
+#[cfg(windows)]
+#[test]
+fn the_prefix_range_covers_exactly_the_paths_under_a_root() {
+    assert_eq!(
+        path_prefix_range(r"\\?\C:\music"),
+        (r"\\?\C:\music\".to_owned(), r"\\?\C:\music]".to_owned())
+    );
+    assert_eq!(
+        path_prefix_range(r"\\?\C:\music\"),
+        (r"\\?\C:\music\".to_owned(), r"\\?\C:\music]".to_owned())
+    );
 }
 
 fn track_list(conn: &Connection) -> HashMap<u32, ListTrack> {
@@ -1101,7 +1111,6 @@ fn a_folder_that_looks_empty_keeps_its_tracks_until_they_return() {
 
 /// A library at `music` of `1.mp3` and `sub/2.mp3`, scanned after its
 /// directories settled, so the next quick scan may skip them.
-#[cfg(unix)]
 fn settled_library() -> (TempDir, PathBuf, Connection) {
     let dir = TempDir::new();
     dir.touch("music/1.mp3");
@@ -1115,9 +1124,6 @@ fn settled_library() -> (TempDir, PathBuf, Connection) {
     (dir, music, conn)
 }
 
-// `age` sets a directory's mtime, which works on Unix only; the code under
-// test is portable.
-#[cfg(unix)]
 #[test]
 fn a_quick_scan_skips_unchanged_directories() {
     let (_dir, music, mut conn) = settled_library();
@@ -1129,7 +1135,6 @@ fn a_quick_scan_skips_unchanged_directories() {
     assert_eq!(present_titles(&conn), ["1", "2"]);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_quick_scan_finds_a_file_added_deep_inside_an_unchanged_directory() {
     let (dir, music, mut conn) = settled_library();
@@ -1139,7 +1144,6 @@ fn a_quick_scan_finds_a_file_added_deep_inside_an_unchanged_directory() {
     assert_eq!(present_titles(&conn), ["1", "2", "3"]);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_quick_scan_marks_the_tracks_of_a_deleted_directory_missing() {
     let (dir, music, mut conn) = settled_library();
@@ -1149,7 +1153,6 @@ fn a_quick_scan_marks_the_tracks_of_a_deleted_directory_missing() {
     assert_eq!(missing_titles(&conn), ["2"]);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_file_rewritten_in_place_is_missed_by_a_quick_scan_and_found_by_a_thorough_one() {
     let (dir, music, mut conn) = settled_library();
@@ -1160,7 +1163,6 @@ fn a_file_rewritten_in_place_is_missed_by_a_quick_scan_and_found_by_a_thorough_o
     assert_eq!(report.updated, 1, "{report:?}");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_quick_scan_rereads_tracks_read_by_an_older_reader_once() {
     let (_dir, music, mut conn) = settled_library();
@@ -1205,7 +1207,6 @@ fn a_thorough_scan_rereads_a_track_read_by_an_older_reader() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_just_modified_directory_is_not_skipped_by_the_next_quick_scan() {
     let dir = TempDir::new();
@@ -1222,7 +1223,6 @@ fn a_just_modified_directory_is_not_skipped_by_the_next_quick_scan() {
 
 // A network share whose clock is behind ours: by our clock everything
 // changed an hour ago, but `sub` changed a second before the newest file.
-#[cfg(unix)]
 #[test]
 fn a_directory_changed_just_before_the_newest_change_seen_is_not_skipped() {
     let dir = TempDir::new();
@@ -1240,7 +1240,6 @@ fn a_directory_changed_just_before_the_newest_change_seen_is_not_skipped() {
 }
 
 // A file dated in the future doesn't make every directory look settled.
-#[cfg(unix)]
 #[test]
 fn a_file_dated_in_the_future_does_not_settle_a_just_modified_directory() {
     let dir = TempDir::new();
@@ -1255,7 +1254,6 @@ fn a_file_dated_in_the_future_does_not_settle_a_just_modified_directory() {
     assert_eq!(report.dirs_skipped, 0, "{report:?}");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_file_whose_tags_failed_is_retried_by_a_quick_scan() {
     let dir = TempDir::new();
@@ -1277,7 +1275,6 @@ fn a_file_whose_tags_failed_is_retried_by_a_quick_scan() {
     assert_eq!((report.added, reads), (1, 1), "{report:?}");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_folder_pruned_and_added_back_is_read_again_by_a_quick_scan() {
     let (_dir, music, mut conn) = settled_library();
@@ -1362,9 +1359,6 @@ fn progress_counts_the_files_listed_then_the_tags_read_of_a_known_total() {
     );
 }
 
-// `age` sets directory mtimes, which works on Unix only; the code under test
-// is portable.
-#[cfg(unix)]
 #[test]
 fn an_interrupted_scan_resumes_from_the_directories_it_had_not_finished() {
     // Each directory fills a fifth of a batch, so the first batch to commit
@@ -1412,7 +1406,6 @@ fn an_interrupted_scan_resumes_from_the_directories_it_had_not_finished() {
     assert_eq!(present_titles(&conn).len(), 6 * per_dir);
 }
 
-#[cfg(unix)]
 #[test]
 fn a_subdirectory_gone_from_a_directory_whose_mtime_is_unchanged_is_marked_missing() {
     let (dir, music, mut conn) = settled_library();

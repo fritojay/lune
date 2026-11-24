@@ -49,7 +49,6 @@ impl TempDir {
         std::fs::remove_file(self.0.join(rel)).unwrap();
     }
 
-    #[cfg(unix)]
     pub fn remove_dir(&self, rel: &str) {
         #[expect(clippy::disallowed_methods, reason = "test fixture in a temp dir")]
         std::fs::remove_dir_all(self.0.join(rel)).unwrap();
@@ -64,15 +63,12 @@ impl TempDir {
     }
 
     /// Sets the mtime of `rel` (a file or directory, "" for the root) to an
-    /// hour ago, so a scan treats it as settled. Opening a directory to set its
-    /// times works on Unix only.
-    #[cfg(unix)]
+    /// hour ago, so a scan treats it as settled.
     pub fn age(&self, rel: &str) {
         let an_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
         self.set_mtime(rel, an_hour_ago);
     }
 
-    #[cfg(unix)]
     pub fn mtime(&self, rel: &str) -> std::time::SystemTime {
         std::fs::metadata(self.0.join(rel))
             .unwrap()
@@ -80,14 +76,30 @@ impl TempDir {
             .unwrap()
     }
 
-    /// Unix only for directories, like [`Self::age`].
-    #[cfg(unix)]
     pub fn set_mtime(&self, rel: &str, mtime: std::time::SystemTime) {
-        std::fs::File::open(self.0.join(rel))
-            .unwrap()
+        open_for_times(&self.0.join(rel))
             .set_modified(mtime)
             .unwrap();
     }
+}
+
+#[cfg(unix)]
+fn open_for_times(path: &Path) -> std::fs::File {
+    std::fs::File::open(path).unwrap()
+}
+
+/// Windows needs write access to set times, and backup semantics to open a
+/// directory at all.
+#[cfg(windows)]
+fn open_for_times(path: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    #[expect(clippy::disallowed_methods, reason = "test fixture in a temp dir")]
+    std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .unwrap()
 }
 
 impl Drop for TempDir {
@@ -289,6 +301,16 @@ pub fn arb_tracks() -> impl Strategy<Value = Vec<ListTrack>> {
 /// Search results over [`arb_tracks`]' ids, or none.
 pub fn arb_matches() -> impl Strategy<Value = Option<HashSet<i64>>> {
     prop::option::of(prop::collection::hash_set(1..20i64, 0..20))
+}
+
+/// A file name that isn't valid UTF-8: a stray byte on Unix, an unpaired
+/// surrogate on Windows.
+pub fn non_utf8_name() -> std::ffi::OsString {
+    #[cfg(unix)]
+    let name = std::os::unix::ffi::OsStringExt::from_vec(b"\xff".to_vec());
+    #[cfg(windows)]
+    let name = std::os::windows::ffi::OsStringExt::from_wide(&[0xD800]);
+    name
 }
 
 /// A new directory `<prefix>-<pid>-<n>` in `parent`. `create_dir` fails on

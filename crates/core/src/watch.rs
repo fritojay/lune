@@ -109,7 +109,15 @@ impl Pending {
         match event {
             // The OS dropped events: only a full rescan is safe.
             Ok(event) if event.need_rescan() => self.rescan_all = true,
-            Ok(event) if changes_files(&event.kind) => self.paths.extend(event.paths),
+            Ok(event) if changes_files(&event.kind) => {
+                let folder_touch = touches_in_place(&event.kind);
+                self.paths.extend(
+                    event
+                        .paths
+                        .into_iter()
+                        .filter(|p| !(folder_touch && p.is_dir())),
+                );
+            }
             Ok(_) => {}
             Err(err) => {
                 tracing::warn!(%err, "file watching error; rescanning everything");
@@ -145,6 +153,17 @@ pub(crate) fn changes_files(kind: &EventKind) -> bool {
         | EventKind::Remove(_)
         | EventKind::Other => true,
     }
+}
+
+/// A change to an entry in place, not to its name. On a folder that is only
+/// its own times: Windows reports one when the folder is listed or a file in
+/// it is read, so a scan would set off another forever. Changes to what the
+/// folder holds are reported on the entries themselves.
+fn touches_in_place(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Modify(ModifyKind::Any | ModifyKind::Data(_) | ModifyKind::Other)
+    )
 }
 
 /// The directories to rescan for changes at `paths`: each change's parent

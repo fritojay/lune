@@ -163,6 +163,33 @@ fn only_reads_leave_nothing_pending() {
 }
 
 #[test]
+fn a_folder_changed_in_place_is_ignored_but_a_renamed_one_counts() {
+    use notify::event::{DataChange, RenameMode};
+    let dir = TempDir::new();
+    let root = dir.path().to_path_buf();
+    let album = root.join("Album");
+    std::fs::create_dir(&album).unwrap();
+    let mut pending = Pending::default();
+    for kind in [
+        ModifyKind::Any,
+        ModifyKind::Data(DataChange::Any),
+        ModifyKind::Other,
+    ] {
+        pending.add(event(EventKind::Modify(kind), &album));
+    }
+    assert!(pending.is_empty());
+    pending.add(event(
+        EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+        &album,
+    ));
+    pending.add(event(
+        EventKind::Modify(ModifyKind::Any),
+        &root.join("Gone"),
+    ));
+    assert_eq!(pending.take(std::slice::from_ref(&root)), [root]);
+}
+
+#[test]
 fn dropped_events_or_errors_rescan_every_root() {
     let roots = [PathBuf::from("/music"), PathBuf::from("/more")];
     let mut pending = Pending::default();

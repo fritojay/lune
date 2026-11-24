@@ -38,16 +38,19 @@ fn invalid_combinations_and_values_are_errors() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn a_capture_path_need_not_be_utf8() {
-    use std::os::unix::ffi::OsStrExt;
-
-    let path = std::ffi::OsStr::from_bytes(b"caf\xe9.wav");
+    #[cfg(unix)]
+    let path: std::ffi::OsString =
+        std::os::unix::ffi::OsStringExt::from_vec(b"caf\xe9.wav".to_vec());
+    #[cfg(windows)]
+    let path: std::ffi::OsString = std::os::windows::ffi::OsStringExt::from_wide(
+        &[0x63, 0x61, 0x66, 0xD800, 0x2E, 0x77, 0x61, 0x76], // "caf", an unpaired surrogate, ".wav"
+    );
     let args = Play::try_parse_from([
         "play".as_ref(),
         "--capture".as_ref(),
-        path,
+        path.as_os_str(),
         "a.flac".as_ref(),
     ])
     .unwrap()
