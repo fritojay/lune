@@ -3,16 +3,83 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{CoreError, Result};
 
-fn project_dirs() -> Result<directories::ProjectDirs> {
-    directories::ProjectDirs::from("io.github", "fritojay", "Lune").ok_or(CoreError::NoHomeDir)
+/// On Windows, a folder with this name beside the executable makes the
+/// install portable: the library, settings, cache, and log all live in it
+/// instead of the user's profile, so the app is self-contained. The Windows
+/// zip ships with one. Elsewhere the app is installed by a package manager,
+/// and a `data` folder beside it is someone else's.
+const PORTABLE_DIR: &str = "data";
+
+#[derive(Debug)]
+struct Dirs {
+    data: PathBuf,
+    config: PathBuf,
+    cache: PathBuf,
+}
+
+fn dirs() -> Result<Dirs> {
+    let exe = if cfg!(windows) {
+        std::env::current_exe().ok()
+    } else {
+        None
+    };
+    dirs_for(exe.as_deref())
+}
+
+/// The portable folders of `exe` if it has them, else the user's.
+fn dirs_for(exe: Option<&Path>) -> Result<Dirs> {
+    if let Some(dirs) = exe.and_then(portable_dirs) {
+        return Ok(dirs);
+    }
+    let project = directories::ProjectDirs::from("io.github", "fritojay", "Lune")
+        .ok_or(CoreError::NoHomeDir)?;
+    Ok(Dirs {
+        data: project.data_dir().to_path_buf(),
+        config: project.config_dir().to_path_buf(),
+        cache: project.cache_dir().to_path_buf(),
+    })
+}
+
+/// The folders of a portable install of `exe`, if it is one.
+fn portable_dirs(exe: &Path) -> Option<Dirs> {
+    let dir = exe.parent()?.join(PORTABLE_DIR);
+    dir.is_dir().then(|| Dirs {
+        data: dir.clone(),
+        config: dir.clone(),
+        cache: dir.join("cache"),
+    })
+}
+
+impl Dirs {
+    fn db_path(&self) -> PathBuf {
+        self.data.join("library.sqlite3")
+    }
+
+    fn thumbnail_dir(&self) -> PathBuf {
+        self.cache.join("thumbnails")
+    }
+
+    fn config_path(&self) -> PathBuf {
+        self.config.join("config.toml")
+    }
+
+    fn log_path(&self) -> PathBuf {
+        self.data.join("lune.log")
+    }
 }
 
 pub fn default_db_path() -> Result<PathBuf> {
-    Ok(project_dirs()?.data_dir().join("library.sqlite3"))
+    Ok(dirs()?.db_path())
 }
 
 pub fn default_thumbnail_dir() -> Result<PathBuf> {
-    Ok(project_dirs()?.cache_dir().join("thumbnails"))
+    Ok(dirs()?.thumbnail_dir())
+}
+
+/// Where the desktop app logs when it has no console (a Windows release
+/// build).
+pub fn default_log_path() -> Result<PathBuf> {
+    Ok(dirs()?.log_path())
 }
 
 /// Beside the library's DB, because the saved browse position names its
@@ -25,7 +92,7 @@ pub fn window_state_path(db_path: &Path) -> PathBuf {
 }
 
 pub fn default_config_path() -> Result<PathBuf> {
-    Ok(project_dirs()?.config_dir().join("config.toml"))
+    Ok(dirs()?.config_path())
 }
 
 /// Writes one of the app's own files (cache, config; never a music file),

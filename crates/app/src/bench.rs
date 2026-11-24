@@ -185,7 +185,20 @@ fn rss() -> Option<u64> {
     Some(kb * 1024)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "reading the working set is a Win32 call")]
+fn rss() -> Option<u64> {
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    let mut counters = PROCESS_MEMORY_COUNTERS::default();
+    let size = u32::try_from(std::mem::size_of_val(&counters)).ok()?;
+    // SAFETY: `counters` is a live, writable struct of the size passed, and
+    // the current-process pseudo handle needs no closing.
+    unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, size) }.ok()?;
+    u64::try_from(counters.WorkingSetSize).ok()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn rss() -> Option<u64> {
     None
 }

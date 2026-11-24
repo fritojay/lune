@@ -5,16 +5,16 @@ How to set up a machine, build Lune from `main`, and run it. Before changing cod
 ## Current state
 
 - **Playback and the library work headlessly** through `lune-cli`: gapless playback, scanning, and querying.
-- **The desktop app (`lune`) browses and plays.** Quick-filter buttons along the top pick a grouping (Album Artist, Artist, Album, Year, Genre, Recently Added, Recently Played) and the filter pane lists its values; the recency groupings list albums newest first, each dated by its newest track; the main pane shows the selection grouped by album with covers; double-click plays, and the queue panel and now-playing bar work. Add music folders in **Preferences** (File → Preferences on Linux, Lune → Preferences… or ⌘, on macOS): they are scanned in the background, rescanned at launch, rescanned quickly every 24 hours (skipping directories whose mtime hasn't changed), and watched for changes. Files that disappear are kept as unavailable rather than deleted, and are listed under **File → Unavailable Tracks**, where they can be removed one at a time or all at once. Queued tracks that go missing stay in the queue, marked with a warning icon, and playback skips them. Media keys and Now Playing/MPRIS are wired up.
+- **The desktop app (`lune`) browses and plays.** Quick-filter buttons along the top pick a grouping (Album Artist, Artist, Album, Year, Genre, Recently Added, Recently Played) and the filter pane lists its values; the recency groupings list albums newest first, each dated by its newest track; the main pane shows the selection grouped by album with covers; double-click plays, and the queue panel and now-playing bar work. Add music folders in **Preferences** (File → Preferences on Linux and Windows, Lune → Preferences… or ⌘, on macOS): they are scanned in the background, rescanned at launch, rescanned quickly every 24 hours (skipping directories whose mtime hasn't changed), and watched for changes. Files that disappear are kept as unavailable rather than deleted, and are listed under **File → Unavailable Tracks**, where they can be removed one at a time or all at once. Queued tracks that go missing stay in the queue, marked with a warning icon, and playback skips them. Media keys and the system Now Playing display (MPRIS on Linux, Now Playing on macOS, the media overlay on Windows) are wired up.
 
 ## Prerequisites
 
-| Need | Fedora 44 | macOS |
-|---|---|---|
-| Rust | `rustup` (the version in `rust-toolchain.toml` installs itself) | same |
-| Qt 6.11 | `qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel` | `aqt install-qt mac desktop 6.11.2 clang_64 -O ~/Qt` |
-| `QMAKE` env var | `/usr/bin/qmake6` | `$HOME/Qt/6.11.2/macos/bin/qmake` |
-| Other | `gcc gcc-c++ lld pkgconf-pkg-config git just alsa-lib-devel dbus-devel` | `xcode-select --install`, `brew install just aqtinstall` |
+| Need | Fedora 44 | macOS | Windows (x64) |
+|---|---|---|---|
+| Rust | `rustup` (the version in `rust-toolchain.toml` installs itself) | same | same (MSVC toolchain) |
+| Qt 6.11 | `qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel` | `aqt install-qt mac desktop 6.11.2 clang_64 -O ~/Qt` | `aqt install-qt windows desktop 6.11.2 win64_msvc2022_64 -O C:\Qt` |
+| `QMAKE` env var | `/usr/bin/qmake6` | `$HOME/Qt/6.11.2/macos/bin/qmake` | `C:\Qt\6.11.2\msvc2022_64\bin\qmake.exe` |
+| Other | `gcc gcc-c++ lld pkgconf-pkg-config git just alsa-lib-devel dbus-devel` | `xcode-select --install`, `brew install just aqtinstall` | Visual Studio 2022 (or Build Tools) with "Desktop development with C++", Python 3.11+, `pip install aqtinstall==3.3.0` |
 
 Do not use Homebrew's `qt` on macOS. The exact commands are below. A Fedora dev container with everything preinstalled lives in the separate [lune-dev](https://github.com/fritojay/lune-dev) repo.
 
@@ -35,7 +35,7 @@ CI (`.github/workflows/ci.yml`) follows the same steps.
 | Qt | **6.11.2** | The **minor** version (6.11) must match on every platform. CI checks the exact version. |
 | Rust | stable | Set by `rust-toolchain.toml`. Minimum is `rust-version` in `Cargo.toml`. |
 | CXX-Qt | 0.10.0 | `cxx-qt`, `cxx-qt-lib`, `cxx-qt-build` are pinned with `=` in the root `Cargo.toml`. |
-| aqtinstall (macOS) | 3.3.0 | Installs the official Qt binaries. |
+| aqtinstall (macOS, Windows) | 3.3.0 | Installs the official Qt binaries. |
 
 Why not Homebrew's `qt` on macOS: Homebrew ships only the newest Qt (6.12 at the time of writing), has no `qt@6.11`, and `brew upgrade` can change it without warning. Fedora 44 ships 6.11. Using aqtinstall on macOS lets us pin the same version on both platforms.
 
@@ -90,6 +90,28 @@ export QMAKE="$HOME/Qt/6.11.2/macos/bin/qmake"
 - If Homebrew's `qt` is also installed, `QMAKE` must still point at `~/Qt/6.11.2/macos/bin/qmake`.
 - The binary gets an rpath to `~/Qt/6.11.2/macos/lib`, so `just run` works without `DYLD_FRAMEWORK_PATH`.
 
+### Windows (x64)
+
+In PowerShell:
+
+```powershell
+# Visual Studio 2022 or its Build Tools, with the "Desktop development with C++" workload
+winget install Rustlang.Rustup Python.Python.3.13 Casey.Just
+pip install aqtinstall==3.3.0
+
+# Qt 6.11.2, official MSVC binaries
+aqt install-qt windows desktop 6.11.2 win64_msvc2022_64 -O C:\Qt
+
+# Point CXX-Qt at it, and put Qt's DLLs on PATH for `just run` (set both permanently in System Properties)
+$env:QMAKE = 'C:\Qt\6.11.2\msvc2022_64\bin\qmake.exe'
+$env:PATH = "C:\Qt\6.11.2\msvc2022_64\bin;$env:PATH"
+& $env:QMAKE -query QT_VERSION   # expect 6.11.2
+```
+
+- The base install includes `windeployqt`, used by `just bundle-windows`.
+- `just` runs recipes with bash, so run it from Git Bash, or call the `cargo` commands in the `justfile` directly. `just bundle-windows` itself runs PowerShell.
+- A debug build opens a console window next to the app, for the log. A release build doesn't.
+
 ### Dev container (Fedora)
 
 See [lune-dev](https://github.com/fritojay/lune-dev).
@@ -131,7 +153,7 @@ just run
 
 In the dev container there is no display, so `QT_QPA_PLATFORM=offscreen` is set and no window appears. A clean exit means the QML loaded. Run on a host to see the window. There is no sound card in the container either, so playback is disabled there ("No audio output").
 
-`--db <path>` and `--config <path>` point the app at another library and settings file, so you can try a test library without touching your own. The settings file is plain TOML (`library_folders = ["/path/to/music"]`) in the platform config directory.
+`--db <path>` and `--config <path>` point the app at another library and settings file, so you can try a test library without touching your own. The settings file is plain TOML (`library_folders = ["/path/to/music"]`) in the platform config directory (or the portable `data` folder, see [Windows `.zip`](#windows-zip)).
 
 When stderr is not a terminal, Qt on Fedora sends its messages (including QML errors) to journald. Set `QT_FORCE_STDERR_LOGGING=1` to see them.
 
@@ -183,7 +205,7 @@ cargo run -p lune-cli -- query search <words..>
 
 In the dev container, the host's `~/Test-Music` is mounted read-only at `/music`, so scan `/music` there.
 
-The database lives in the platform data directory (`~/.local/share/lune/` on Linux, `~/Library/Application Support/io.github.fritojay.Lune/` on macOS). Use `--db <path>` before the command to keep a separate one while developing:
+The database lives in the platform data directory (`~/.local/share/lune/` on Linux, `~/Library/Application Support/io.github.fritojay.Lune/` on macOS, `%APPDATA%\fritojay\Lune\data\` on Windows). On Windows, a folder named `data` beside the executable takes the place of all three platform folders (data, config, cache), as in the Windows zip. Use `--db <path>` before the command to keep a separate one while developing:
 
 ```sh
 cargo run -p lune-cli -- --db /tmp/dev.sqlite3 scan ~/Music
@@ -191,7 +213,7 @@ cargo run -p lune-cli -- --db /tmp/dev.sqlite3 scan ~/Music
 
 ## Package the app
 
-Packaging files live in `packaging/`. CI builds both packages on a `v*` tag (and on a manual run of the Release workflow) and attaches them to a draft GitHub release.
+Packaging files live in `packaging/`. CI builds all three packages on a `v*` tag (and on a manual run of the Release workflow) and attaches them to a draft GitHub release.
 
 ### macOS `.app` and `.dmg`
 
@@ -201,6 +223,15 @@ open "dist/Lune.app"
 ```
 
 This builds an Apple Silicon app with Qt bundled by `macdeployqt`, ad-hoc signed, plus `dist/Lune-<version>.dmg`. `QMAKE` must point at Qt 6.11 (see [Machine setup](#machine-setup)). An app built on your own Mac opens normally. A downloaded copy is quarantined because it isn't notarized: open it once, then allow it in System Settings > Privacy & Security > Open Anyway.
+
+### Windows `.zip`
+
+```powershell
+just bundle-windows   # or: pwsh packaging/windows/build-zip.ps1
+dist\Lune\lune.exe
+```
+
+This writes `dist\Lune\` (`lune.exe` with the Qt DLLs, plugins, and QML modules from `windeployqt`, and the MSVC runtime DLLs from Visual Studio's redistributable folder) and `dist\Lune-<version>-windows-x64.zip` of that folder. There is no installer: unzip it anywhere you can write to (not `Program Files`) and run `lune.exe`. It needs Windows 10 or later (x64). The install is self-contained: the zip has a `data` folder beside `lune.exe`, and the library database, settings, window state, cover cache, and log all go there, so nothing is written to the user profile and deleting the folder removes everything. To update, delete everything in the `Lune` folder except `data` (so no DLL or plugin of the old version is left behind), then unzip the new version where the old one was. The exe isn't signed, so the first launch of a downloaded copy shows SmartScreen's "Windows protected your PC": choose More info > Run anyway.
 
 ### Fedora Flatpak
 
@@ -227,11 +258,11 @@ A symlink in `~/Music` doesn't help: its target is still outside the sandbox.
 
 The version is in `Cargo.toml` (`workspace.package`). `just bump-version <version>` (`packaging/bump-version.py`) sets it there and in `Cargo.lock`, and adds a matching `<release>` dated today at the top of `packaging/linux/io.github.fritojay.Lune.metainfo.xml`; then commit and tag `v<version>`. `packaging/check-version.py` checks they agree (CI runs it, and the Release workflow also checks the tag).
 
-The app icon is a placeholder: `packaging/icon/lune.svg`. After changing it, re-render the PNG the macOS build uses: `rsvg-convert -w 1024 -h 1024 packaging/icon/lune.svg -o packaging/icon/lune-1024.png`.
+The app icon is a placeholder: `packaging/icon/lune.svg`. After changing it, re-render the PNG the macOS build uses: `rsvg-convert -w 1024 -h 1024 packaging/icon/lune.svg -o packaging/icon/lune-1024.png`, then the Windows icon from it, `packaging/windows/lune.ico` (16 to 256 px; for example with ImageMagick, `magick packaging/icon/lune-1024.png -define icon:auto-resize=256,128,64,48,32,24,16 packaging/windows/lune.ico`).
 
 ## Logging
 
-Both binaries use `tracing`. Set `RUST_LOG`, for example `RUST_LOG=debug` or `RUST_LOG=lune_engine=trace`. The CLI defaults to `warn` and logs to stderr.
+Both binaries use `tracing`. Set `RUST_LOG`, for example `RUST_LOG=debug` or `RUST_LOG=lune_engine=trace`. The CLI defaults to `warn` and logs to stderr. A Windows release build of the app has no console, so it logs to `lune.log` in its data folder instead (`data\lune.log` in the zip), emptied at each launch. There it logs warnings as well as errors unless `RUST_LOG` is set, and panics too. If that file can't be written (the folder is read-only, or another running Lune has it), it logs to `%TEMP%\lune.log`.
 
 ## Running a subset of tests
 

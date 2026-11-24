@@ -1,12 +1,12 @@
 # Contributing
 
-Lune is a fast, read-only, cross-platform desktop music player in Rust. Targets: macOS and Linux (Fedora) now, Windows later. Library is mostly M4A, MP3, FLAC.
+Lune is a fast, read-only, cross-platform desktop music player in Rust. Targets: macOS, Linux (Fedora), and Windows (x64). Library is mostly M4A, MP3, FLAC.
 
 Read `DEVELOPMENT.md` (setup, build, run) before making changes. The rules below apply to every change.
 
 ## Non-negotiables
 
-- Never write, rename, move, or delete music files. Open them read-only. Never call lofty write APIs. The app writes only its own SQLite DB, cache, and config.
+- Never write, rename, move, or delete music files. Open them read-only. Never call lofty write APIs. The app writes only its own SQLite DB, cache, config, and log.
 - Audio callback: no allocation, locks, I/O, or logging. It only drains a lock-free ring buffer.
 - Startup loads from SQLite. Scanning runs in the background. Lists are virtualized. Art is decoded off the UI thread.
 - Gapless playback is required.
@@ -28,13 +28,13 @@ symphonia (no system FFmpeg), cpal, rubato, rtrb, lofty, rusqlite (`bundled`, FT
 ## Portability
 
 - Use `PathBuf`/`OsString`. No string-built paths. No `std::os::unix` in `core` or `engine`.
-- Get DB, cache, and config paths from `directories`.
+- Get DB, cache, and config paths from `lune_core` (`default_db_path` and friends, in `paths.rs`), which uses `directories` except in a portable Windows install (a `data` folder beside the exe).
 - Platform code (media keys, Now Playing) sits behind a trait.
 - Do not unwrap path-to-string conversions.
 
 ## Build
 
-- Qt is pinned to 6.11 (6.11.2) on both platforms: macOS uses official binaries via `aqtinstall` (not Homebrew `qt`), and Fedora 44 uses `qt6-qtbase-devel` and `qt6-qtdeclarative-devel`. CXX-Qt finds Qt via the `QMAKE` env var.
+- Qt is pinned to 6.11 (6.11.2) on every platform: macOS and Windows use official binaries via `aqtinstall` (not Homebrew `qt` on macOS), and Fedora 44 uses `qt6-qtbase-devel` and `qt6-qtdeclarative-devel`. CXX-Qt finds Qt via the `QMAKE` env var.
 - Exact setup steps live in `DEVELOPMENT.md`.
 - `justfile` targets: `build`, `test`, `run`, `lint`, `fmt`.
 - `cargo fmt` and `cargo clippy -- -D warnings` must pass.
