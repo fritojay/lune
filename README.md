@@ -7,4 +7,8 @@ My inspirations for this project:
 * Google Play Music
 * Apple Music
 * Foobar2k
-<img width="1512" height="893" alt="lune" src="https://github.com/user-attachments/assets/738ef5e1-0d1f-45d3-b073-0769bdead751" />
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark.png" />
+  <img width="1440" alt="Lune showing albums, the queue, and the player" src="docs/screenshots/light.png" />
+</picture>
