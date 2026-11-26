@@ -9,8 +9,9 @@ ColumnLayout {
     id: filterPane
     required property var model
     required property int currentRow
-    // Shown under the search field.
+    // Shown under the search field while `headerShown`.
     property alias headerItems: header.data
+    property bool headerShown: false
     required property url cover
     required property bool hasTrack
     required property string album
@@ -68,7 +69,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.leftMargin: 6
         Layout.rightMargin: 6
-        visible: visibleChildren.length > 0
+        visible: filterPane.headerShown
     }
 
     ListView {

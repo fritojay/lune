@@ -337,9 +337,9 @@ ApplicationWindow {
                     if (listsPlaylists)
                         playlistMenu.show(row)
                 }
+                headerShown: listsPlaylists
                 headerItems: Button {
                     Layout.fillWidth: true
-                    visible: filterPane.listsPlaylists
                     text: qsTr("New Playlist…")
                     onClicked: window.newPlaylist()
                 }
