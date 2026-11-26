@@ -3,7 +3,7 @@
 //! is ready. The most recent requests are served first, so the covers in
 //! view after a fast scroll appear before ones scrolled past.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -20,6 +20,9 @@ use crate::list_model::{self, QAbstractListModel};
 /// it is slightly soft there.
 pub const THUMBNAIL_SIZE: u32 = 320;
 const WORKERS: usize = 2;
+/// Requests kept waiting. Older ones are dropped: after a fast scroll they
+/// are covers no longer in view, and are asked for again if they come back.
+const MAX_PENDING: usize = 256;
 
 type Listener = Arc<dyn Fn(i64) + Send + Sync>;
 
@@ -36,7 +39,7 @@ struct State {
     /// request; meanwhile it is still shown, so covers don't blink.
     stale: HashSet<i64>,
     queued: HashSet<i64>,
-    pending: Vec<i64>,
+    pending: VecDeque<i64>,
     listeners: Vec<Listener>,
 }
 
@@ -76,7 +79,12 @@ impl Covers {
 
     fn queue(&self, state: &mut State, art_id: i64) {
         if state.queued.insert(art_id) {
-            state.pending.push(art_id);
+            state.pending.push_back(art_id);
+            if state.pending.len() > MAX_PENDING
+                && let Some(oldest) = state.pending.pop_front()
+            {
+                state.queued.remove(&oldest);
+            }
             self.wake.notify_one();
         }
     }
@@ -99,7 +107,7 @@ impl Covers {
             let art_id = {
                 let mut state = self.lock();
                 loop {
-                    if let Some(id) = state.pending.pop() {
+                    if let Some(id) = state.pending.pop_back() {
                         break id;
                     }
                     state = self

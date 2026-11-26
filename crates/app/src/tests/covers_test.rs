@@ -86,6 +86,35 @@ fn the_latest_request_is_served_first() {
 }
 
 #[test]
+fn only_the_latest_requests_wait_and_a_dropped_one_can_be_asked_for_again() {
+    let (gate_tx, gate) = mpsc::channel::<()>();
+    let gate = Arc::new(Mutex::new(gate));
+    let (started_tx, started) = mpsc::channel();
+    let started_tx = Arc::new(Mutex::new(started_tx));
+    let (covers, ready) = covers_with(move |id| {
+        let _ = started_tx.lock().unwrap().send(id);
+        gate.lock().unwrap().recv_timeout(WAIT).unwrap();
+        Some(PathBuf::new())
+    });
+    covers.path(0);
+    assert_eq!(started.recv_timeout(WAIT).unwrap(), 0);
+    let requested = MAX_PENDING as i64 + 10;
+    for id in 1..=requested {
+        covers.path(id);
+    }
+    covers.path(1);
+    for _ in 0..=MAX_PENDING {
+        gate_tx.send(()).unwrap();
+    }
+    let served: Vec<i64> = (0..=MAX_PENDING)
+        .map(|_| ready.recv_timeout(WAIT).unwrap())
+        .collect();
+    let newest = (requested - MAX_PENDING as i64 + 2..=requested).rev();
+    let expected: Vec<i64> = [0, 1].into_iter().chain(newest).collect();
+    assert_eq!(served, expected);
+}
+
+#[test]
 fn a_forgotten_cover_is_still_shown_until_it_is_made_again() {
     let generation = Arc::new(AtomicU64::new(0));
     let made = Arc::clone(&generation);
