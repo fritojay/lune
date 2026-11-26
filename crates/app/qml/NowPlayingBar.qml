@@ -29,12 +29,10 @@ Pane {
     signal muteToggled()
     signal queueToggled(bool shown)
 
-    component TransportButton: ToolButton {
+    component TransportButton: KeyToolButton {
         icon.width: 20
         icon.height: 20
         icon.color: palette.buttonText
-        Keys.onReturnPressed: click()
-        Keys.onEnterPressed: click()
     }
 
     padding: 10
@@ -181,20 +179,13 @@ Pane {
                     onVolumeMoved: volume => nowPlayingBar.volumeMoved(volume)
                     onMuteToggled: nowPlayingBar.muteToggled()
                 }
-                ToolButton {
+                KeyToolButton {
                     icon.source: "icons/queue.svg"
                     icon.color: palette.buttonText
-                    checkable: true
                     checked: nowPlayingBar.queueShown
-                    onClicked: {
-                        nowPlayingBar.queueToggled(checked)
-                        // A click toggles `checked`, which breaks its binding.
-                        checked = Qt.binding(() => nowPlayingBar.queueShown)
-                    }
+                    onClicked: nowPlayingBar.queueToggled(!checked)
                     ToolTip.visible: hovered
                     ToolTip.text: checked ? qsTr("Hide Queue") : qsTr("Show Queue")
-                    Keys.onReturnPressed: click()
-                    Keys.onEnterPressed: click()
                 }
             }
         }

@@ -62,14 +62,21 @@ ApplicationWindow {
                 shortcut: listKey.sequence
                 checkable: true
                 checked: !layout.albumGrid
-                onTriggered: layout.albumGrid = false
+                onTriggered: {
+                    layout.albumGrid = false
+                    // Triggering toggles `checked`, which breaks its binding.
+                    checked = Qt.binding(() => !layout.albumGrid)
+                }
             }
             Action {
                 text: qsTr("Albums as &Grid")
                 shortcut: gridKey.sequence
                 checkable: true
                 checked: layout.albumGrid
-                onTriggered: layout.albumGrid = true
+                onTriggered: {
+                    layout.albumGrid = true
+                    checked = Qt.binding(() => layout.albumGrid)
+                }
             }
             MenuSeparator {}
             SortMenu {

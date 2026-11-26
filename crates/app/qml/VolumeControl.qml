@@ -11,7 +11,7 @@ RowLayout {
 
     spacing: 4
 
-    ToolButton {
+    KeyToolButton {
         id: speaker
         icon.source: volumeControl.muted ? "icons/volume-muted.svg"
                    : volumeControl.volume < 0.5 ? "icons/volume-low.svg"
@@ -20,8 +20,6 @@ RowLayout {
         // The first click shows the slider; clicking again while it shows mutes.
         onClicked: volumePopup.opened ? volumeControl.muteToggled() : volumePopup.open()
         // Space is the play/pause shortcut, so Return is how the keyboard clicks.
-        Keys.onReturnPressed: click()
-        Keys.onEnterPressed: click()
 
         Popup {
             id: volumePopup

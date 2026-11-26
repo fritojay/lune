@@ -88,23 +88,18 @@ ColumnLayout {
                 text: qsTr("%L1 tracks · %2").arg(queuePane.count).arg(queuePane.totalDuration)
             }
         }
-        ToolButton {
+        KeyToolButton {
             icon.source: "icons/shuffle.svg"
             icon.color: checked ? palette.highlight : palette.buttonText
-            checkable: true
             checked: queuePane.shuffle
-            onClicked: queuePane.shuffleToggled(checked)
-            Keys.onReturnPressed: click()
-            Keys.onEnterPressed: click()
+            onClicked: queuePane.shuffleToggled(!checked)
             ToolTip.visible: hovered
             ToolTip.text: checked ? qsTr("Shuffle is on") : qsTr("Shuffle is off")
         }
-        ToolButton {
+        KeyToolButton {
             text: qsTr("Clear")
             enabled: queuePane.count > 0
             onClicked: queuePane.clearRequested()
-            Keys.onReturnPressed: click()
-            Keys.onEnterPressed: click()
         }
     }
 

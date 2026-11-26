@@ -195,11 +195,8 @@ ColumnLayout {
         }
     }
 
-    component ViewButton: ToolButton {
+    component ViewButton: KeyToolButton {
         icon.color: checked ? palette.highlight : palette.buttonText
-        checkable: true
-        Keys.onReturnPressed: click()
-        Keys.onEnterPressed: click()
         ToolTip.visible: hovered
     }
 
@@ -219,19 +216,13 @@ ColumnLayout {
         ViewButton {
             icon.source: "icons/list.svg"
             checked: !trackPane.albumGrid
-            onClicked: {
-                checked = Qt.binding(() => !trackPane.albumGrid)
-                trackPane.albumGridChosen(false)
-            }
+            onClicked: trackPane.albumGridChosen(false)
             ToolTip.text: qsTr("Show albums as a list")
         }
         ViewButton {
             icon.source: "icons/grid.svg"
             checked: trackPane.albumGrid
-            onClicked: {
-                checked = Qt.binding(() => trackPane.albumGrid)
-                trackPane.albumGridChosen(true)
-            }
+            onClicked: trackPane.albumGridChosen(true)
             ToolTip.text: qsTr("Show albums as a grid")
         }
     }
@@ -490,14 +481,12 @@ ColumnLayout {
                         }
                     }
 
-                    ToolButton {
+                    KeyToolButton {
                         anchors.top: parent.top
                         anchors.right: parent.right
                         anchors.margins: 4
                         icon.source: "icons/clear.svg"
                         onClicked: trackPane.closeAlbum()
-                        Keys.onReturnPressed: click()
-                        Keys.onEnterPressed: click()
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("Close the album")
                     }

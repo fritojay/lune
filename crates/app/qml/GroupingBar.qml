@@ -41,11 +41,9 @@ RowLayout {
             hoverEnabled: true
             text: groupingBar.titles[sourceId]
             font.bold: current
-            checkable: true
             checked: current
             onClicked: {
                 sources.choose(index)
-                checked = Qt.binding(() => tab.current)
                 groupingBar.sourceChosen(kind, sourceId)
             }
             Keys.onReturnPressed: click()
