@@ -49,30 +49,37 @@ fn an_empty_main_pane_says_why_when_the_user_can_act_on_it() {
         id: Some("4".parse().unwrap()),
     };
     let none = Source::Playlist { id: None };
-    let library = Source::Library(Grouping::Genre);
-    for (source, searching, tracks, said) in [
-        (library, false, 3, false),
-        (library, true, 3, false),
-        (playlist, false, 1, false),
-        (library, false, 0, false),
-        (library, true, 0, true),
-        (playlist, true, 0, true),
-        (playlist, false, 0, true),
-        (none, false, 0, true),
-    ] {
-        let reason = empty_reason(source, searching, tracks);
-        assert_eq!(
-            !reason.is_empty(),
-            said,
-            "{source:?} {searching} {tracks}: {reason:?}"
-        );
+    let played = Source::Library(Grouping::RecentlyPlayed);
+    for grouping in Grouping::ALL {
+        let library = Source::Library(grouping);
+        for (source, searching, tracks, library_empty, said) in [
+            (library, false, 3, false, false),
+            (library, true, 3, false, false),
+            (playlist, false, 1, false, false),
+            (library, false, 0, true, false),
+            (library, false, 0, false, true),
+            (library, true, 0, false, true),
+            (library, true, 0, true, true),
+            (playlist, true, 0, false, true),
+            (playlist, false, 0, false, true),
+            (playlist, false, 0, true, true),
+            (none, false, 0, false, true),
+        ] {
+            let reason = empty_reason(source, searching, tracks, library_empty);
+            assert_eq!(
+                !reason.is_empty(),
+                said,
+                "{source:?} {searching} {tracks} {library_empty}: {reason:?}"
+            );
+        }
     }
-    assert_ne!(
-        empty_reason(playlist, false, 0),
-        empty_reason(none, false, 0)
-    );
-    assert_ne!(
-        empty_reason(playlist, true, 0),
-        empty_reason(playlist, false, 0)
-    );
+    let reasons = [
+        empty_reason(playlist, false, 0, false),
+        empty_reason(none, false, 0, false),
+        empty_reason(playlist, true, 0, false),
+        empty_reason(played, false, 0, false),
+    ];
+    for (i, reason) in reasons.iter().enumerate() {
+        assert!(!reasons[..i].contains(reason), "{reason:?}");
+    }
 }

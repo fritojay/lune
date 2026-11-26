@@ -469,7 +469,8 @@ impl qobject::FilterModel {
         let flat = view.flat;
         let reorderable = reorderable(&self.state, &self.search);
         let searching = !matches!(self.search, TrackFilter::All);
-        let reason = empty_reason(self.state.source, searching, view.len());
+        let library_empty = session::catalog().is_none_or(|catalog| catalog.is_empty());
+        let reason = empty_reason(self.state.source, searching, view.len(), library_empty);
         session::set_view(view, reset);
         set!(
             self,
@@ -504,7 +505,12 @@ fn playlist_name(id: ListId) -> String {
 
 /// Why the main pane shows no tracks, when the user can do something about
 /// it. An empty library has its own screen.
-fn empty_reason(source: Source, searching: bool, tracks: usize) -> &'static str {
+fn empty_reason(
+    source: Source,
+    searching: bool,
+    tracks: usize,
+    library_empty: bool,
+) -> &'static str {
     match (tracks, source, searching) {
         (1.., _, _) => "",
         (_, _, true) => "No tracks match the search.",
@@ -514,7 +520,11 @@ fn empty_reason(source: Source, searching: bool, tracks: usize) -> &'static str 
         (_, Source::Playlist { id: Some(_) }, _) => {
             "This playlist is empty. Right-click tracks and choose Add to Playlist to add them here."
         }
-        (_, Source::Library(_), false) => "",
+        (_, Source::Library(_), false) if library_empty => "",
+        (_, Source::Library(Grouping::RecentlyPlayed), false) => {
+            "Nothing played yet. Albums you play are listed here, latest first."
+        }
+        (_, Source::Library(_), false) => "No tracks here.",
     }
 }
 
