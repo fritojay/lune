@@ -31,14 +31,32 @@ ColumnLayout {
     property int keptRow
     property int keptColumns: 1
 
-    onGridChanged: shownAlbumId = -1
+    // A hidden ListView still makes delegates, so the list has no model
+    // while the grid shows. It comes back where it was.
+    function showList(shown: bool) {
+        if (!shown)
+            albumList.keepPosition()
+        albumList.model = shown ? albums : null
+        if (shown)
+            albumList.restorePosition()
+    }
+
+    Component.onCompleted: showList(!grid)
+    onGridChanged: {
+        shownAlbumId = -1
+        showList(!grid)
+    }
 
     AlbumListModel {
         id: albums
         // A rescan keeps the list where it was.
-        onModelAboutToBeReset: albumList.keepPosition()
+        onModelAboutToBeReset: if (albumList.model) albumList.keepPosition()
         onRefreshed: reset => {
             trackSelection.clear()
+            if (reset)
+                albumList.keptY = 0
+            if (!albumList.model)
+                return
             if (reset)
                 albumList.positionViewAtBeginning()
             else
@@ -270,7 +288,6 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
         visible: !trackPane.grid && albums.albumCount > 0
-        model: albums
         onMoveRequested: (rows, to) => Playlists.moveTracks(rows, to)
 
         delegate: AlbumDelegate {
