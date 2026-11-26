@@ -58,6 +58,8 @@ pub struct ScanReport {
     /// Files whose tags could not be read. They are retried on the next scan.
     pub failed: usize,
     pub skipped_non_utf8: usize,
+    /// Audio files that are links, which the walk doesn't follow.
+    pub skipped_links: usize,
     /// Directories or entries the walk could not read. Tracks under them are
     /// kept as they are rather than marked missing.
     pub walk_errors: usize,
@@ -543,6 +545,9 @@ fn list_dir(
             continue;
         }
         if !file_type.is_file() || !is_audio_path(&path) {
+            if file_type.is_symlink() && is_audio_path(&path) {
+                report.skipped_links += 1;
+            }
             continue;
         }
         // Doesn't follow links, but `path` is not one.

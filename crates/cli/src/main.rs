@@ -80,10 +80,15 @@ fn main() -> anyhow::Result<()> {
                 report.missing,
                 report.restored
             );
-            if report.failed + report.skipped_non_utf8 + report.walk_errors > 0 {
+            if report.failed + report.skipped_non_utf8 + report.skipped_links + report.walk_errors
+                > 0
+            {
                 println!(
-                    "  problems: {} unreadable, {} non-UTF-8 paths, {} walk errors (see log)",
-                    report.failed, report.skipped_non_utf8, report.walk_errors
+                    "  problems: {} unreadable, {} non-UTF-8 paths, {} linked files, {} walk errors (see log)",
+                    report.failed,
+                    report.skipped_non_utf8,
+                    report.skipped_links,
+                    report.walk_errors
                 );
             }
             println!(

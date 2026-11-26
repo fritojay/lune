@@ -5,6 +5,7 @@
 //! list each [`Update::Folders`] carries. No Qt here, so it is tested
 //! directly.
 
+use std::collections::HashMap;
 use std::mem::{self, Discriminant};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -101,6 +102,7 @@ impl LibraryService {
                     watcher: None,
                     jobs: watcher_jobs,
                     notify: Box::new(notify),
+                    skipped: HashMap::new(),
                 };
                 worker.run(folders, rx);
             });
@@ -125,6 +127,9 @@ struct Worker {
     watcher: Option<FolderWatcher>,
     jobs: Sender<Job>,
     notify: Box<dyn Fn(Update) + Send>,
+    /// Per folder, the (links, non-UTF-8 names) its last full scan skipped,
+    /// so a message dismissed isn't shown again until they change.
+    skipped: HashMap<PathBuf, (usize, usize)>,
 }
 
 impl Worker {
@@ -353,6 +358,7 @@ impl Worker {
         );
         let mut changed = false;
         let mut recorded = false;
+        let mut skipped = Vec::new();
         for dir in dirs {
             let Some(library) = &mut self.library else {
                 return false;
@@ -383,6 +389,12 @@ impl Worker {
                         + report.restored
                         + report.dated
                         > 0;
+                    // A quick scan doesn't list every directory, so only a
+                    // thorough one counts all that it skips.
+                    if mode == ScanMode::Thorough && self.folders.contains(&dir) {
+                        skipped
+                            .push((dir.clone(), (report.skipped_links, report.skipped_non_utf8)));
+                    }
                     if self.folders.contains(&dir) {
                         match library.record_folder_scan(&dir, (self.now)()) {
                             Ok(()) => recorded = true,
@@ -399,6 +411,13 @@ impl Worker {
         }
         if recorded {
             self.publish_folders();
+        }
+        for (folder, counts) in skipped {
+            if self.skipped.insert(folder.clone(), counts) != Some(counts)
+                && let Some(message) = skipped_message(&folder, counts.0, counts.1)
+            {
+                self.error(message);
+            }
         }
         changed
     }
@@ -446,6 +465,38 @@ pub fn existing_ancestor(dir: &Path, folders: &[PathBuf]) -> Option<PathBuf> {
         .take_while(|a| a.starts_with(root))
         .find(|a| a.is_dir())
         .map(Path::to_path_buf)
+}
+
+/// What a full scan of `folder` left out, if anything.
+fn skipped_message(folder: &Path, links: usize, non_utf8: usize) -> Option<String> {
+    let parts: Vec<String> = [
+        (
+            links,
+            "linked file",
+            "linked files",
+            " (links aren't followed)",
+        ),
+        (non_utf8, "file", "files", " whose name isn't valid UTF-8"),
+    ]
+    .into_iter()
+    .filter(|&(count, ..)| count > 0)
+    .map(|(count, one, many, why)| {
+        let what = if count == 1 { one } else { many };
+        let why = if count == 1 {
+            why.to_owned()
+        } else {
+            why.replace("name isn't", "names aren't")
+        };
+        format!("{count} {what}{why}")
+    })
+    .collect();
+    (!parts.is_empty()).then(|| {
+        format!(
+            "Not in the library from {}: {}.",
+            folder.display(),
+            parts.join(" and ")
+        )
+    })
 }
 
 fn progress_status(folder: &str, progress: ScanProgress) -> String {

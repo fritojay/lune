@@ -109,6 +109,10 @@ fn symlinks_inside_a_folder_are_not_followed() {
     .unwrap();
     assert_eq!(report.added, 1, "{report:?}");
     assert_eq!(report.walk_errors, 0, "{report:?}");
+    assert_eq!(
+        report.skipped_links, 1,
+        "only the linked file counts: {report:?}"
+    );
     let paths: Vec<String> = conn
         .prepare("SELECT path FROM tracks")
         .unwrap()

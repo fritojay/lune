@@ -698,3 +698,30 @@ fn the_periodic_rescan_updates_the_folder_times() {
         _ => None,
     });
 }
+
+#[test]
+fn a_full_scan_says_what_it_left_out() {
+    let folder = Path::new("/music");
+    for (links, non_utf8, message) in [
+        (0, 0, None),
+        (
+            2,
+            0,
+            Some("Not in the library from /music: 2 linked files (links aren't followed)."),
+        ),
+        (
+            0,
+            1,
+            Some("Not in the library from /music: 1 file whose name isn't valid UTF-8."),
+        ),
+        (
+            1,
+            3,
+            Some(
+                "Not in the library from /music: 1 linked file (links aren't followed) and 3 files whose names aren't valid UTF-8.",
+            ),
+        ),
+    ] {
+        assert_eq!(skipped_message(folder, links, non_utf8).as_deref(), message);
+    }
+}
