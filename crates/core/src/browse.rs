@@ -187,7 +187,8 @@ impl Field {
                 ..FieldDef::TEXT
             },
             Self::FileType => FieldDef {
-                key: KeyKind::Text(|t| &t.codec),
+                // The scanner stores codecs lowercase, which is their key.
+                key: KeyKind::Stored(|t| &t.codec),
                 label: |t| file_type(&t.codec),
                 missing: "Unknown",
                 ..FieldDef::TEXT
@@ -653,7 +654,7 @@ impl Catalog {
     /// `tracks` must be in [`crate::Library::track_list`] order.
     pub fn new(tracks: Vec<ListTrack>) -> Self {
         let text_keys = Field::ALL.map(|field| match field.def().key {
-            KeyKind::Text(text) => tracks.iter().map(|t| normalize::key(text(t))).collect(),
+            KeyKind::Text(text) => keys_of(tracks.iter().map(text)),
             KeyKind::Stored(_) | KeyKind::Album | KeyKind::AlbumYear => Vec::new(),
         });
         let title_keys = tracks.iter().map(|t| normalize::key(&t.title)).collect();
@@ -989,6 +990,19 @@ impl Catalog {
             Some(order) => Box::new(order.iter().copied()),
         }
     }
+}
+
+/// [`normalize::key`] of each of `texts`, computed once per distinct text:
+/// tags such as artists repeat across many tracks.
+fn keys_of<'a>(texts: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut keys: HashMap<&str, String> = HashMap::new();
+    texts
+        .map(|text| {
+            keys.entry(text)
+                .or_insert_with(|| normalize::key(text))
+                .clone()
+        })
+        .collect()
 }
 
 /// Indices of the tracks of albums with a `date`, newest album first. An
