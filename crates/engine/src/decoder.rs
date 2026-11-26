@@ -19,7 +19,9 @@ use crate::source::Source;
 use crate::timeline::{Boundary, Timeline, lock};
 use crate::units::frames_to_duration;
 
-const RING_FULL_WAIT: Duration = Duration::from_millis(10);
+/// Commands still wake it at once; this only paces refilling, which the
+/// ring's seconds of audio leave plenty of time for.
+const RING_FULL_WAIT: Duration = Duration::from_millis(100);
 const MAX_OPEN_ATTEMPTS: usize = 32;
 const PREVIOUS_RESTART_AFTER: Duration = Duration::from_secs(3);
 
