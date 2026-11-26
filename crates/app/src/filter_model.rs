@@ -210,18 +210,10 @@ impl cxx_qt::Initialize for qobject::FilterModel {
     fn initialize(mut self: Pin<&mut Self>) {
         let searches = start_search(self.qt_thread());
         self.as_mut().rust_mut().searches = searches;
-        session::on_change(self.qt_thread(), |model, change| match change {
-            Change::Catalog => model.reload(),
-            Change::Played => model.played(),
-            Change::Playlists => model.playlists_changed(),
-            Change::Folders => model.show_empty_pane(),
-            Change::View { .. }
-            | Change::Missing
-            | Change::Queue
-            | Change::Browse
-            | Change::OutputDevice
-            | Change::NowPlaying => {}
-        });
+        session::on_change(self.qt_thread(), Change::Catalog, Self::reload);
+        session::on_change(self.qt_thread(), Change::Played, Self::played);
+        session::on_change(self.qt_thread(), Change::Playlists, Self::playlists_changed);
+        session::on_change(self.qt_thread(), Change::Folders, Self::show_empty_pane);
     }
 }
 

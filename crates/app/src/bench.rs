@@ -83,11 +83,9 @@ impl cxx_qt::Initialize for qobject::BenchProbe {
         if !self.enabled {
             return;
         }
-        session::on_change(self.qt_thread(), |probe, change| {
-            if matches!(change, Change::View { .. }) {
-                probe.view_shown();
-            }
-        });
+        for change in [Change::View, Change::ViewRefreshed] {
+            session::on_change(self.qt_thread(), change, Self::view_shown);
+        }
     }
 }
 

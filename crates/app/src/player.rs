@@ -228,11 +228,8 @@ impl cxx_qt::Initialize for qobject::PlayerController {
             let _ = qt_thread.queue(move |controller| controller.media_command(command));
         });
         self.as_mut().rust_mut().media = media;
-        session::on_change(self.qt_thread(), |controller, change| match change {
-            Change::Catalog => controller.refresh(),
-            Change::OutputDevice => controller.reopen(),
-            _ => {}
-        });
+        session::on_change(self.qt_thread(), Change::Catalog, Self::refresh);
+        session::on_change(self.qt_thread(), Change::OutputDevice, Self::reopen);
     }
 }
 

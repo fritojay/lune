@@ -147,11 +147,9 @@ impl Default for QueueModelRust {
 impl cxx_qt::Initialize for qobject::QueueModel {
     fn initialize(self: Pin<&mut Self>) {
         covers::update_rows_on_ready(self.qt_thread(), |model| &model.cover_rows, COVER_ROLE);
-        session::on_change(self.qt_thread(), |model, change| {
-            if matches!(change, Change::Catalog | Change::Missing | Change::Queue) {
-                model.refresh();
-            }
-        });
+        for change in [Change::Catalog, Change::Missing, Change::Queue] {
+            session::on_change(self.qt_thread(), change, Self::refresh);
+        }
     }
 }
 

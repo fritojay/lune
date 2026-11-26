@@ -172,11 +172,7 @@ impl Default for SourcesModelRust {
 
 impl cxx_qt::Initialize for qobject::SourcesModel {
     fn initialize(self: Pin<&mut Self>) {
-        session::on_change(self.qt_thread(), |model, change| {
-            if change == Change::Browse {
-                model.browsed();
-            }
-        });
+        session::on_change(self.qt_thread(), Change::Browse, Self::browsed);
     }
 }
 

@@ -210,11 +210,11 @@ impl Default for AlbumListModelRust {
 impl cxx_qt::Initialize for qobject::AlbumListModel {
     fn initialize(self: Pin<&mut Self>) {
         covers::update_rows_on_ready(self.qt_thread(), |model| &model.cover_rows, COVER_ROLE);
-        session::on_change(self.qt_thread(), |model, change| match change {
-            Change::View { reset } => model.refresh(reset),
-            Change::NowPlaying => model.now_playing(),
-            _ => {}
+        session::on_change(self.qt_thread(), Change::View, |model| model.refresh(true));
+        session::on_change(self.qt_thread(), Change::ViewRefreshed, |model| {
+            model.refresh(false);
         });
+        session::on_change(self.qt_thread(), Change::NowPlaying, Self::now_playing);
     }
 }
 

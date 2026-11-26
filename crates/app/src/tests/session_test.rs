@@ -3,11 +3,27 @@ use lune_core::{Grouping, TrackFilter};
 
 use crate::test_util::list_track;
 
+const ALL: [Change; 11] = [
+    Change::Catalog,
+    Change::View,
+    Change::ViewRefreshed,
+    Change::Missing,
+    Change::Playlists,
+    Change::Queue,
+    Change::Played,
+    Change::Browse,
+    Change::OutputDevice,
+    Change::Folders,
+    Change::NowPlaying,
+];
+
 /// The changes sent from now on, in order.
 fn recorded() -> Rc<RefCell<Vec<Change>>> {
     let changes = Rc::new(RefCell::new(Vec::new()));
-    let sink = Rc::clone(&changes);
-    subscribe(move |change| sink.borrow_mut().push(change));
+    for change in ALL {
+        let sink = Rc::clone(&changes);
+        subscribe(change, move || sink.borrow_mut().push(change));
+    }
     changes
 }
 
@@ -32,8 +48,8 @@ fn each_setter_sends_its_change() {
         *changes.borrow(),
         [
             Change::Catalog,
-            Change::View { reset: false },
-            Change::View { reset: true },
+            Change::ViewRefreshed,
+            Change::View,
             Change::Missing,
             Change::Playlists,
             Change::Queue,
@@ -47,26 +63,24 @@ fn each_setter_sends_its_change() {
 }
 
 #[test]
-fn every_listener_hears_every_change_in_the_order_they_subscribed() {
+fn only_the_listeners_of_a_change_hear_it_in_the_order_they_subscribed() {
     let order = Rc::new(RefCell::new(Vec::new()));
-    for listener in 0..3 {
+    for (listener, change) in [(0, Change::Queue), (1, Change::Missing), (2, Change::Queue)] {
         let order = Rc::clone(&order);
-        subscribe(move |_| order.borrow_mut().push(listener));
+        subscribe(change, move || order.borrow_mut().push(listener));
     }
     queue_edited();
     queue_edited();
-    assert_eq!(*order.borrow(), [0, 1, 2, 0, 1, 2]);
+    assert_eq!(*order.borrow(), [0, 2, 0, 2]);
 }
 
 #[test]
 fn a_listener_can_read_the_new_state_and_subscribe() {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let sink = Rc::clone(&seen);
-    subscribe(move |change| {
-        if change == Change::Catalog {
-            sink.borrow_mut().push(catalog().map_or(0, |c| c.len()));
-            subscribe(|_| {});
-        }
+    subscribe(Change::Catalog, move || {
+        sink.borrow_mut().push(catalog().map_or(0, |c| c.len()));
+        subscribe(Change::Catalog, || {});
     });
     set_catalog(Catalog::new(vec![list_track(1, 1, None)]));
     assert_eq!(*seen.borrow(), [1]);

@@ -146,11 +146,8 @@ pub struct PlaylistsModelRust {
 impl cxx_qt::Initialize for qobject::PlaylistsModel {
     fn initialize(mut self: Pin<&mut Self>) {
         self.as_mut().refresh();
-        session::on_change(self.qt_thread(), |model, change| match change {
-            Change::Playlists => model.refresh(),
-            Change::Browse => model.show_current(),
-            _ => {}
-        });
+        session::on_change(self.qt_thread(), Change::Playlists, Self::refresh);
+        session::on_change(self.qt_thread(), Change::Browse, Self::show_current);
     }
 }
 

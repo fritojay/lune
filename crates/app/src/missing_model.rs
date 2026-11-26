@@ -83,11 +83,7 @@ pub struct MissingModelRust {
 
 impl cxx_qt::Initialize for qobject::MissingModel {
     fn initialize(self: Pin<&mut Self>) {
-        session::on_change(self.qt_thread(), |model, change| {
-            if change == Change::Missing {
-                model.refresh();
-            }
-        });
+        session::on_change(self.qt_thread(), Change::Missing, Self::refresh);
     }
 }
 

@@ -23,11 +23,11 @@ use lune_engine::{EntryId, PlayQueue, QueueEntry};
 pub enum Change {
     /// The library loaded or changed.
     Catalog,
-    /// `reset` is false when only the library changed underneath (a
-    /// rescan), so the list keeps its position.
-    View {
-        reset: bool,
-    },
+    /// [`view`] shows something else, from its start.
+    View,
+    /// [`view`] is the same selection with the library changed underneath
+    /// (a rescan), so the list keeps its position.
+    ViewRefreshed,
     Missing,
     Playlists,
     /// Its contents, order, or shuffle. The current item is `PlayerController.queueIndex`.
@@ -55,7 +55,7 @@ struct UiState {
     browse: Option<BrowseState>,
     has_folders: bool,
     now_playing: Option<i64>,
-    listeners: Vec<Rc<dyn Fn(Change)>>,
+    listeners: Vec<(Change, Rc<dyn Fn()>)>,
 }
 
 thread_local! {
@@ -142,7 +142,11 @@ pub fn view() -> Rc<View> {
 
 pub fn set_view(view: View, reset: bool) {
     UI.with_borrow_mut(|ui| ui.view = Rc::new(view));
-    notify(Change::View { reset });
+    notify(if reset {
+        Change::View
+    } else {
+        Change::ViewRefreshed
+    });
 }
 
 /// The window as the last run left it. `--bench` always starts from the
@@ -231,27 +235,34 @@ pub fn queue_edited() {
     notify(Change::Queue);
 }
 
-pub fn subscribe(listener: impl Fn(Change) + 'static) {
-    UI.with_borrow_mut(|ui| ui.listeners.push(Rc::new(listener)));
+pub fn subscribe(change: Change, listener: impl Fn() + 'static) {
+    UI.with_borrow_mut(|ui| ui.listeners.push((change, Rc::new(listener))));
 }
 
-/// Calls `changed` on `qt_thread`'s object with each change. It is queued, so
-/// it never runs inside another object's update.
+/// Calls `changed` on `qt_thread`'s object with each `change`. It is
+/// queued, so it never runs inside another object's update.
 pub fn on_change<T: Threading + 'static>(
     qt_thread: CxxQtThread<T>,
-    changed: fn(Pin<&mut T>, Change),
+    change: Change,
+    changed: fn(Pin<&mut T>),
 ) {
-    subscribe(move |change| {
+    subscribe(change, move || {
         // An error means the object is gone (the app is quitting).
-        let _ = qt_thread.queue(move |object| changed(object, change));
+        let _ = qt_thread.queue(changed);
     });
 }
 
 fn notify(change: Change) {
     // Cloned so a listener can use the state, or subscribe, while it runs.
-    let listeners = UI.with_borrow(|ui| ui.listeners.clone());
+    let listeners: Vec<_> = UI.with_borrow(|ui| {
+        ui.listeners
+            .iter()
+            .filter(|(heard, _)| *heard == change)
+            .map(|(_, listener)| Rc::clone(listener))
+            .collect()
+    });
     for listener in listeners {
-        listener(change);
+        listener();
     }
 }
 
