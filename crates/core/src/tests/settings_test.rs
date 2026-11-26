@@ -27,6 +27,7 @@ fn settings_survive_a_save_and_load_and_create_the_folder() {
     let settings = Settings {
         library_folders: vec![PathBuf::from("/music"), PathBuf::from("/mnt/Ünïcode dir")],
         scroll_speed: 7,
+        output_device: Some("alsa:hw:CARD=USB,DEV=0".to_owned()),
         ..Settings::default()
     };
     settings.save(&path).unwrap();

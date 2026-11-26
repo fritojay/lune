@@ -127,3 +127,70 @@ fn levels_are_clamped_and_a_non_finite_level_is_full_volume() {
     volume.set_level(f64::NEG_INFINITY);
     assert_eq!(volume, unmuted(1.0));
 }
+
+fn status(
+    state: PlaybackState,
+    entry: Option<u64>,
+    output_failed: bool,
+    preferred_back: bool,
+) -> Status {
+    Status {
+        state,
+        entry: entry.map(EntryId),
+        position: Duration::from_secs(42),
+        duration: None,
+        underruns: 0,
+        output_failed,
+        preferred_back,
+        output_rate: 48_000,
+        output_channels: 2,
+    }
+}
+
+#[test]
+fn the_output_is_opened_again_when_missing_failed_or_its_preferred_device_is_back() {
+    let now = Instant::now();
+    let fine = status(PlaybackState::Playing, Some(1), false, false);
+    let failed = status(PlaybackState::Playing, Some(1), true, false);
+    let back = status(PlaybackState::Paused, Some(1), false, true);
+    for (status, last_open, due) in [
+        (None, None, true),
+        (None, Some(now), false),
+        (None, Some(now - REOPEN_EVERY), true),
+        (Some(&fine), Some(now - REOPEN_EVERY), false),
+        (Some(&failed), Some(now - REOPEN_EVERY), true),
+        (Some(&failed), Some(now), false),
+        (Some(&back), Some(now - REOPEN_EVERY), true),
+    ] {
+        assert_eq!(
+            reopen_due(status, last_open, now),
+            due,
+            "{status:?} {last_open:?}"
+        );
+    }
+}
+
+#[test]
+fn a_new_output_goes_on_from_the_entry_heard_and_starts_it_only_if_it_was_playing() {
+    let at = Duration::from_secs(42);
+    for (state, entry, resume) in [
+        (
+            PlaybackState::Playing,
+            Some(3),
+            Some((EntryId(3), at, true)),
+        ),
+        (
+            PlaybackState::Paused,
+            Some(3),
+            Some((EntryId(3), at, false)),
+        ),
+        (PlaybackState::Stopped, None, None),
+        (PlaybackState::Playing, None, None),
+    ] {
+        assert_eq!(
+            resume_from(&status(state, entry, false, false)),
+            resume,
+            "{state:?}"
+        );
+    }
+}

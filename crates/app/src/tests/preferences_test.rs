@@ -102,3 +102,40 @@ fn a_scroll_speed_from_qml_is_clamped_even_when_negative() {
     assert_eq!(scroll_speed_from_qml(0), *SCROLL_SPEEDS.start());
     assert_eq!(scroll_speed_from_qml(i32::MAX), *SCROLL_SPEEDS.end());
 }
+
+#[test]
+fn the_default_and_every_connected_device_can_be_chosen_and_a_saved_one_stays_listed() {
+    let devices = [
+        OutputDevice {
+            id: "alsa:usb".to_owned(),
+            name: "USB DAC".to_owned(),
+        },
+        OutputDevice {
+            id: "alsa:hdmi".to_owned(),
+            name: "HDMI".to_owned(),
+        },
+    ];
+    let ids = |choices: &[(Option<String>, String)]| -> Vec<Option<String>> {
+        choices.iter().map(|(id, _)| id.clone()).collect()
+    };
+    let connected = vec![
+        None,
+        Some("alsa:usb".to_owned()),
+        Some("alsa:hdmi".to_owned()),
+    ];
+    for (saved, listed, chosen) in [
+        (None, connected.clone(), 0),
+        (Some("alsa:hdmi"), connected.clone(), 2),
+        (
+            Some("alsa:gone"),
+            [connected.clone(), vec![Some("alsa:gone".to_owned())]].concat(),
+            3,
+        ),
+    ] {
+        let (choices, index) = device_choices(&devices, saved);
+        assert_eq!(ids(&choices), listed, "{saved:?}");
+        assert_eq!(index, chosen, "{saved:?}");
+    }
+    let (choices, index) = device_choices(&[], None);
+    assert_eq!((ids(&choices), index), (vec![None], 0));
+}

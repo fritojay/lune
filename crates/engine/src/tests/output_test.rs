@@ -252,3 +252,21 @@ fn restarts_that_keep_failing_fail_the_output_for_good() {
         "a failed output was restarted"
     );
 }
+
+#[test]
+fn the_preferred_device_plays_when_connected_and_else_the_default_in_its_place() {
+    let find = |id: &str| (id == "usb").then_some("usb");
+    for (preferred, default, chosen) in [
+        (Some("usb"), Some("default"), Some(("usb", false))),
+        (Some("gone"), Some("default"), Some(("default", true))),
+        (None, Some("default"), Some(("default", false))),
+        (Some("gone"), None, None),
+        (None, None, None),
+    ] {
+        assert_eq!(
+            choose_device(preferred, find, || default),
+            chosen,
+            "{preferred:?}"
+        );
+    }
+}

@@ -10,14 +10,15 @@
 use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QString, QUrl};
 use lune_core::{Catalog, ListId, Queue, QueueItem, SlotId, TrackRef, View};
-use lune_engine::{EntryId, PlaybackState, Player, PlayerConfig};
+use lune_engine::{EntryId, OutputKind, PlaybackState, Player, PlayerConfig, Status};
 
 use crate::media_controls::{self, MediaCommand, MediaControls, NowPlaying, Playback};
+use crate::preferences::with_store;
 use crate::property::set;
 use crate::session::{self, Change, Save};
 use crate::{covers, format};
@@ -51,7 +52,6 @@ pub mod qobject {
         #[qproperty(bool, shuffle, READ, NOTIFY)]
         #[qproperty(f64, volume, READ, NOTIFY)]
         #[qproperty(bool, muted, READ, NOTIFY)]
-        #[qproperty(QString, error, READ, NOTIFY)]
         type PlayerController = super::PlayerControllerRust;
     }
 
@@ -141,9 +141,6 @@ pub mod qobject {
         #[qinvokable]
         fn poll(self: Pin<&mut PlayerController>);
 
-        #[qinvokable]
-        #[cxx_name = "clearError"]
-        fn clear_error(self: Pin<&mut PlayerController>);
     }
 
     impl cxx_qt::Threading for PlayerController {}
@@ -165,11 +162,11 @@ pub struct PlayerControllerRust {
     shuffle: bool,
     volume: f64,
     muted: bool,
-    error: QString,
     player: Option<Player>,
-    /// Whether the engine's output failure has been reported, so a
-    /// dismissed error doesn't come back on the next poll.
-    output_failed: bool,
+    last_open: Option<Instant>,
+    /// That no output could be opened has been logged, so retries don't
+    /// repeat it.
+    open_failure_logged: bool,
     /// The entry the engine last reported playing.
     playing_entry: Option<EntryId>,
     cover_id: Option<i64>,
@@ -197,9 +194,9 @@ impl Default for PlayerControllerRust {
             shuffle: false,
             volume: 1.0,
             muted: false,
-            error: QString::default(),
             player: None,
-            output_failed: false,
+            last_open: None,
+            open_failure_logged: false,
             playing_entry: None,
             cover_id: None,
             media: None,
@@ -211,13 +208,7 @@ impl Default for PlayerControllerRust {
 
 impl cxx_qt::Initialize for qobject::PlayerController {
     fn initialize(mut self: Pin<&mut Self>) {
-        match Player::new(PlayerConfig::default(), Arc::new(session::EngineQueue)) {
-            Ok(player) => {
-                self.as_mut().rust_mut().player = Some(player);
-                set!(self, available, available_changed, true);
-            }
-            Err(err) => tracing::error!(%err, "no audio output; playback is disabled"),
-        }
+        self.as_mut().open_output();
         covers::on_ready(self.qt_thread(), Self::cover_ready);
         // Created on the Qt (main) thread, as macOS requires.
         let qt_thread = self.qt_thread();
@@ -225,10 +216,10 @@ impl cxx_qt::Initialize for qobject::PlayerController {
             let _ = qt_thread.queue(move |controller| controller.media_command(command));
         });
         self.as_mut().rust_mut().media = media;
-        session::on_change(self.qt_thread(), |controller, change| {
-            if change == Change::Catalog {
-                controller.refresh();
-            }
+        session::on_change(self.qt_thread(), |controller, change| match change {
+            Change::Catalog => controller.refresh(),
+            Change::OutputDevice => controller.reopen(),
+            _ => {}
         });
     }
 }
@@ -562,17 +553,14 @@ impl qobject::PlayerController {
     }
 
     fn poll(mut self: Pin<&mut Self>) {
-        let Some(status) = self.player.as_ref().map(Player::status) else {
+        let status = self.player.as_ref().map(Player::status);
+        if reopen_due(status.as_ref(), self.last_open, Instant::now()) {
+            self.reopen();
+            return;
+        }
+        let Some(status) = status else {
             return;
         };
-        if status.output_failed && !self.output_failed {
-            self.as_mut().rust_mut().output_failed = true;
-            self.as_mut().rust_mut().error = QString::from(
-                "The audio output stopped working, e.g. the device was disconnected. \
-                 Restart Lune to hear sound again.",
-            );
-            self.as_mut().error_changed();
-        }
         if status.entry != self.playing_entry {
             if let (Some(stopped), None) = (self.playing_entry, status.entry) {
                 session::lock_queue().set_resume_position(SlotId(stopped.0), Duration::ZERO);
@@ -617,8 +605,61 @@ impl qobject::PlayerController {
         }
     }
 
-    fn clear_error(mut self: Pin<&mut Self>) {
-        set!(self, error, error_changed, QString::default());
+    /// Opens the output the settings choose, or the default in its place.
+    fn open_output(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().last_open = Some(Instant::now());
+        let preferred = with_store(|store| store.settings().output_device.clone());
+        let config = PlayerConfig {
+            output: OutputKind::Device { preferred },
+            ..PlayerConfig::default()
+        };
+        match Player::new(config, Arc::new(session::EngineQueue)) {
+            Ok(player) => {
+                player.set_volume(self.volume_state().output() as f32);
+                let mut this = self.as_mut().rust_mut();
+                this.player = Some(player);
+                this.open_failure_logged = false;
+                set!(self, available, available_changed, true);
+            }
+            Err(err) => {
+                if !self.open_failure_logged {
+                    tracing::error!(%err, "no audio output; playback waits for one");
+                    self.as_mut().rust_mut().open_failure_logged = true;
+                }
+                set!(self, available, available_changed, false);
+            }
+        }
+    }
+
+    /// Replaces the output, after it failed or to switch devices, and goes
+    /// on from the same place in the same track.
+    fn reopen(mut self: Pin<&mut Self>) {
+        let resume = self
+            .player
+            .as_ref()
+            .and_then(|player| resume_from(&player.status()));
+        // Some devices take one stream at a time, so the old one goes first.
+        drop(self.as_mut().rust_mut().player.take());
+        self.as_mut().open_output();
+        // The new output starts with nothing heard, which isn't the end of
+        // the track that was playing.
+        self.as_mut().rust_mut().playing_entry = None;
+        let Some((entry, position, playing)) = resume else {
+            return;
+        };
+        let slot = SlotId(entry.0);
+        let item = {
+            let mut queue = session::lock_queue();
+            queue.set_resume_position(slot, position);
+            queue
+                .items()
+                .iter()
+                .find(|item| item.slot == slot)
+                .map(session::entry)
+        };
+        if playing && let (Some(item), Some(player)) = (item, &self.player) {
+            log_err(player.play_from(item, position));
+        }
     }
 
     /// Re-reads the queue and now playing (after the library loads or
@@ -719,6 +760,27 @@ impl qobject::PlayerController {
             self.as_mut().rust_mut().media_now = now;
         }
     }
+}
+
+const REOPEN_EVERY: Duration = Duration::from_secs(2);
+
+/// Whether to open the output again: there is none, it failed, or it plays
+/// in place of the preferred device, which is back. At most once per
+/// [`REOPEN_EVERY`].
+fn reopen_due(status: Option<&Status>, last_open: Option<Instant>, now: Instant) -> bool {
+    let wanted = status.is_none_or(|status| status.output_failed || status.preferred_back);
+    wanted && last_open.is_none_or(|at| now.duration_since(at) >= REOPEN_EVERY)
+}
+
+/// Where a new output goes on from: the entry heard, its position, and
+/// whether it was playing (a paused one waits to be resumed).
+fn resume_from(status: &Status) -> Option<(EntryId, Duration, bool)> {
+    let entry = status.entry?;
+    Some((
+        entry,
+        status.position,
+        status.state == PlaybackState::Playing,
+    ))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

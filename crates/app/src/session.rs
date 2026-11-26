@@ -36,6 +36,8 @@ pub enum Change {
     Played,
     /// [`browse`] changed.
     Browse,
+    /// The user chose another audio output.
+    OutputDevice,
 }
 
 #[derive(Default)]
@@ -186,6 +188,10 @@ pub fn queue() -> &'static Arc<Mutex<Queue>> {
 pub fn lock_queue() -> MutexGuard<'static, Queue> {
     // Every edit leaves the queue consistent before it can panic.
     queue().lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub fn output_device_changed() {
+    notify(Change::OutputDevice);
 }
 
 /// Call after editing the queue through [`lock_queue`].

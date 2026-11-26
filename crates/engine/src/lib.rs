@@ -16,7 +16,7 @@ mod timeline;
 mod units;
 
 pub use error::{EngineError, Result};
-pub use output::OutputKind;
+pub use output::{OutputDevice, OutputKind, output_devices};
 pub use player::{PlaybackState, Player, PlayerConfig, Status};
 pub use queue::{EntryId, PlayQueue, QueueEntry, VecQueue};
 

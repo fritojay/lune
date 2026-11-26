@@ -12,17 +12,21 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use cxx_qt::CxxQtType;
-use cxx_qt_lib::QString;
+use cxx_qt_lib::{QString, QStringList};
 use lune_core::{SCROLL_SPEEDS, Settings, clamp_scroll_speed};
+use lune_engine::OutputDevice;
 
 use crate::format::qml_int;
 use crate::property::set;
+use crate::session;
 
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qstringlist.h");
+        type QStringList = cxx_qt_lib::QStringList;
     }
 
     extern "RustQt" {
@@ -34,12 +38,23 @@ pub mod qobject {
         #[qproperty(i32, min_scroll_speed, cxx_name = "minScrollSpeed", READ, CONSTANT)]
         #[qproperty(i32, max_scroll_speed, cxx_name = "maxScrollSpeed", READ, CONSTANT)]
         #[qproperty(QString, error, READ, NOTIFY)]
+        /// What `outputDevice` picks from: the system default first.
+        #[qproperty(QStringList, output_devices, cxx_name = "outputDevices", READ, NOTIFY)]
+        #[qproperty(i32, output_device, cxx_name = "outputDevice", READ, WRITE = set_output_device, NOTIFY)]
         type Preferences = super::PreferencesRust;
     }
 
     unsafe extern "RustQt" {
         #[cxx_name = "setScrollSpeed"]
         fn set_scroll_speed(self: Pin<&mut Preferences>, speed: i32);
+
+        #[cxx_name = "setOutputDevice"]
+        fn set_output_device(self: Pin<&mut Preferences>, index: i32);
+
+        /// Lists the connected devices again (slow on some systems).
+        #[qinvokable]
+        #[cxx_name = "refreshOutputDevices"]
+        fn refresh_output_devices(self: Pin<&mut Preferences>);
 
         #[qinvokable]
         #[cxx_name = "clearError"]
@@ -52,6 +67,10 @@ pub struct PreferencesRust {
     min_scroll_speed: i32,
     max_scroll_speed: i32,
     error: QString,
+    output_devices: QStringList,
+    output_device: i32,
+    /// The device each of `output_devices` names; `None` is the default.
+    output_ids: Vec<Option<String>>,
 }
 
 impl Default for PreferencesRust {
@@ -61,6 +80,9 @@ impl Default for PreferencesRust {
             min_scroll_speed: qml_int(*SCROLL_SPEEDS.start()),
             max_scroll_speed: qml_int(*SCROLL_SPEEDS.end()),
             error: QString::default(),
+            output_devices: QStringList::default(),
+            output_device: 0,
+            output_ids: Vec::new(),
         }
     }
 }
@@ -75,9 +97,70 @@ impl qobject::Preferences {
         }
     }
 
+    fn set_output_device(mut self: Pin<&mut Self>, index: i32) {
+        let Some(id) = usize::try_from(index)
+            .ok()
+            .and_then(|i| self.output_ids.get(i))
+            .cloned()
+        else {
+            return;
+        };
+        let saved = with_store(|store| {
+            store.update(|s| {
+                let changed = s.output_device != id;
+                s.output_device = id;
+                changed
+            })
+        });
+        if index != self.output_device {
+            set!(self, output_device, output_device_changed, index);
+            session::output_device_changed();
+        }
+        if let Err(message) = saved {
+            set!(self, error, error_changed, QString::from(&message));
+        }
+    }
+
+    fn refresh_output_devices(mut self: Pin<&mut Self>) {
+        let saved = with_store(|store| store.settings().output_device.clone());
+        let (choices, chosen) = device_choices(&lune_engine::output_devices(), saved.as_deref());
+        let labels: QStringList = choices
+            .iter()
+            .map(|(_, label)| QString::from(label))
+            .collect();
+        self.as_mut().rust_mut().output_ids = choices.into_iter().map(|(id, _)| id).collect();
+        set!(self, output_devices, output_devices_changed, labels);
+        let chosen = i32::try_from(chosen).unwrap_or(0);
+        set!(self, output_device, output_device_changed, chosen);
+    }
+
     fn clear_error(mut self: Pin<&mut Self>) {
         set!(self, error, error_changed, QString::default());
     }
+}
+
+/// The outputs to choose from, as (device id, label), and which one is
+/// chosen. A saved device that isn't connected stays listed, so looking at
+/// the list doesn't change the choice.
+fn device_choices(
+    devices: &[OutputDevice],
+    saved: Option<&str>,
+) -> (Vec<(Option<String>, String)>, usize) {
+    let mut choices = vec![(None, "System Default".to_owned())];
+    choices.extend(devices.iter().map(|d| (Some(d.id.clone()), d.name.clone())));
+    if let Some(saved) = saved
+        && !devices.iter().any(|d| d.id == saved)
+    {
+        choices.push((
+            Some(saved.to_owned()),
+            "Chosen Device (not connected)".to_owned(),
+        ));
+    }
+    let chosen = choices
+        .iter()
+        .position(|(id, _)| id.as_deref() == saved)
+        .unwrap_or(0);
+    (choices, chosen)
 }
 
 fn scroll_speed_from_qml(speed: i32) -> u32 {

@@ -34,6 +34,9 @@ pub struct Shared {
     /// Playback is silent until the output is reopened. Not used by the
     /// data callback.
     pub output_failed: AtomicBool,
+    /// Set by the output thread when the preferred device it is standing in
+    /// for is connected again. Not used by the data callback.
+    pub preferred_back: AtomicBool,
     /// Set by the callback when its last buffer held no audio from the ring.
     pub silent: AtomicBool,
 }
@@ -48,6 +51,7 @@ impl Shared {
             underruns: AtomicU64::new(0),
             starting: AtomicBool::new(false),
             output_failed: AtomicBool::new(false),
+            preferred_back: AtomicBool::new(false),
             silent: AtomicBool::new(true),
         }
     }

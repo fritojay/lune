@@ -16,6 +16,7 @@ Dialog {
 
     title: qsTr("Preferences")
     modal: true
+    onAboutToShow: Preferences.refreshOutputDevices()
     standardButtons: Dialog.Close
 
     // Removing a folder deletes its tracks from the library. Adding it back
@@ -132,6 +133,19 @@ Dialog {
                 elide: Text.ElideMiddle
                 opacity: 0.7
             }
+        }
+
+        Label {
+            Layout.topMargin: 12
+            text: qsTr("Audio Output")
+            font.bold: true
+        }
+
+        ComboBox {
+            Layout.fillWidth: true
+            model: Preferences.outputDevices
+            currentIndex: Preferences.outputDevice
+            onActivated: index => Preferences.outputDevice = index
         }
 
         Label {

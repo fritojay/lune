@@ -276,13 +276,6 @@ ApplicationWindow {
             onDismissed: Preferences.clearError()
         }
 
-        // The audio output failed (e.g. its device was unplugged).
-        ErrorBanner {
-            Layout.fillWidth: true
-            message: player.error
-            onDismissed: player.clearError()
-        }
-
         // Quick filters: picks which grouping the filter pane lists.
         GroupingBar {
             Layout.fillWidth: true

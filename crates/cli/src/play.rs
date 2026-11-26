@@ -67,7 +67,7 @@ pub fn run(args: Args) -> anyhow::Result<()> {
             channels: 2,
             realtime: !fast,
         },
-        None => OutputKind::Device,
+        None => OutputKind::Device { preferred: None },
     };
     let queue = Arc::new(VecQueue::from_paths(files));
     let first = queue.first().context("empty queue")?;

@@ -231,7 +231,11 @@ impl cxx_qt::Initialize for qobject::FilterModel {
             Change::Catalog => model.reload(),
             Change::Played => model.played(),
             Change::Playlists => model.playlists_changed(),
-            Change::View { .. } | Change::Missing | Change::Queue | Change::Browse => {}
+            Change::View { .. }
+            | Change::Missing
+            | Change::Queue
+            | Change::Browse
+            | Change::OutputDevice => {}
         });
     }
 }

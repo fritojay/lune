@@ -32,10 +32,15 @@ const SLEEP_AFTER: Duration = Duration::from_secs(2);
 /// A restart can fail for a moment, e.g. while the system resumes from
 /// suspend, so only this many failures in a row fail the output.
 const RESTART_ATTEMPTS: u32 = 3;
+/// How often an output opened in place of its preferred device checks
+/// whether that one is connected again.
+const PREFERRED_CHECK: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OutputKind {
-    Device,
+    /// `preferred` is an [`OutputDevice::id`]. Without one, or while it isn't
+    /// connected, the system default plays.
+    Device { preferred: Option<String> },
     /// The file must not exist yet; an existing file is never overwritten.
     Capture {
         path: Option<PathBuf>,
@@ -45,6 +50,32 @@ pub enum OutputKind {
         /// fast as the decoder can supply audio, without counting underruns.
         realtime: bool,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputDevice {
+    /// Stable across runs, so it can be saved.
+    pub id: String,
+    pub name: String,
+}
+
+/// The connected output devices. Slow on some systems (it asks the sound
+/// server), so call it when needed rather than often.
+pub fn output_devices() -> Vec<OutputDevice> {
+    match cpal::default_host().output_devices() {
+        Ok(devices) => devices
+            .filter_map(|device| {
+                Some(OutputDevice {
+                    id: device.id().ok()?.to_string(),
+                    name: device.to_string(),
+                })
+            })
+            .collect(),
+        Err(err) => {
+            tracing::warn!(%err, "could not list the audio outputs");
+            Vec::new()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +158,13 @@ pub fn start(
     let thread = std::thread::Builder::new()
         .name("lune-output".into())
         .spawn(move || match kind {
-            OutputKind::Device => run_device(make_renderer, &shared, &ready_tx, &signals_rx),
+            OutputKind::Device { preferred } => run_device(
+                make_renderer,
+                preferred.as_deref(),
+                &shared,
+                &ready_tx,
+                &signals_rx,
+            ),
             OutputKind::Capture {
                 path,
                 rate,
@@ -155,14 +192,24 @@ pub fn start(
 
 fn run_device(
     make_renderer: impl FnOnce(OutputSpec) -> Renderer,
+    preferred: Option<&str>,
     shared: &Shared,
     ready: &mpsc::SyncSender<Result<OutputSpec>>,
     signals: &Receiver<Signal>,
 ) {
-    let stream = match build_device_stream(make_renderer) {
-        Ok((stream, spec)) => {
+    let host = cpal::default_host();
+    let find = |id: &str| {
+        let id = id.parse::<cpal::DeviceId>().ok()?;
+        host.device_by_id(&id)
+    };
+    let (stream, fell_back) = match choose_device(preferred, find, || host.default_output_device())
+        .ok_or(EngineError::NoOutputDevice)
+        .and_then(|(device, fell_back)| {
+            build_device_stream(&device, make_renderer).map(|built| (built, fell_back))
+        }) {
+        Ok(((stream, spec), fell_back)) => {
             let _ = ready.send(Ok(spec));
-            stream
+            (stream, fell_back)
         }
         Err(err) => {
             let _ = ready.send(Err(err));
@@ -170,11 +217,23 @@ fn run_device(
         }
     };
     let mut sleeper = Sleeper::default();
+    let mut checked = Instant::now();
     loop {
         match signals.recv_timeout(IDLE_CHECK) {
             Ok(Signal::Wake) => sleeper.wake(&stream, shared),
             Err(RecvTimeoutError::Timeout) => {
-                sleeper.check(&stream, shared, Instant::now());
+                let now = Instant::now();
+                sleeper.check(&stream, shared, now);
+                if let Some(preferred) = preferred.filter(|_| fell_back)
+                    && now.duration_since(checked) >= PREFERRED_CHECK
+                    && !shared.preferred_back.load(Ordering::Relaxed)
+                {
+                    checked = now;
+                    if find(preferred).is_some() {
+                        tracing::info!(preferred, "the preferred audio output is connected again");
+                        shared.preferred_back.store(true, Ordering::Release);
+                    }
+                }
             }
             Ok(Signal::Stop) | Err(RecvTimeoutError::Disconnected) => break,
         }
@@ -264,13 +323,32 @@ impl Sleeper {
     }
 }
 
+/// `preferred` if it is connected, else the default, and whether that is in
+/// its place.
+fn choose_device<D>(
+    preferred: Option<&str>,
+    find: impl Fn(&str) -> Option<D>,
+    default: impl FnOnce() -> Option<D>,
+) -> Option<(D, bool)> {
+    let Some(preferred) = preferred else {
+        return default().map(|device| (device, false));
+    };
+    match find(preferred) {
+        Some(device) => Some((device, false)),
+        None => {
+            tracing::warn!(
+                preferred,
+                "the preferred audio output isn't connected; using the default"
+            );
+            default().map(|device| (device, true))
+        }
+    }
+}
+
 fn build_device_stream(
+    device: &cpal::Device,
     make_renderer: impl FnOnce(OutputSpec) -> Renderer,
 ) -> Result<(cpal::Stream, OutputSpec)> {
-    let host = cpal::default_host();
-    let device = host
-        .default_output_device()
-        .ok_or(EngineError::NoOutputDevice)?;
     let supported = device
         .default_output_config()
         .map_err(EngineError::output("reading the default output format"))?;
@@ -281,17 +359,18 @@ fn build_device_stream(
     };
     let renderer = make_renderer(spec);
     tracing::info!(
+        device = %device,
         rate = spec.rate,
         channels = spec.channels,
         format = ?supported.sample_format(),
         "opening output device"
     );
     let stream = match supported.sample_format() {
-        SampleFormat::F32 => build_stream::<f32>(&device, config, renderer),
-        SampleFormat::I16 => build_stream::<i16>(&device, config, renderer),
-        SampleFormat::U16 => build_stream::<u16>(&device, config, renderer),
-        SampleFormat::I32 => build_stream::<i32>(&device, config, renderer),
-        SampleFormat::F64 => build_stream::<f64>(&device, config, renderer),
+        SampleFormat::F32 => build_stream::<f32>(device, config, renderer),
+        SampleFormat::I16 => build_stream::<i16>(device, config, renderer),
+        SampleFormat::U16 => build_stream::<u16>(device, config, renderer),
+        SampleFormat::I32 => build_stream::<i32>(device, config, renderer),
+        SampleFormat::F64 => build_stream::<f64>(device, config, renderer),
         other => Err(EngineError::OutputConfig(format!(
             "unsupported device sample format {other:?}"
         ))),

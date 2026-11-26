@@ -21,6 +21,10 @@ pub struct Settings {
     /// Multiplies how far one mouse wheel step scrolls a list. Always within
     /// [`SCROLL_SPEEDS`]; an out-of-range value in the file is clamped on load.
     pub scroll_speed: u32,
+    /// The audio output the user chose, as the engine names it; `None` is
+    /// the system default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_device: Option<String>,
     /// Keys this version doesn't know, such as a newer version's settings or
     /// a typo, kept so saving writes them back.
     #[serde(flatten)]
@@ -32,6 +36,7 @@ impl Default for Settings {
         Self {
             library_folders: Vec::new(),
             scroll_speed: DEFAULT_SCROLL_SPEED,
+            output_device: None,
             extra: toml::Table::new(),
         }
     }

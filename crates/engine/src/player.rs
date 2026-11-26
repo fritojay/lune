@@ -32,7 +32,7 @@ pub struct PlayerConfig {
 impl Default for PlayerConfig {
     fn default() -> Self {
         Self {
-            output: OutputKind::Device,
+            output: OutputKind::Device { preferred: None },
             buffer: Duration::from_millis(1500),
         }
     }
@@ -57,6 +57,9 @@ pub struct Status {
     /// The output device reported an error (e.g. it was unplugged) and
     /// playback is silent.
     pub output_failed: bool,
+    /// The output plays in place of the preferred device, which is
+    /// connected again: reopen the player to switch back.
+    pub preferred_back: bool,
     pub output_rate: u32,
     pub output_channels: usize,
 }
@@ -194,6 +197,7 @@ impl Player {
             duration: None,
             underruns,
             output_failed: self.shared.output_failed.load(Ordering::Acquire),
+            preferred_back: self.shared.preferred_back.load(Ordering::Acquire),
             output_rate: self.spec.rate,
             output_channels: self.spec.channels,
         };
@@ -224,9 +228,7 @@ impl Player {
             position,
             duration: b.duration,
             underruns,
-            output_failed: self.shared.output_failed.load(Ordering::Acquire),
-            output_rate: self.spec.rate,
-            output_channels: self.spec.channels,
+            ..stopped
         }
     }
 }
