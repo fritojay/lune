@@ -175,17 +175,7 @@ impl Queue {
     /// that was at index `to`, or at the end when `to` is past the end.
     pub fn move_to(&mut self, slots: &[SlotId], to: usize) {
         let moving: HashSet<SlotId> = slots.iter().copied().collect();
-        let to = to.min(self.items.len());
-        let before = self.items[..to]
-            .iter()
-            .filter(|item| moving.contains(&item.slot))
-            .count();
-        let (moved, mut rest): (Vec<QueueItem>, Vec<QueueItem>) = std::mem::take(&mut self.items)
-            .into_iter()
-            .partition(|item| moving.contains(&item.slot));
-        let at = to - before;
-        rest.splice(at..at, moved);
-        self.items = rest;
+        lists::move_picked(&mut self.items, |_, item| moving.contains(&item.slot), to);
         self.relocate_cursor();
     }
 

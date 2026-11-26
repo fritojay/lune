@@ -63,15 +63,11 @@ impl Playlist {
     /// before the track that was at `to`, or at the end when `to` is past it.
     pub fn move_to(&mut self, positions: &[usize], to: usize) {
         let moving: HashSet<usize> = positions.iter().copied().collect();
-        let to = to.min(self.track_ids.len());
-        let before = moving.iter().filter(|&&position| position < to).count();
-        let (moved, mut rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.track_ids)
-            .into_iter()
-            .enumerate()
-            .partition(|(position, _)| moving.contains(position));
-        let at = to - before;
-        rest.splice(at..at, moved);
-        self.track_ids = rest.into_iter().map(|(_, id)| id).collect();
+        move_picked(
+            &mut self.track_ids,
+            |position, _| moving.contains(&position),
+            to,
+        );
     }
 
     /// `id` while it is one of `playlists`, else the first of them by name.
@@ -90,6 +86,18 @@ impl ListId {
     pub fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
+}
+
+/// [`Playlist::move_to`] for any list, picking the items by index and value.
+pub(crate) fn move_picked<T>(items: &mut Vec<T>, picked: impl Fn(usize, &T) -> bool, to: usize) {
+    let to = to.min(items.len());
+    let (moved, mut rest): (Vec<_>, Vec<_>) = std::mem::take(items)
+        .into_iter()
+        .enumerate()
+        .partition(|(i, item)| picked(*i, item));
+    let at = to - moved.iter().filter(|(i, _)| *i < to).count();
+    rest.splice(at..at, moved);
+    *items = rest.into_iter().map(|(_, item)| item).collect();
 }
 
 /// Each item's track id, in order, with its path while the track is still in
