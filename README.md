@@ -1,5 +1,5 @@
 I wanted a music player that mixed a few music players I liked to use on Windows, Linux, and Mac. 
-I wanted to create something simple without any tag editing and focuses solely on playing music. 
+I wanted to create something simple, with no tag editing, that focuses solely on playing music. 
 
 My inspirations for this project:
 * MusicBee

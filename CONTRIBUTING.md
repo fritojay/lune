@@ -60,6 +60,7 @@ symphonia (no system FFmpeg), cpal, rubato, rtrb, lofty, rusqlite (`bundled`, FT
 - No `unwrap()`/`expect()` in non-test code except true invariants (comment why).
 - `thiserror` in libraries, `anyhow` in binaries only.
 - Logging via `tracing`, never from the audio callback.
+- Use inclusive language in code, comments, docs, and UI text.
 - Avoid extra comments. Only comment when something is done in a non-obvious way, and say why (a workaround, an invariant, a safety or realtime constraint). Don't write comments or doc comments that restate what the code or its name already says.
 - The settings and window-state files must load files written by newer versions: an unknown key or a value this version can't read never makes the file unreadable, and an unreadable value falls back to its default. Settings keep unknown keys so saving writes them back. The exception is `library_folders`: an unreadable list is an error, so the app never saves over the user's folders.
 
