@@ -11,6 +11,7 @@ QtObject {
         { id: "album", title: qsTr("Albums") },
         { id: "year", title: qsTr("Years") },
         { id: "genre", title: qsTr("Genres") },
+        { id: "file_type", title: qsTr("File Types") },
         { id: "recently_added", title: qsTr("Recently Added") },
         { id: "recently_played", title: qsTr("Recently Played") },
     ]

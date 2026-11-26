@@ -24,6 +24,7 @@ pub enum Grouping {
     Album,
     Year,
     Genre,
+    FileType,
     /// Albums by their latest added track, newest first, so an album that
     /// had singles out comes back to the top when the rest arrives.
     RecentlyAdded,
@@ -33,12 +34,13 @@ pub enum Grouping {
 
 impl Grouping {
     /// In declaration order, so `name` can index by discriminant.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::AlbumArtist,
         Self::Artist,
         Self::Album,
         Self::Year,
         Self::Genre,
+        Self::FileType,
         Self::RecentlyAdded,
         Self::RecentlyPlayed,
     ];
@@ -72,6 +74,7 @@ impl Grouping {
             Self::Album => (Order::Catalog, Field::Album),
             Self::Year => (Order::Year, Field::Year),
             Self::Genre => (Order::Catalog, Field::Genre),
+            Self::FileType => (Order::Catalog, Field::FileType),
             Self::RecentlyAdded => (Order::Added, Field::Album),
             Self::RecentlyPlayed => (Order::Played, Field::Album),
         }
@@ -89,16 +92,18 @@ pub enum Field {
     Year,
     /// The track genre.
     Genre,
+    FileType,
 }
 
 impl Field {
     /// In declaration order, so [`Catalog`] can index its keys by discriminant.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::AlbumArtist,
         Self::Artist,
         Self::Album,
         Self::Year,
         Self::Genre,
+        Self::FileType,
     ];
 
     fn def(self) -> FieldDef {
@@ -134,6 +139,12 @@ impl Field {
                 key: KeyKind::Text(|t| t.genre.as_deref().unwrap_or_default()),
                 label: |t| t.genre.clone().unwrap_or_default(),
                 missing: "Unknown Genre",
+                ..FieldDef::TEXT
+            },
+            Self::FileType => FieldDef {
+                key: KeyKind::Text(|t| &t.codec),
+                label: |t| t.codec.to_uppercase(),
+                missing: "Unknown",
                 ..FieldDef::TEXT
             },
         }

@@ -527,8 +527,9 @@ fn grouping_count() -> usize {
         | Grouping::Album
         | Grouping::Year
         | Grouping::Genre
+        | Grouping::FileType
         | Grouping::RecentlyAdded
-        | Grouping::RecentlyPlayed => 7,
+        | Grouping::RecentlyPlayed => 8,
     }
 }
 
@@ -543,7 +544,12 @@ fn all_has_every_grouping_once_in_declaration_order() {
 /// No wildcard arm, so a new field doesn't compile until it's counted here.
 fn field_count() -> usize {
     match Field::AlbumArtist {
-        Field::AlbumArtist | Field::Artist | Field::Album | Field::Year | Field::Genre => 5,
+        Field::AlbumArtist
+        | Field::Artist
+        | Field::Album
+        | Field::Year
+        | Field::Genre
+        | Field::FileType => 6,
     }
 }
 
