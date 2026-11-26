@@ -339,6 +339,7 @@ ColumnLayout {
         Layout.fillHeight: true
         visible: !trackPane.grid && !trackPane.hinted && (trackPane.albumCount > 0 || trackPane.hasFolders)
         model: trackPane.model
+        onMoveRequested: (rows, to) => trackPane.moveRequested(rows, to)
 
         delegate: AlbumDelegate {
             id: listAlbum
@@ -357,13 +358,7 @@ ColumnLayout {
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
             onMenuRequested: trackMenu.show(trackSelection.rows())
             onDragMoved: y => albumList.dropRow = albumList.dropTarget(listAlbum, y)
-            onDragEnded: viewIndex => {
-                if (albumList.dropRow < 0)
-                    return
-                trackPane.moveRequested(trackSelection.contains(viewIndex) ? trackSelection.rows() : [viewIndex],
-                                        albumList.dropRow)
-                albumList.dropRow = -1
-            }
+            onDragEnded: viewIndex => albumList.endDrag(trackSelection, viewIndex)
         }
     }
 

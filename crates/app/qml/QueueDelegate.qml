@@ -30,18 +30,7 @@ Rectangle {
     signal dragEnded()
 
     height: Theme.rowHeight + 14
-    color: selected ? palette.highlight
-         : rowArea.containsMouse ? Theme.hoverColor(palette)
-         : index % 2 ? Theme.stripeColor(palette) : "transparent"
-
-    Rectangle {
-        width: parent.width
-        height: 2
-        y: queueRow.dropRow === queueRow.index + 1 ? parent.height - 1 : -1
-        visible: queueRow.dropRow === queueRow.index
-                 || (queueRow.dropRow === queueRow.index + 1 && queueRow.index === queueRow.rowCount - 1)
-        color: queueRow.palette.highlight
-    }
+    color: Theme.rowColor(palette, selected, rowInput.hovered, index % 2 === 1)
 
     RowLayout {
         anchors.fill: parent
@@ -106,30 +95,15 @@ Rectangle {
         }
     }
 
-    MouseArea {
-        id: rowArea
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
-        onDoubleClicked: mouse => {
-            if (mouse.button === Qt.LeftButton)
-                queueRow.playRequested()
-        }
-        onClicked: mouse => {
-            if (mouse.button === Qt.RightButton) {
-                queueRow.selection.keep(queueRow.index)
-                queueRow.menuRequested()
-            } else {
-                queueRow.selection.click(queueRow.index, (mouse.modifiers & Qt.ShiftModifier) !== 0,
-                                         (mouse.modifiers & Qt.ControlModifier) !== 0)
-            }
-        }
-    }
-
-    DragHandler {
-        target: null
-        xAxis.enabled: false
-        onCentroidChanged: if (active) queueRow.dragMoved(centroid.position.y)
-        onActiveChanged: if (!active) queueRow.dragEnded()
+    TrackRowInput {
+        id: rowInput
+        row: queueRow.index
+        lastRow: queueRow.rowCount - 1
+        selection: queueRow.selection
+        dropRow: queueRow.dropRow
+        onPlayRequested: queueRow.playRequested()
+        onMenuRequested: queueRow.menuRequested()
+        onDragMoved: y => queueRow.dragMoved(y)
+        onDragEnded: queueRow.dragEnded()
     }
 }

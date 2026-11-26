@@ -113,9 +113,8 @@ Item {
                 readonly property color textColor: selected ? album.palette.highlightedText : album.palette.text
                 width: tracks.width
                 height: Theme.rowHeight
-                color: selected ? album.palette.highlight
-                     : rowArea.containsMouse ? Theme.hoverColor(album.palette)
-                     : (album.flat ? viewIndex : index) % 2 ? Theme.stripeColor(album.palette) : "transparent"
+                color: Theme.rowColor(album.palette, selected, rowInput.hovered,
+                                      (album.flat ? viewIndex : index) % 2 === 1)
 
                 RowLayout {
                     anchors.fill: parent
@@ -154,42 +153,17 @@ Item {
                     }
                 }
 
-                MouseArea {
-                    id: rowArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onClicked: mouse => {
-                        if (mouse.button === Qt.RightButton) {
-                            album.selection.keep(trackRow.viewIndex)
-                            album.menuRequested()
-                        } else {
-                            album.selection.click(trackRow.viewIndex, (mouse.modifiers & Qt.ShiftModifier) !== 0,
-                                                  (mouse.modifiers & Qt.ControlModifier) !== 0)
-                        }
-                    }
-                    onDoubleClicked: mouse => {
-                        if (mouse.button === Qt.LeftButton)
-                            album.playRequested(trackRow.viewIndex)
-                    }
-                }
-
-                Rectangle {
-                    readonly property bool below: album.dropRow === trackRow.viewIndex + 1
-                                                  && trackRow.viewIndex === album.lastRow
-                    width: parent.width
-                    height: 2
-                    y: below ? parent.height - 1 : -1
-                    visible: album.dropRow === trackRow.viewIndex || below
-                    color: album.palette.highlight
-                }
-
-                DragHandler {
-                    enabled: album.reorderable
-                    target: null
-                    xAxis.enabled: false
-                    onCentroidChanged: if (active) album.dragMoved(trackRow.mapToItem(album, 0, centroid.position.y).y)
-                    onActiveChanged: if (!active) album.dragEnded(trackRow.viewIndex)
+                TrackRowInput {
+                    id: rowInput
+                    row: trackRow.viewIndex
+                    lastRow: album.lastRow
+                    selection: album.selection
+                    dropRow: album.dropRow
+                    draggable: album.reorderable
+                    onPlayRequested: album.playRequested(trackRow.viewIndex)
+                    onMenuRequested: album.menuRequested()
+                    onDragMoved: y => album.dragMoved(rowInput.mapToItem(album, 0, y).y)
+                    onDragEnded: album.dragEnded(trackRow.viewIndex)
                 }
             }
         }

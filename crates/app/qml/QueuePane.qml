@@ -126,6 +126,7 @@ ColumnLayout {
         // No model while hidden: delegates would still be made, and ask for covers.
         model: queuePane.visible ? queuePane.model : null
         onModelChanged: if (model) queuePane.showCurrent()
+        onMoveRequested: (rows, to) => queuePane.moveRequested(rows, to)
 
         delegate: QueueDelegate {
             id: queueRow
@@ -138,11 +139,7 @@ ColumnLayout {
             onPlayRequested: queuePane.playRequested(queueRow.index)
             onMenuRequested: queueMenu.show(queueSelection.rows())
             onDragMoved: y => queueList.dropRow = queueList.dropTarget(queueRow, y)
-            onDragEnded: if (queueList.dropRow >= 0) {
-                queuePane.moveRequested(queueSelection.contains(queueRow.index) ? queueSelection.rows() : [queueRow.index],
-                                        queueList.dropRow)
-                queueList.dropRow = -1
-            }
+            onDragEnded: queueList.endDrag(queueSelection, queueRow.index)
         }
     }
 }

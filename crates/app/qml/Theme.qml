@@ -21,6 +21,12 @@ QtObject {
         return tint(palette, 0.1)
     }
 
+    function rowColor(palette: Palette, selected: bool, hovered: bool, striped: bool): color {
+        return selected ? palette.highlight
+             : hovered ? hoverColor(palette)
+             : striped ? stripeColor(palette) : "transparent"
+    }
+
     function tint(palette: Palette, alpha: real): color {
         return Qt.rgba(palette.text.r, palette.text.g, palette.text.b, alpha)
     }

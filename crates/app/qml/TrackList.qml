@@ -10,6 +10,16 @@ ListView {
     // The row a dragged track would land before, or -1.
     property int dropRow: -1
 
+    // `rows` keep their order and go before the row now at `to`.
+    signal moveRequested(list<int> rows, int to)
+
+    // A drag of `row` carries the selection if it holds `row`, else that row.
+    function endDrag(selection: TrackSelection, row: int) {
+        if (dropRow >= 0)
+            moveRequested(selection.contains(row) ? selection.rows() : [row], dropRow)
+        dropRow = -1
+    }
+
     // The row a drag at `y` in `item` lands before: the row under it, or the
     // next one from its lower half on.
     function dropTarget(item: Item, y: real): int {
