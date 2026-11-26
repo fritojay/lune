@@ -57,7 +57,7 @@ fn albums(rows: &[Row]) -> Vec<usize> {
 
 proptest! {
     #[test]
-    fn rows_cover_each_album_in_order_in_parts_of_at_most_the_limit_with_one_header(
+    fn rows_cover_each_album_in_order_in_parts_of_at_most_the_limit_and_one_album_whole(
         sizes in prop::collection::vec(1..=3 * MAX_ROW_TRACKS, 0..6),
     ) {
         let mut id = 0;
@@ -87,6 +87,11 @@ proptest! {
         prop_assert_eq!(headers, (0..view.albums.len()).collect::<Vec<_>>());
         let covers = cover_rows(&catalog, &view, &rows);
         prop_assert_eq!(covers.values().map(Vec::len).sum::<usize>(), view.albums.len());
+        for album in 0..view.albums.len() {
+            let album_id = catalog.track(view.tracks[view.albums[album].start]).unwrap().album_id;
+            let whole = shown_rows(Some(&catalog), &view, true, album_id);
+            prop_assert_eq!(whole, vec![Row { album, tracks: view.albums[album].clone() }]);
+        }
     }
 }
 

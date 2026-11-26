@@ -358,20 +358,27 @@ fn shown_cover(view: &View, first: &ListTrack) -> Option<i64> {
     first.art_id.filter(|_| !view.flat)
 }
 
-/// The rows of `view`'s albums, each album split into parts of at most
-/// [`MAX_ROW_TRACKS`]: with `one_album`, those of album `album_id` (none for
-/// -1), otherwise all of them.
+/// The rows of `view`'s albums: with `one_album`, album `album_id` (none
+/// for -1) whole, otherwise every album split into parts of at most
+/// [`MAX_ROW_TRACKS`]. One album is shown in a column that makes all of its
+/// rows at once, so splitting it gains nothing, and closing it mid-build made
+/// Qt warn about the parts it had yet to make.
 fn shown_rows(catalog: Option<&Catalog>, view: &View, one_album: bool, album_id: i64) -> Vec<Row> {
     let shown = |album: usize| {
         !one_album || first_track(catalog, view, album).is_some_and(|t| t.album_id == album_id)
+    };
+    let part = if one_album {
+        usize::MAX
+    } else {
+        MAX_ROW_TRACKS
     };
     (0..view.albums.len())
         .filter(|&album| shown(album))
         .flat_map(|album| {
             let range = view.albums[album].clone();
-            range.clone().step_by(MAX_ROW_TRACKS).map(move |start| Row {
+            range.clone().step_by(part).map(move |start| Row {
                 album,
-                tracks: start..range.end.min(start + MAX_ROW_TRACKS),
+                tracks: start..range.end.min(start.saturating_add(part)),
             })
         })
         .collect()
