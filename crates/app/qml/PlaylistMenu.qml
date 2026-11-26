@@ -48,7 +48,7 @@ Menu {
             anchors.centerIn: parent
             width: Math.min(400, parent.width - 40)
             modal: true
-            title: qsTr("Delete “%1”?").arg(name)
+            title: qsTr("Delete Playlist")
             standardButtons: Dialog.Ok | Dialog.Cancel
             Component.onCompleted: standardButton(Dialog.Ok).text = qsTr("Delete")
             onAccepted: playlistMenu.playlists.remove(playlistId)
@@ -56,7 +56,8 @@ Menu {
             Label {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: qsTr("The playlist is deleted. Its tracks stay in your library.")
+                textFormat: Text.PlainText
+                text: qsTr("Delete “%1”? Its tracks stay in your library.").arg(confirm.name)
             }
         }
     }

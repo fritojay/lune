@@ -1,7 +1,7 @@
 //! Ordered lists of track ids, stored by list id. The same track can appear
 //! more than once. Items aren't tied to `tracks`, so rescans never change them.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -49,15 +49,6 @@ impl Playlist {
         sorted.into_iter().map(|(_, p)| p).collect()
     }
 
-    /// An id that no list in `playlists` has, nor the queue.
-    pub fn new_id(playlists: &[Self]) -> ListId {
-        let largest = playlists
-            .iter()
-            .map(|p| p.id.0)
-            .fold(ListId::QUEUE.0, i64::max);
-        ListId(largest.saturating_add(1))
-    }
-
     pub fn remove(&mut self, positions: &[usize]) {
         let remove: HashSet<usize> = positions.iter().copied().collect();
         self.track_ids = std::mem::take(&mut self.track_ids)
@@ -95,6 +86,10 @@ impl Playlist {
 impl ListId {
     /// Created by migration v12.
     pub(crate) const QUEUE: Self = Self(1);
+
+    pub fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
 }
 
 /// Each item's track id, in order, with its path while the track is still in
@@ -164,7 +159,19 @@ pub(crate) fn save_items(tx: &Transaction, id: ListId, track_ids: &[i64]) -> Res
     Ok(())
 }
 
-pub(crate) fn save_playlists(tx: &Transaction, playlists: &[Playlist]) -> Result<()> {
+/// An id no stored list has, of any kind.
+pub(crate) fn unused_id(conn: &Connection) -> Result<ListId> {
+    let largest: i64 = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM lists", [], |row| {
+        row.get(0)
+    })?;
+    Ok(ListId(largest).next())
+}
+
+pub(crate) fn save_playlists(
+    tx: &Transaction,
+    saved: &[Playlist],
+    playlists: &[Playlist],
+) -> Result<()> {
     let kept: HashSet<ListId> = playlists.iter().map(|p| p.id).collect();
     let stored: Vec<i64> = tx
         .prepare("SELECT id FROM lists WHERE kind = 'playlist'")?
@@ -183,12 +190,21 @@ pub(crate) fn save_playlists(tx: &Transaction, playlists: &[Playlist]) -> Result
          VALUES (:id, 'playlist', :name, CAST(unixepoch('subsec') * 1000 AS INTEGER) * 1000000)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name WHERE kind = 'playlist'",
     )?;
+    let saved: HashMap<ListId, &Playlist> = saved.iter().map(|p| (p.id, p)).collect();
     for playlist in playlists {
-        let saved = upsert.execute(named_params! {
+        let before = saved.get(&playlist.id).copied();
+        if before == Some(playlist) {
+            continue;
+        }
+        let written = upsert.execute(named_params! {
             ":id": playlist.id.0,
             ":name": playlist.name,
         })?;
-        if saved > 0 {
+        if written == 0 {
+            tracing::error!(id = %playlist.id, "a playlist's id is another list's; it is not saved");
+            continue;
+        }
+        if before.map(|p| &p.track_ids) != Some(&playlist.track_ids) {
             save_items(tx, playlist.id, &playlist.track_ids)?;
         }
     }

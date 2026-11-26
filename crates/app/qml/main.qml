@@ -340,6 +340,7 @@ ApplicationWindow {
                 headerShown: listsPlaylists
                 headerItems: Button {
                     Layout.fillWidth: true
+                    enabled: playlistsModel.loaded
                     text: qsTr("New Playlist…")
                     onClicked: window.newPlaylist()
                 }
@@ -457,7 +458,7 @@ ApplicationWindow {
             title: qsTr("New Playlist"),
             name: playlistsModel.suggestedName(qsTr("New Playlist"))
         })
-        dialog.chosen.connect(name => filters.showPlaylist(playlistsModel.create(name)))
+        dialog.chosen.connect(name => filters.showPlaylist(playlistsModel.create(name, [])))
         dialog.open()
     }
 

@@ -16,7 +16,7 @@ fn each_setter_sends_its_change() {
     set_view(View::default(), false);
     set_view(View::default(), true);
     set_missing(Vec::new());
-    set_playlists(Vec::new());
+    load_playlists(Vec::new(), id("2"));
     queue_edited();
     set_browse(BrowseState::default());
     set_browse(BrowseState::default());
@@ -67,14 +67,24 @@ fn nothing_is_sent_without_a_change() {
     assert!(changes.borrow().is_empty());
 }
 
-#[test]
-fn a_playlist_edit_shows_at_once_and_is_announced() {
-    let playlist = |id: &str, track_ids: Vec<i64>| Playlist {
-        id: id.parse().unwrap(),
+fn id(id: &str) -> ListId {
+    id.parse().unwrap()
+}
+
+fn playlist(id: &str, track_ids: Vec<i64>) -> Playlist {
+    Playlist {
+        id: self::id(id),
         name: format!("list {id}"),
         track_ids,
-    };
-    set_playlists(vec![playlist("2", vec![5]), playlist("3", vec![1])]);
+    }
+}
+
+#[test]
+fn a_playlist_edit_shows_at_once_and_is_announced() {
+    load_playlists(
+        vec![playlist("2", vec![5]), playlist("3", vec![1])],
+        id("4"),
+    );
     let changes = recorded();
     edit_playlists(|playlists| {
         playlists[0].track_ids.push(1);
@@ -82,4 +92,33 @@ fn a_playlist_edit_shows_at_once_and_is_announced() {
     });
     assert_eq!(*playlists(), [playlist("2", vec![5, 1])]);
     assert_eq!(*changes.borrow(), [Change::Playlists]);
+}
+
+#[test]
+fn before_the_playlists_load_nothing_can_change_them() {
+    let changes = recorded();
+    edit_playlists(|playlists| playlists.push(playlist("2", Vec::new())));
+    assert_eq!(create_playlist("Mix".to_owned(), vec![1]), None);
+    assert!(playlists().is_empty());
+    assert!(changes.borrow().is_empty());
+}
+
+#[test]
+fn new_playlists_take_the_unused_id_then_the_ones_after_it() {
+    load_playlists(vec![playlist("2", Vec::new())], id("9"));
+    assert_eq!(create_playlist("A".to_owned(), vec![1]), Some(id("9")));
+    assert_eq!(create_playlist("B".to_owned(), Vec::new()), Some(id("10")));
+    let all = playlists();
+    let made: Vec<(ListId, &str, &[i64])> = all
+        .iter()
+        .map(|p| (p.id, p.name.as_str(), &p.track_ids[..]))
+        .collect();
+    assert_eq!(
+        made,
+        [
+            (id("2"), "list 2", &[][..]),
+            (id("9"), "A", &[1][..]),
+            (id("10"), "B", &[][..])
+        ]
+    );
 }

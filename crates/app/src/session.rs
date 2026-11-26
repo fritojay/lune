@@ -14,7 +14,7 @@ use std::time::SystemTime;
 
 use cxx_qt::{CxxQtThread, Threading};
 use lune_core::{
-    BrowseState, Catalog, Library, MissingTrack, Playlist, Queue, QueueItem, SlotId, View,
+    BrowseState, Catalog, Library, ListId, MissingTrack, Playlist, Queue, QueueItem, SlotId, View,
     WindowState,
 };
 use lune_engine::{EntryId, PlayQueue, QueueEntry};
@@ -44,6 +44,8 @@ struct UiState {
     view: Rc<View>,
     missing: Rc<Vec<MissingTrack>>,
     playlists: Rc<Vec<Playlist>>,
+    /// For the next new playlist; `None` until the playlists have loaded.
+    unused_playlist_id: Option<ListId>,
     browse: Option<BrowseState>,
     listeners: Vec<Rc<dyn Fn(Change)>>,
 }
@@ -77,18 +79,52 @@ pub fn playlists() -> Rc<Vec<Playlist>> {
     UI.with_borrow(|ui| Rc::clone(&ui.playlists))
 }
 
-pub fn set_playlists(playlists: Vec<Playlist>) {
+/// The playlists as stored, and an id no stored list has. Until this is
+/// called, the playlists can't be edited: a save would replace the stored
+/// ones with none.
+pub fn load_playlists(playlists: Vec<Playlist>, unused_id: ListId) {
+    UI.with_borrow_mut(|ui| ui.unused_playlist_id = Some(unused_id));
+    set_playlists(playlists);
+}
+
+pub fn playlists_loaded() -> bool {
+    UI.with_borrow(|ui| ui.unused_playlist_id.is_some())
+}
+
+fn set_playlists(playlists: Vec<Playlist>) {
     UI.with_borrow_mut(|ui| ui.playlists = Rc::new(playlists));
     notify(Change::Playlists);
 }
 
 /// Changes the playlists: the change shows now, and the DB is updated in
-/// the background.
+/// the background. Does nothing before they have loaded.
 pub fn edit_playlists(edit: impl FnOnce(&mut Vec<Playlist>)) {
+    if !playlists_loaded() {
+        tracing::warn!("a playlist edit before the playlists loaded is dropped");
+        return;
+    }
     let mut playlists = Vec::clone(&playlists());
     edit(&mut playlists);
     save(Save::Playlists(playlists.clone()));
     set_playlists(playlists);
+}
+
+/// Makes a playlist and returns its id, or `None` before the playlists have
+/// loaded.
+pub fn create_playlist(name: String, track_ids: Vec<i64>) -> Option<ListId> {
+    let id = UI.with_borrow_mut(|ui| {
+        let id = ui.unused_playlist_id?;
+        ui.unused_playlist_id = Some(id.next());
+        Some(id)
+    })?;
+    edit_playlists(|playlists| {
+        playlists.push(Playlist {
+            id,
+            name,
+            track_ids,
+        });
+    });
+    Some(id)
 }
 
 /// The main pane's track list: what a double-click puts in the queue.
@@ -232,6 +268,11 @@ fn saver() -> &'static Mutex<Option<Saver>> {
                         return;
                     }
                 };
+                // What is stored, so a save rewrites only what changed.
+                let mut saved_playlists = library.playlists().unwrap_or_else(|err| {
+                    tracing::warn!(%err, "the first playlist save rewrites them all");
+                    Vec::new()
+                });
                 while let Ok(first) = rx.recv() {
                     let batch: Vec<Save> = std::iter::once(first).chain(rx.try_iter()).collect();
                     for save in &batch {
@@ -245,10 +286,11 @@ fn saver() -> &'static Mutex<Option<Saver>> {
                         Save::Playlists(playlists) => Some(playlists),
                         _ => None,
                     });
-                    if let Some(playlists) = playlists
-                        && let Err(err) = library.save_playlists(playlists)
-                    {
-                        tracing::error!(%err, "could not save the playlists");
+                    if let Some(playlists) = playlists {
+                        match library.save_playlists(&saved_playlists, playlists) {
+                            Ok(()) => saved_playlists = playlists.clone(),
+                            Err(err) => tracing::error!(%err, "could not save the playlists"),
+                        }
                     }
                     let result = if batch.contains(&Save::Queue) {
                         // Saving 100k rows takes a while; don't hold the

@@ -14,19 +14,20 @@ Menu {
     // Ascending.
     property list<int> rows
     property real trackId: -1
+    property list<real> trackIds
 
     signal playRequested(int row)
     signal albumRequested(real trackId)
 
-    // Asks for a name, then makes a playlist of the rows the menu was for.
+    // Asks for a name, then makes a playlist of the tracks the menu was for,
+    // as they were when it opened.
     function newPlaylist() {
-        const source = trackMenu.source
-        const rows = trackMenu.rows
+        const trackIds = trackMenu.trackIds
         const dialog = nameDialog.createObject(trackMenu.parent, {
             title: qsTr("New Playlist"),
             name: playlists.suggestedName(qsTr("New Playlist"))
         })
-        dialog.chosen.connect(name => trackMenu.controller.addToPlaylist(source, rows, playlists.create(name)))
+        dialog.chosen.connect(name => playlists.create(name, trackIds))
         dialog.open()
     }
 
@@ -39,6 +40,7 @@ Menu {
         if (rows.length === 0)
             return
         trackMenu.rows = rows
+        trackIds = controller.trackIds(source, rows)
         trackId = controller.trackId(source, rows[0])
         popup()
     }
@@ -60,6 +62,7 @@ Menu {
         title: qsTr("Add to Playlist")
         MenuItem {
             text: qsTr("New Playlist…")
+            enabled: playlists.loaded
             onTriggered: trackMenu.newPlaylist()
         }
         MenuSeparator {
@@ -73,9 +76,8 @@ Menu {
             }
             delegate: MenuItem {
                 required property string playlistId
-                required property string label
-                // Not a mnemonic.
-                text: label.replace(/&/g, "&&")
+                required property string menuText
+                text: menuText
                 onTriggered: trackMenu.controller.addToPlaylist(trackMenu.source, trackMenu.rows, playlistId)
             }
             // After New Playlist… and the separator.

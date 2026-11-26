@@ -143,7 +143,7 @@ fn the_saved_playlists_arrive_with_the_library() {
         Update::Loaded(_, _, playlists) => Some(playlists),
         _ => None,
     });
-    assert_eq!(loaded, saved);
+    assert_eq!(loaded.map(|p| p.playlists), Some(saved));
 }
 
 #[test]

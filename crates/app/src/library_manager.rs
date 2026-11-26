@@ -122,7 +122,9 @@ impl qobject::LibraryManager {
         match update {
             Update::Loaded(catalog, queue, playlists) => {
                 *session::lock_queue() = queue;
-                session::set_playlists(playlists);
+                if let Some(saved) = playlists {
+                    session::load_playlists(saved.playlists, saved.unused_id);
+                }
                 session::set_catalog(catalog);
             }
             Update::Library(catalog) => {

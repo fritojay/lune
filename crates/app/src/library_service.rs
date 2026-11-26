@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant, SystemTime};
 
 use lune_core::{
-    Catalog, FolderWatcher, Library, MissingTrack, Playlist, Queue, ScanMode, ScanProgress,
+    Catalog, FolderWatcher, Library, ListId, MissingTrack, Playlist, Queue, ScanMode, ScanProgress,
 };
 
 /// How long changes must settle before a watched folder is rescanned.
@@ -41,10 +41,17 @@ pub enum Job {
     ForgetAllMissing,
 }
 
+pub struct SavedPlaylists {
+    pub playlists: Vec<Playlist>,
+    /// No stored list has it, so a new playlist can.
+    pub unused_id: ListId,
+}
+
 pub enum Update {
     /// The library, saved queue, and playlists on startup; always the first
-    /// update.
-    Loaded(Catalog, Queue, Vec<Playlist>),
+    /// update. The playlists are `None` when they couldn't be read, so they
+    /// aren't saved over.
+    Loaded(Catalog, Queue, Option<SavedPlaylists>),
     /// The library changed on disk or in the folder list.
     Library(Catalog),
     /// The tracks whose files are missing; sent with every `Loaded` and `Library`.
@@ -173,7 +180,10 @@ impl Worker {
         let opened = Library::open(&self.db_path).and_then(|library| {
             let catalog = Catalog::new(library.track_list()?);
             let queue = library.load_queue()?;
-            let playlists = library.playlists()?;
+            let playlists = SavedPlaylists {
+                playlists: library.playlists()?,
+                unused_id: library.unused_list_id()?,
+            };
             Ok((library, catalog, queue, playlists))
         });
         match opened {
@@ -181,11 +191,11 @@ impl Worker {
                 tracing::info!(
                     tracks = catalog.len(),
                     queued = queue.len(),
-                    playlists = playlists.len(),
+                    playlists = playlists.playlists.len(),
                     "library loaded"
                 );
                 self.library = Some(library);
-                (self.notify)(Update::Loaded(catalog, queue, playlists));
+                (self.notify)(Update::Loaded(catalog, queue, Some(playlists)));
                 self.publish_missing();
             }
             Err(err) => {
@@ -193,7 +203,7 @@ impl Worker {
                 (self.notify)(Update::Loaded(
                     Catalog::new(Vec::new()),
                     Queue::default(),
-                    Vec::new(),
+                    None,
                 ));
             }
         }

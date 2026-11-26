@@ -456,9 +456,7 @@ impl qobject::FilterModel {
         };
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
         let flat = view.flat;
-        let reorderable = matches!(self.state.source, Source::Playlist { id: Some(_) })
-            && self.state.sort.is_none()
-            && matches!(self.search, TrackFilter::All);
+        let reorderable = reorderable(&self.state, &self.search);
         session::set_view(view, reset);
         set!(self, flat, flat_changed, flat);
         set!(self, reorderable, reorderable_changed, reorderable);
@@ -494,3 +492,15 @@ fn all(grouping: Grouping) -> Filter {
         tracks: 0,
     }
 }
+
+/// Whether the main pane's tracks can be moved: a playlist in its own order,
+/// with nothing hidden by a search.
+fn reorderable(state: &BrowseState, search: &TrackFilter) -> bool {
+    matches!(state.source, Source::Playlist { id: Some(_) })
+        && state.sort.is_none()
+        && matches!(search, TrackFilter::All)
+}
+
+#[cfg(test)]
+#[path = "tests/filter_model_test.rs"]
+mod tests;

@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use rusqlite::Connection;
 
 use crate::art;
-use crate::lists::{self, Playlist};
+use crate::lists::{self, ListId, Playlist};
 use crate::query::{self, AlbumRow, LibraryStats, ListTrack, MissingTrack};
 use crate::queue::{self, Queue};
 use crate::scan::{self, ScanMode, ScanProgress, ScanReport};
@@ -122,12 +122,19 @@ impl Library {
         lists::load_playlists(&self.conn)
     }
 
+    /// An id that no stored list has, for a new playlist.
+    pub fn unused_list_id(&self) -> Result<ListId> {
+        lists::unused_id(&self.conn)
+    }
+
     /// Makes the stored playlists match `playlists`: adds new ones, renames
-    /// and refills the others, and deletes the rest. An id that belongs to
-    /// another kind of list, such as the queue, is skipped.
-    pub fn save_playlists(&mut self, playlists: &[Playlist]) -> Result<()> {
+    /// and refills changed ones, and deletes the rest. `saved` is what was
+    /// stored before, so unchanged playlists aren't rewritten. An id that
+    /// belongs to another kind of list, such as the queue, is skipped and
+    /// logged.
+    pub fn save_playlists(&mut self, saved: &[Playlist], playlists: &[Playlist]) -> Result<()> {
         let tx = self.conn.transaction()?;
-        lists::save_playlists(&tx, playlists)?;
+        lists::save_playlists(&tx, saved, playlists)?;
         tx.commit()?;
         Ok(())
     }

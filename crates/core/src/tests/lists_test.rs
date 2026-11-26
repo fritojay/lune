@@ -104,10 +104,12 @@ proptest! {
     ) {
         let mut conn = db::open_in_memory().unwrap();
         save(&mut conn, ListId::QUEUE, &queued);
+        let mut saved = Vec::new();
         for snapshot in &snapshots {
             let tx = conn.transaction().unwrap();
-            save_playlists(&tx, snapshot).unwrap();
+            save_playlists(&tx, &saved, snapshot).unwrap();
             tx.commit().unwrap();
+            saved = snapshot.clone();
 
             let mut loaded = load_playlists(&conn).unwrap();
             loaded.sort_by_key(|p| p.id.0);
@@ -134,10 +136,33 @@ proptest! {
     }
 
     #[test]
-    fn a_new_id_is_neither_a_playlists_nor_the_queues(playlists in arb_playlists()) {
-        let id = Playlist::new_id(&playlists);
+    fn saving_what_is_already_saved_writes_nothing(playlists in arb_playlists()) {
+        let mut conn = db::open_in_memory().unwrap();
+        let tx = conn.transaction().unwrap();
+        save_playlists(&tx, &[], &playlists).unwrap();
+        tx.commit().unwrap();
+        let before = conn.total_changes();
+        let tx = conn.transaction().unwrap();
+        save_playlists(&tx, &playlists, &playlists).unwrap();
+        tx.commit().unwrap();
+        prop_assert_eq!(conn.total_changes(), before);
+    }
+
+    #[test]
+    fn an_unused_id_belongs_to_no_stored_list_of_any_kind(
+        lists in prop::collection::btree_map(2..50i64, "[a-z_]{1,8}", 0..6),
+    ) {
+        let conn = db::open_in_memory().unwrap();
+        for (id, kind) in &lists {
+            conn.execute(
+                "INSERT INTO lists (id, kind, created_ns) VALUES (:id, :kind, 0)",
+                named_params! { ":id": id, ":kind": kind },
+            )
+            .unwrap();
+        }
+        let id = unused_id(&conn).unwrap();
         prop_assert_ne!(id, ListId::QUEUE);
-        prop_assert!(playlists.iter().all(|p| p.id != id));
+        prop_assert!(lists.keys().all(|&stored| ListId(stored) != id));
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub mod qobject {
         type QString = cxx_qt_lib::QString;
         include!("cxx-qt-lib/qlist.h");
         type QList_i32 = cxx_qt_lib::QList<i32>;
+        type QList_i64 = cxx_qt_lib::QList<i64>;
     }
 
     extern "RustQt" {
@@ -39,6 +40,8 @@ pub mod qobject {
         #[qml_element]
         #[base = QAbstractListModel]
         #[qproperty(i32, count, READ, NOTIFY)]
+        /// Playlists can be made and changed: they have loaded.
+        #[qproperty(bool, loaded, READ, NOTIFY)]
         /// The shown playlist's row, or -1.
         #[qproperty(i32, current_row, cxx_name = "currentRow", READ, NOTIFY)]
         type PlaylistsModel = super::PlaylistsModelRust;
@@ -63,9 +66,11 @@ pub mod qobject {
         #[cxx_name = "playlistChosen"]
         fn playlist_chosen(self: Pin<&mut PlaylistsModel>, id: QString);
 
-        /// Makes an empty playlist and returns its id, or "" for a blank name.
+        /// Makes a playlist of `track_ids` and returns its id, or "" for a
+        /// blank name or before the playlists have loaded.
         #[qinvokable]
-        fn create(self: Pin<&mut PlaylistsModel>, name: &QString) -> QString;
+        fn create(self: Pin<&mut PlaylistsModel>, name: &QString, track_ids: &QList_i64)
+        -> QString;
 
         #[qinvokable]
         fn rename(self: Pin<&mut PlaylistsModel>, id: &QString, name: &QString);
@@ -120,6 +125,7 @@ pub mod qobject {
 /// `label`, `detail`, `count` and `all` are the filter pane's roles.
 const ROLES: &[Role<Playlist>] = &[
     ("playlistId", |p| text(&p.id.to_string())),
+    ("menuText", |p| text(&menu_text(&p.name))),
     ("label", |p| text(&p.name)),
     ("detail", |_| text("")),
     ("count", |p| {
@@ -131,6 +137,7 @@ const ROLES: &[Role<Playlist>] = &[
 #[derive(Default)]
 pub struct PlaylistsModelRust {
     count: i32,
+    loaded: bool,
     current_row: i32,
     /// By name.
     playlists: Vec<Playlist>,
@@ -158,6 +165,7 @@ impl qobject::PlaylistsModel {
         self.as_mut().rust_mut().playlists = playlists;
         self.as_mut().end_reset_model();
         set!(self, count, count_changed, count);
+        set!(self, loaded, loaded_changed, session::playlists_loaded());
         self.show_current();
     }
 
@@ -196,20 +204,9 @@ impl qobject::PlaylistsModel {
         QString::from(name.unwrap_or_default())
     }
 
-    fn create(self: Pin<&mut Self>, name: &QString) -> QString {
-        let Some(name) = playlist_name(name) else {
-            return QString::default();
-        };
-        let mut created = None;
-        session::edit_playlists(|playlists| {
-            let id = Playlist::new_id(playlists);
-            playlists.push(Playlist {
-                id,
-                name,
-                track_ids: Vec::new(),
-            });
-            created = Some(id);
-        });
+    fn create(self: Pin<&mut Self>, name: &QString, track_ids: &QList<i64>) -> QString {
+        let created = playlist_name(name)
+            .and_then(|name| session::create_playlist(name, track_ids.iter().copied().collect()));
         created
             .map(|id| QString::from(&id.to_string()))
             .unwrap_or_default()
@@ -234,20 +231,12 @@ impl qobject::PlaylistsModel {
     }
 
     fn remove_tracks(self: Pin<&mut Self>, rows: &QList<i32>) {
-        edit_shown(|playlist, positions| {
-            let remove: Vec<usize> = picked(positions, rows).collect();
-            playlist.remove(&remove);
-        });
+        edit_shown(|playlist, positions| remove_rows(playlist, positions, rows.iter().copied()));
     }
 
     fn move_tracks(self: Pin<&mut Self>, rows: &QList<i32>, to: i32) {
         edit_shown(|playlist, positions| {
-            let moving: Vec<usize> = picked(positions, rows).collect();
-            let to = usize::try_from(to)
-                .ok()
-                .and_then(|row| positions.get(row).copied().flatten())
-                .unwrap_or(playlist.track_ids.len());
-            playlist.move_to(&moving, to);
+            move_rows(playlist, positions, rows.iter().copied(), to);
         });
     }
 
@@ -285,14 +274,44 @@ fn edit_shown(edit: impl FnOnce(&mut Playlist, &[Option<usize>])) {
     });
 }
 
-/// The positions shown at `rows`.
-fn picked<'a>(
-    positions: &'a [Option<usize>],
-    rows: &'a QList<i32>,
-) -> impl Iterator<Item = usize> + 'a {
-    rows.iter()
-        .filter_map(|&row| usize::try_from(row).ok())
+/// Removes the tracks a view of `playlist` shows at `rows`, given each of
+/// its rows' position (`Catalog::playlist_positions`).
+fn remove_rows(
+    playlist: &mut Playlist,
+    positions: &[Option<usize>],
+    rows: impl IntoIterator<Item = i32>,
+) {
+    playlist.remove(&picked(positions, rows));
+}
+
+/// Moves the tracks a view of `playlist` shows at `rows` to before its row
+/// `to`, or to the end when `to` is past the last.
+fn move_rows(
+    playlist: &mut Playlist,
+    positions: &[Option<usize>],
+    rows: impl IntoIterator<Item = i32>,
+    to: i32,
+) {
+    let moving = picked(positions, rows);
+    let to = usize::try_from(to)
+        .ok()
+        .and_then(|row| positions.get(row).copied().flatten())
+        .unwrap_or(playlist.track_ids.len());
+    playlist.move_to(&moving, to);
+}
+
+fn picked(positions: &[Option<usize>], rows: impl IntoIterator<Item = i32>) -> Vec<usize> {
+    rows.into_iter()
+        .filter_map(|row| usize::try_from(row).ok())
         .filter_map(|row| positions.get(row).copied().flatten())
+        .collect()
+}
+
+/// `name` as a menu item shows it: as written, so `&` isn't a mnemonic
+/// and markup isn't styled. A word joiner after `<` keeps it from opening
+/// a tag, and shows nothing.
+fn menu_text(name: &str) -> String {
+    name.replace('&', "&&").replace('<', "<\u{2060}")
 }
 
 fn list_id(id: &QString) -> Option<ListId> {

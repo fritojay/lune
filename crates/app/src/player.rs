@@ -31,6 +31,7 @@ pub mod qobject {
         type QUrl = cxx_qt_lib::QUrl;
         include!("cxx-qt-lib/qlist.h");
         type QList_i32 = cxx_qt_lib::QList<i32>;
+        type QList_i64 = cxx_qt_lib::QList<i64>;
     }
 
     extern "RustQt" {
@@ -80,6 +81,11 @@ pub mod qobject {
             rows: &QList_i32,
             playlist: &QString,
         );
+
+        /// The rows' track ids, in list order.
+        #[qinvokable]
+        #[cxx_name = "trackIds"]
+        fn track_ids(self: &PlayerController, source: &QString, rows: &QList_i32) -> QList_i64;
 
         /// The track at `row`, or -1 when it isn't in the library.
         #[qinvokable]
@@ -384,6 +390,17 @@ impl qobject::PlayerController {
                 }
             });
         }
+    }
+
+    fn track_ids(&self, source: &QString, rows: &QList<i32>) -> QList<i64> {
+        let mut ids = QList::<i64>::default();
+        for track in selection(source, rows)
+            .and_then(|s| selected_tracks(&s))
+            .unwrap_or_default()
+        {
+            ids.append(track.id);
+        }
+        ids
     }
 
     fn track_id(&self, source: &QString, row: i32) -> i64 {
