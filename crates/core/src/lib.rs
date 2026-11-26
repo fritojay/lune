@@ -30,8 +30,8 @@ pub use error::{CoreError, Result};
 pub use library::Library;
 pub use lists::{ListId, Playlist};
 pub use paths::{
-    default_config_path, default_db_path, default_log_path, default_thumbnail_dir,
-    window_state_path,
+    LibraryLock, default_config_path, default_db_path, default_log_path, default_thumbnail_dir,
+    lock_library, window_state_path,
 };
 pub use query::{AlbumRow, LibraryStats, ListTrack, MissingTrack};
 pub use queue::{Queue, QueueItem, SlotId, TrackRef};

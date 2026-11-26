@@ -86,9 +86,52 @@ pub fn default_log_path() -> Result<PathBuf> {
 /// albums and artists. The DB's name plus a suffix, like SQLite's own
 /// `-wal` file, so it can never be the DB itself.
 pub fn window_state_path(db_path: &Path) -> PathBuf {
+    beside_db(db_path, ".window.toml")
+}
+
+fn beside_db(db_path: &Path, suffix: &str) -> PathBuf {
     let mut path = db_path.as_os_str().to_owned();
-    path.push(".window.toml");
+    path.push(suffix);
     PathBuf::from(path)
+}
+
+/// Held while this process uses the library; dropped, it lets another in.
+/// Two apps on one library would each save their own playlists and queue
+/// over the other's. The OS releases it when the process ends, even in a
+/// crash. Not SQLite's own locking, which would also shut out this
+/// process's other connections.
+#[derive(Debug)]
+pub struct LibraryLock {
+    _file: std::fs::File,
+}
+
+/// Fails with [`CoreError::LibraryInUse`] while another holder has it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "creates the app's own lock file beside its DB, never a music file"
+)]
+pub fn lock_library(db_path: &Path) -> Result<LibraryLock> {
+    let path = beside_db(db_path, ".lock");
+    let io_err = |source| CoreError::Io {
+        path: path.clone(),
+        source,
+    };
+    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(io_err)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(io_err)?;
+    match file.try_lock() {
+        Ok(()) => Ok(LibraryLock { _file: file }),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            Err(CoreError::LibraryInUse(db_path.to_path_buf()))
+        }
+        Err(std::fs::TryLockError::Error(source)) => Err(io_err(source)),
+    }
 }
 
 pub fn default_config_path() -> Result<PathBuf> {

@@ -56,6 +56,9 @@ pub enum CoreError {
     #[error("the library already has {0} tracks; synthetic data needs an empty library")]
     NotEmpty(u64),
 
+    #[error("another Lune is already using the library at {0}")]
+    LibraryInUse(PathBuf),
+
     #[error("could not determine the user's home directory")]
     NoHomeDir,
 }

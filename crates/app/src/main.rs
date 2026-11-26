@@ -36,8 +36,9 @@ use anyhow::bail;
 use clap::Parser;
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 
-/// Location of `qml/main.qml` inside the QML module compiled by `build.rs`.
+/// Locations inside the QML module compiled by `build.rs`.
 const MAIN_QML: &str = "qrc:/qt/qml/com/lune/player/qml/main.qml";
+const ALREADY_RUNNING_QML: &str = "qrc:/qt/qml/com/lune/player/qml/AlreadyRunning.qml";
 
 pub struct Config {
     pub db_path: PathBuf,
@@ -121,6 +122,20 @@ fn run(started: Instant) -> anyhow::Result<()> {
         bail!("configuration was read before it was set");
     }
 
+    let (_lock, in_use) = match lune_core::lock_library(&config().db_path) {
+        Ok(lock) => (Some(lock), false),
+        Err(err @ lune_core::CoreError::LibraryInUse(_)) => {
+            tracing::warn!("{err}");
+            (None, true)
+        }
+        // Run anyway: opening the library reports what is wrong with its
+        // folder, in the window.
+        Err(err) => {
+            tracing::warn!(%err, "running without the library lock");
+            (None, false)
+        }
+    };
+
     let mut app = QGuiApplication::new();
     let Some(app_ref) = app.as_mut() else {
         anyhow::bail!("failed to create the Qt application");
@@ -147,7 +162,11 @@ fn run(started: Instant) -> anyhow::Result<()> {
             std::process::exit(1);
         })
         .release();
-    engine_ref.load(&QUrl::from(MAIN_QML));
+    engine_ref.load(&QUrl::from(if in_use {
+        ALREADY_RUNNING_QML
+    } else {
+        MAIN_QML
+    }));
 
     let Some(app_ref) = app.as_mut() else {
         anyhow::bail!("failed to create the Qt application");
@@ -157,7 +176,9 @@ fn run(started: Instant) -> anyhow::Result<()> {
     if session::catalog().is_some() {
         session::save(session::Save::Cursor);
     }
-    session::finish_saving();
+    if !in_use {
+        session::finish_saving();
+    }
     if code != 0 {
         anyhow::bail!("Qt event loop exited with code {code}");
     }

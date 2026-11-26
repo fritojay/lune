@@ -18,10 +18,32 @@ fn the_window_state_sits_beside_the_db() {
 }
 
 #[test]
-fn the_window_state_is_never_the_db_itself() {
-    for db in ["library", "/", "", "data/..", "library.window.toml"] {
-        assert_ne!(window_state_path(Path::new(db)), Path::new(db), "{db:?}");
+fn the_window_state_and_lock_are_never_the_db_itself() {
+    for db in [
+        "library",
+        "/",
+        "",
+        "data/..",
+        "library.window.toml",
+        "library.lock",
+    ] {
+        for suffix in [".window.toml", ".lock"] {
+            assert_ne!(beside_db(Path::new(db), suffix), Path::new(db), "{db:?}");
+        }
     }
+}
+
+#[test]
+fn a_library_is_locked_until_its_holder_lets_go() {
+    let dir = TempDir::new();
+    let db = dir.path().join("new folder").join("library.sqlite3");
+    let held = lock_library(&db).unwrap();
+    assert!(matches!(lock_library(&db), Err(CoreError::LibraryInUse(path)) if path == db));
+    let other = dir.path().join("other.sqlite3");
+    let _other = lock_library(&other).unwrap();
+    drop(held);
+    let _again = lock_library(&db).unwrap();
+    assert!(!db.exists(), "the lock never creates the DB");
 }
 
 #[test]
