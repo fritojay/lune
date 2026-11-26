@@ -49,17 +49,15 @@ fn a_new_current_source_changes_only_the_old_and_new_rows() {
 }
 
 #[test]
-fn grouping_bar_qml_has_a_title_for_every_tab_once() {
-    let mut names: Vec<&str> = include_str!("../../qml/GroupingBar.qml")
-        .lines()
-        .filter_map(|line| line.trim().split_once("\": qsTr("))
-        .map(|(name, _)| name.trim_start_matches('"'))
-        .collect();
-    names.sort_unstable();
-    let mut expected: Vec<&str> = sources(Shown::default())
+fn every_tab_has_a_title_of_its_own() {
+    let titles: Vec<&str> = sources(Shown::default())
         .iter()
-        .map(|s| s.tab.id())
+        .map(|s| s.tab.title())
         .collect();
-    expected.sort_unstable();
-    assert_eq!(names, expected);
+    for (i, title) in titles.iter().enumerate() {
+        assert!(
+            !title.is_empty() && !titles[..i].contains(title),
+            "{title:?}"
+        );
+    }
 }

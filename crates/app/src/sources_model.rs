@@ -77,6 +77,22 @@ impl Tab {
         }
     }
 
+    fn title(self) -> &'static str {
+        match self {
+            Self::Grouping(grouping) => match grouping {
+                Grouping::AlbumArtist => "Album Artists",
+                Grouping::Artist => "Artists",
+                Grouping::Album => "Albums",
+                Grouping::Year => "Years",
+                Grouping::Genre => "Genres",
+                Grouping::FileType => "File Types",
+                Grouping::RecentlyAdded => "Recently Added",
+                Grouping::RecentlyPlayed => "Recently Played",
+            },
+            Self::Playlists => "Playlists",
+        }
+    }
+
     fn id(self) -> &'static str {
         match self {
             Self::Grouping(grouping) => grouping.name(),
@@ -102,9 +118,9 @@ struct Source {
 }
 
 /// `kind` and `sourceId` are what QML passes back when a source is chosen.
-/// `sourceId` is a grouping's `Grouping::name` or "playlists", which also
-/// keys its title in GroupingBar.qml.
+/// `sourceId` is a grouping's `Grouping::name` or "playlists".
 const ROLES: &[Role<Source>] = &[
+    ("title", |s| text(s.tab.title())),
     ("kind", |s| text(kind(s.tab.source()))),
     ("sourceId", |s| text(s.tab.id())),
     ("current", |s| QVariant::from(&s.current)),

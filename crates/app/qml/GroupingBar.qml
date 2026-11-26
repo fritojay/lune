@@ -9,19 +9,6 @@ RowLayout {
     // `kind` and `sourceId` as SourcesModel lists them.
     signal sourceChosen(string kind, string sourceId)
 
-    // By SourcesModel's `sourceId`. A test in sources_model_test.rs checks it against Rust.
-    readonly property var titles: ({
-        "album_artist": qsTr("Album Artists"),
-        "artist": qsTr("Artists"),
-        "album": qsTr("Albums"),
-        "year": qsTr("Years"),
-        "genre": qsTr("Genres"),
-        "file_type": qsTr("File Types"),
-        "recently_added": qsTr("Recently Added"),
-        "recently_played": qsTr("Recently Played"),
-        "playlists": qsTr("Playlists"),
-    })
-
     spacing: 2
 
     Repeater {
@@ -35,11 +22,12 @@ RowLayout {
             required property string kind
             required property string sourceId
             required property bool current
+            required property string title
             implicitHeight: 34
             leftPadding: 12
             rightPadding: 12
             hoverEnabled: true
-            text: groupingBar.titles[sourceId]
+            text: tab.title
             font.bold: current
             // Checkable, so assistive tech announces the chosen tab.
             checkable: true
