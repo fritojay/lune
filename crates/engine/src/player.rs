@@ -24,8 +24,9 @@ const DISCARD_CAPACITY: usize = 64;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerConfig {
     pub output: OutputKind,
-    /// Audio buffered ahead of the device. Larger survives more CPU stalls;
-    /// it does not delay pause, seek, or skip (stale audio is discarded).
+    /// Audio buffered ahead of the device. Larger survives longer stalls,
+    /// such as a sleeping disk waking to open the next track; it does not
+    /// delay pause, seek, or skip (stale audio is discarded).
     pub buffer: Duration,
 }
 
@@ -33,7 +34,7 @@ impl Default for PlayerConfig {
     fn default() -> Self {
         Self {
             output: OutputKind::Device { preferred: None },
-            buffer: Duration::from_millis(1500),
+            buffer: Duration::from_secs(5),
         }
     }
 }
