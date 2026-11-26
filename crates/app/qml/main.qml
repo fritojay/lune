@@ -291,16 +291,27 @@ ApplicationWindow {
             onDismissed: Preferences.clearError()
         }
 
-        // Quick filters: picks which grouping the filter pane lists.
-        GroupingBar {
+        // Quick filters: picks which grouping the filter pane lists. Scrolls
+        // sideways when the window is too narrow for every tab.
+        Flickable {
             Layout.fillWidth: true
             Layout.leftMargin: 6
             Layout.topMargin: 4
-            onSourceChosen: (kind, sourceId) => {
-                if (kind === "grouping")
-                    filters.setGrouping(sourceId)
-                else if (kind === "playlists")
-                    filters.showPlaylists()
+            implicitHeight: groupingBar.implicitHeight
+            contentWidth: groupingBar.implicitWidth
+            clip: true
+            interactive: contentWidth > width
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+
+            GroupingBar {
+                id: groupingBar
+                onSourceChosen: (kind, sourceId) => {
+                    if (kind === "grouping")
+                        filters.setGrouping(sourceId)
+                    else if (kind === "playlists")
+                        filters.showPlaylists()
+                }
             }
         }
 
