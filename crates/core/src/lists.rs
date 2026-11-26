@@ -1,14 +1,15 @@
 //! Ordered lists of track ids, stored by list id. The same track can appear
 //! more than once. Items aren't tied to `tracks`, so rescans never change them.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use rusqlite::{Connection, OptionalExtension, Transaction, named_params};
+use rusqlite::{Connection, Transaction, named_params};
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
+use crate::{Result, normalize};
 
 /// Shown and parsed as its number, which is how QML names a playlist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -35,6 +36,35 @@ pub struct Playlist {
     pub name: String,
     /// In order, and kept when a track leaves the library.
     pub track_ids: Vec<i64>,
+}
+
+impl Playlist {
+    /// `playlists` ordered by name, ignoring case, then by id.
+    pub fn by_name(playlists: &[Self]) -> Vec<&Self> {
+        let mut sorted: Vec<(String, &Self)> = playlists
+            .iter()
+            .map(|p| (normalize::key(&p.name), p))
+            .collect();
+        sorted.sort_by(|(a, p), (b, q)| a.cmp(b).then(p.id.0.cmp(&q.id.0)));
+        sorted.into_iter().map(|(_, p)| p).collect()
+    }
+
+    /// An id that no list in `playlists` has, nor the queue.
+    pub fn new_id(playlists: &[Self]) -> ListId {
+        let largest = playlists
+            .iter()
+            .map(|p| p.id.0)
+            .fold(ListId::QUEUE.0, i64::max);
+        ListId(largest.saturating_add(1))
+    }
+
+    /// `id` while it is one of `playlists`, else the first of them by name.
+    pub fn existing_or_first(id: Option<ListId>, playlists: &[Self]) -> Option<ListId> {
+        match id {
+            Some(id) if playlists.iter().any(|p| p.id == id) => Some(id),
+            _ => Self::by_name(playlists).first().map(|p| p.id),
+        }
+    }
 }
 
 impl ListId {
@@ -95,35 +125,47 @@ pub(crate) fn save_items(tx: &Transaction, id: ListId, track_ids: &[i64]) -> Res
         "DELETE FROM list_items WHERE list_id = :list_id",
         named_params! { ":list_id": id.0 },
     )?;
-    insert_items(tx, id, 0, track_ids)
-}
-
-pub(crate) fn append_to_playlist(tx: &Transaction, id: ListId, track_ids: &[i64]) -> Result<()> {
-    let end: Option<i64> = tx
-        .query_row(
-            "SELECT (SELECT COALESCE(MAX(position) + 1, 0) FROM list_items WHERE list_id = l.id)
-             FROM lists l WHERE l.id = :list_id AND l.kind = 'playlist'",
-            named_params! { ":list_id": id.0 },
-            |row| row.get(0),
-        )
-        .optional()?;
-    match end {
-        Some(end) => insert_items(tx, id, end, track_ids),
-        None => Ok(()),
-    }
-}
-
-fn insert_items(tx: &Transaction, id: ListId, first: i64, track_ids: &[i64]) -> Result<()> {
     let mut insert = tx.prepare(
         "INSERT INTO list_items (list_id, position, track_id)
          VALUES (:list_id, :position, :track_id)",
     )?;
-    for (position, track_id) in (first..).zip(track_ids) {
+    for (position, track_id) in track_ids.iter().enumerate() {
         insert.execute(named_params! {
             ":list_id": id.0,
-            ":position": position,
+            ":position": position as i64,
             ":track_id": track_id,
         })?;
+    }
+    Ok(())
+}
+
+pub(crate) fn save_playlists(tx: &Transaction, playlists: &[Playlist]) -> Result<()> {
+    let kept: HashSet<ListId> = playlists.iter().map(|p| p.id).collect();
+    let stored: Vec<i64> = tx
+        .prepare("SELECT id FROM lists WHERE kind = 'playlist'")?
+        .query_map([], |row| row.get("id"))?
+        .collect::<rusqlite::Result<_>>()?;
+    for id in stored.into_iter().map(ListId) {
+        if !kept.contains(&id) {
+            tx.execute(
+                "DELETE FROM lists WHERE id = :id",
+                named_params! { ":id": id.0 },
+            )?;
+        }
+    }
+    let mut upsert = tx.prepare(
+        "INSERT INTO lists (id, kind, name, created_ns)
+         VALUES (:id, 'playlist', :name, CAST(unixepoch('subsec') * 1000 AS INTEGER) * 1000000)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name WHERE kind = 'playlist'",
+    )?;
+    for playlist in playlists {
+        let saved = upsert.execute(named_params! {
+            ":id": playlist.id.0,
+            ":name": playlist.name,
+        })?;
+        if saved > 0 {
+            save_items(tx, playlist.id, &playlist.track_ids)?;
+        }
     }
     Ok(())
 }

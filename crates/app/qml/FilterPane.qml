@@ -3,16 +3,20 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// The values of the chosen grouping.
+// The values of the chosen grouping, or another list with the same roles
+// (`label`, `detail`, `count`, `all`).
 ColumnLayout {
     id: filterPane
     required property var model
     required property int currentRow
+    // Shown under the search field.
+    property alias headerItems: header.data
     required property url cover
     required property bool hasTrack
     required property string album
     signal searchEdited(string text)
     signal rowChosen(int row)
+    signal rowMenuRequested(int row)
     signal albumRequested()
 
     function focusSearch() {
@@ -59,6 +63,14 @@ ColumnLayout {
         }
     }
 
+    ColumnLayout {
+        id: header
+        Layout.fillWidth: true
+        Layout.leftMargin: 6
+        Layout.rightMargin: 6
+        visible: visibleChildren.length > 0
+    }
+
     ListView {
         id: filterList
         Layout.fillWidth: true
@@ -84,6 +96,7 @@ ColumnLayout {
             required property string label
             required property string detail
             required property int count
+            required property bool all
             width: ListView.view.width
             height: detail ? 40 : 28
             color: ListView.isCurrentItem ? palette.highlight
@@ -103,7 +116,7 @@ ColumnLayout {
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
                         color: filterRow.textColor
-                        font.bold: filterRow.index === 0
+                        font.bold: filterRow.all
                     }
                     Text {
                         text: filterRow.count
@@ -128,7 +141,12 @@ ColumnLayout {
                 id: rowArea
                 anchors.fill: parent
                 hoverEnabled: true
-                onClicked: {
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: mouse => {
+                    if (mouse.button === Qt.RightButton) {
+                        filterPane.rowMenuRequested(filterRow.index)
+                        return
+                    }
                     filterPane.rowChosen(filterRow.index)
                     filterList.forceActiveFocus()
                 }

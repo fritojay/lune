@@ -92,7 +92,12 @@ impl Grouping {
 pub enum Source {
     Library(Grouping),
     /// Its filter pane lists only "All", and its album order is its own.
-    Playlist(ListId),
+    /// `None` while there is no playlist to show. A struct variant, as TOML
+    /// can't write a `None` tuple field.
+    Playlist {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<ListId>,
+    },
 }
 
 impl Default for Source {
@@ -106,7 +111,7 @@ impl Source {
     pub fn has_album_direction(self) -> bool {
         match self {
             Self::Library(grouping) => grouping.has_album_direction(),
-            Self::Playlist(_) => false,
+            Self::Playlist { .. } => false,
         }
     }
 }
@@ -879,7 +884,7 @@ impl Catalog {
     ) -> Browsed {
         let grouping = match state.source {
             Source::Library(grouping) => grouping,
-            Source::Playlist(_) => {
+            Source::Playlist { .. } => {
                 let state = BrowseState {
                     selected: FilterValue::All,
                     ..*state
@@ -931,8 +936,8 @@ impl Catalog {
                 let selected = TrackFilter::Field(grouping.field(), state.selected.clone());
                 self.view(grouping, &search.clone().and(selected))
             }
-            Source::Playlist(id) => {
-                let track_ids = playlists.iter().find(|p| p.id == id);
+            Source::Playlist { id } => {
+                let track_ids = playlists.iter().find(|p| Some(p.id) == id);
                 let track_ids = track_ids.map_or(&[][..], |p| &p.track_ids);
                 self.playlist_view(track_ids, search)
             }

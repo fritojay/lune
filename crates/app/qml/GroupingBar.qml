@@ -9,7 +9,7 @@ RowLayout {
     // `kind` and `sourceId` as SourcesModel lists them.
     signal sourceChosen(string kind, string sourceId)
 
-    // By Grouping::name. A test in sources_model_test.rs checks it against Rust.
+    // By SourcesModel's `sourceId`. A test in sources_model_test.rs checks it against Rust.
     readonly property var titles: ({
         "album_artist": qsTr("Album Artists"),
         "artist": qsTr("Artists"),
@@ -19,6 +19,7 @@ RowLayout {
         "file_type": qsTr("File Types"),
         "recently_added": qsTr("Recently Added"),
         "recently_played": qsTr("Recently Played"),
+        "playlists": qsTr("Playlists"),
     })
 
     spacing: 2

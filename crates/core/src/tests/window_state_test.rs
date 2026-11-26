@@ -223,9 +223,11 @@ fn an_unreadable_browse_value_falls_back_to_its_default_and_keeps_the_rest() {
         ),
         (
             "known-source.toml",
-            "source = { playlist = 3 }",
+            "source = { playlist = { id = 3 } }",
             BrowseState {
-                source: Source::Playlist("3".parse().unwrap()),
+                source: Source::Playlist {
+                    id: Some("3".parse().unwrap()),
+                },
                 ..saved.clone()
             },
         ),

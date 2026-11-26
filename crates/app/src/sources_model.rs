@@ -61,19 +61,52 @@ pub mod qobject {
     impl cxx_qt::Initialize for SourcesModel {}
 }
 
+/// One button of the grouping bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Grouping(Grouping),
+    Playlists,
+}
+
+impl Tab {
+    /// What choosing it shows. A playlist source picks which playlist.
+    fn source(self) -> Shown {
+        match self {
+            Self::Grouping(grouping) => Shown::Library(grouping),
+            Self::Playlists => Shown::Playlist { id: None },
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Grouping(grouping) => grouping.name(),
+            Self::Playlists => "playlists",
+        }
+    }
+}
+
+/// The kind of `source`, as QML names it: `FilterModel.sourceKind` and each
+/// row's `kind`.
+pub fn kind(source: Shown) -> &'static str {
+    match source {
+        Shown::Library(_) => "grouping",
+        Shown::Playlist { .. } => "playlists",
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Source {
-    grouping: Grouping,
+    tab: Tab,
     /// Whether the main pane shows it.
     current: bool,
 }
 
 /// `kind` and `sourceId` are what QML passes back when a source is chosen.
-/// `sourceId` is the grouping's `Grouping::name`, which also keys its title
-/// in GroupingBar.qml.
+/// `sourceId` is a grouping's `Grouping::name` or "playlists", which also
+/// keys its title in GroupingBar.qml.
 const ROLES: &[Role<Source>] = &[
-    ("kind", |_| text("grouping")),
-    ("sourceId", |s| text(s.grouping.name())),
+    ("kind", |s| text(kind(s.tab.source()))),
+    ("sourceId", |s| text(s.tab.id())),
     ("current", |s| QVariant::from(&s.current)),
 ];
 
@@ -82,11 +115,22 @@ const CURRENT_ROLE: i32 = list_model::role_id(ROLES, "current");
 fn sources(current: Shown) -> Vec<Source> {
     Grouping::ALL
         .into_iter()
-        .map(|grouping| Source {
-            grouping,
-            current: Shown::Library(grouping) == current,
+        .map(Tab::Grouping)
+        .chain([Tab::Playlists])
+        .map(|tab| Source {
+            tab,
+            current: shows(tab.source(), current),
         })
         .collect()
+}
+
+/// Whether `current` belongs to the tab that shows `tab`: every playlist
+/// belongs to the Playlists tab.
+fn shows(tab: Shown, current: Shown) -> bool {
+    match (tab, current) {
+        (Shown::Playlist { .. }, Shown::Playlist { .. }) => true,
+        _ => tab == current,
+    }
 }
 
 /// The rows whose `current` differs between `old` and `new`.
@@ -132,8 +176,8 @@ impl qobject::SourcesModel {
         let Some(source) = usize::try_from(row).ok().and_then(|r| self.sources.get(r)) else {
             return;
         };
-        let grouping = source.grouping;
-        self.show(Shown::Library(grouping));
+        let shown = source.tab.source();
+        self.show(shown);
     }
 
     fn show(mut self: Pin<&mut Self>, current: Shown) {

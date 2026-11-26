@@ -27,6 +27,9 @@ ColumnLayout {
     required property var columnWidths
     required property bool albumGrid
     required property PlayerController controller
+    // Shown in place of an empty track list.
+    required property string emptyHint
+    readonly property bool hinted: !loading && trackCount === 0 && emptyHint !== ""
     // The tracks' cells: under the headings in the list, inside the open
     // album's panel in the grid.
     readonly property real rowWidth: grid ? albumRows.panelWidth - tracksLeft - tracksRight
@@ -237,6 +240,18 @@ ColumnLayout {
         }
     }
 
+    Label {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        visible: trackPane.hinted
+        padding: 16
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
+        wrapMode: Text.Wrap
+        opacity: 0.6
+        text: trackPane.emptyHint
+    }
+
     Item {
         id: headings
         Layout.fillWidth: true
@@ -284,7 +299,7 @@ ColumnLayout {
         id: albumList
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: !trackPane.grid && (trackPane.albumCount > 0 || trackPane.hasFolders)
+        visible: !trackPane.grid && !trackPane.hinted && (trackPane.albumCount > 0 || trackPane.hasFolders)
         model: trackPane.model
         clip: true
         reuseItems: true
@@ -331,7 +346,7 @@ ColumnLayout {
         property int selectedIndex: -1
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: trackPane.grid && (trackPane.albumCount > 0 || trackPane.hasFolders)
+        visible: trackPane.grid && !trackPane.hinted && (trackPane.albumCount > 0 || trackPane.hasFolders)
         model: trackPane.gridModel
         clip: true
         boundsBehavior: Flickable.StopAtBounds

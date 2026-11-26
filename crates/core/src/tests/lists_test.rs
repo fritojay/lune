@@ -77,40 +77,80 @@ proptest! {
     }
 }
 
+/// Ids 1 to 6, so some snapshots claim the queue's id.
+fn arb_playlists() -> impl Strategy<Value = Vec<Playlist>> {
+    prop::collection::btree_map(
+        1..7i64,
+        ("[a-zA-Z ]{0,5}", prop::collection::vec(0..8i64, 0..5)),
+        0..5,
+    )
+    .prop_map(|playlists| {
+        playlists
+            .into_iter()
+            .map(|(id, (name, track_ids))| Playlist {
+                id: ListId(id),
+                name,
+                track_ids,
+            })
+            .collect()
+    })
+}
+
 proptest! {
     #[test]
-    fn appending_adds_to_the_end_of_a_playlist_and_never_changes_the_queue_or_other_lists(
-        appends in prop::collection::vec(
-            (0..4i64, prop::collection::vec(0..8i64, 0..5)),
-            0..8,
-        ),
+    fn saved_playlists_load_as_the_last_snapshot_and_the_queue_is_never_touched(
+        snapshots in prop::collection::vec(arb_playlists(), 1..5),
         queued in prop::collection::vec(0..8i64, 0..5),
     ) {
-        // Lists 2 and 3 are playlists; 1 is the queue and 0 doesn't exist.
         let mut conn = db::open_in_memory().unwrap();
         save(&mut conn, ListId::QUEUE, &queued);
-        for id in [2, 3] {
-            conn.execute(
-                "INSERT INTO lists (id, kind, created_ns) VALUES (:id, 'playlist', :id)",
-                named_params! { ":id": id },
-            )
-            .unwrap();
-        }
-        let mut expected = [Vec::new(), Vec::new()];
-        for (id, track_ids) in &appends {
+        for snapshot in &snapshots {
             let tx = conn.transaction().unwrap();
-            append_to_playlist(&tx, ListId(*id), track_ids).unwrap();
+            save_playlists(&tx, snapshot).unwrap();
             tx.commit().unwrap();
-            if let Some(playlist) = id.checked_sub(2).and_then(|i| expected.get_mut(i as usize)) {
-                playlist.extend(track_ids);
-            }
+
+            let mut loaded = load_playlists(&conn).unwrap();
+            loaded.sort_by_key(|p| p.id.0);
+            let expected: Vec<&Playlist> =
+                snapshot.iter().filter(|p| p.id != ListId::QUEUE).collect();
+            prop_assert_eq!(loaded.iter().collect::<Vec<_>>(), expected);
+            let queue: Vec<i64> =
+                load_items(&conn, ListId::QUEUE).unwrap().into_iter().map(|(id, _)| id).collect();
+            prop_assert_eq!(&queue, &queued);
         }
-        let loaded: Vec<Vec<i64>> =
-            load_playlists(&conn).unwrap().into_iter().map(|p| p.track_ids).collect();
-        prop_assert_eq!(loaded, expected);
-        let queue: Vec<i64> =
-            load_items(&conn, ListId::QUEUE).unwrap().into_iter().map(|(id, _)| id).collect();
-        prop_assert_eq!(queue, queued);
+    }
+
+    #[test]
+    fn by_name_is_every_playlist_ordered_by_name_ignoring_case_then_id(
+        playlists in arb_playlists(),
+    ) {
+        let sorted = Playlist::by_name(&playlists);
+        let mut ids: Vec<i64> = sorted.iter().map(|p| p.id.0).collect();
+        let keys: Vec<(String, i64)> =
+            sorted.iter().map(|p| (crate::normalize::key(&p.name), p.id.0)).collect();
+        prop_assert!(keys.is_sorted());
+        ids.sort_unstable();
+        prop_assert_eq!(ids, playlists.iter().map(|p| p.id.0).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_new_id_is_neither_a_playlists_nor_the_queues(playlists in arb_playlists()) {
+        let id = Playlist::new_id(&playlists);
+        prop_assert_ne!(id, ListId::QUEUE);
+        prop_assert!(playlists.iter().all(|p| p.id != id));
+    }
+
+    #[test]
+    fn a_shown_playlist_stays_while_it_exists_and_else_is_the_first_by_name(
+        playlists in arb_playlists(),
+        id in prop::option::of(1..9i64),
+    ) {
+        let id = id.map(ListId);
+        let expected = match id {
+            Some(id) if playlists.iter().any(|p| p.id == id) => Some(id),
+            _ => Playlist::by_name(&playlists).first().map(|p| p.id),
+        };
+        prop_assert_eq!(Playlist::existing_or_first(id, &playlists), expected);
     }
 }
 

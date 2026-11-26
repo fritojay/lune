@@ -14,7 +14,7 @@ use std::time::SystemTime;
 
 use cxx_qt::{CxxQtThread, Threading};
 use lune_core::{
-    BrowseState, Catalog, Library, ListId, MissingTrack, Playlist, Queue, QueueItem, SlotId, View,
+    BrowseState, Catalog, Library, MissingTrack, Playlist, Queue, QueueItem, SlotId, View,
     WindowState,
 };
 use lune_engine::{EntryId, PlayQueue, QueueEntry};
@@ -82,19 +82,13 @@ pub fn set_playlists(playlists: Vec<Playlist>) {
     notify(Change::Playlists);
 }
 
-/// Appends `track_ids` to playlist `id`: it shows now, and the DB is updated
-/// in the background.
-pub fn add_to_playlist(id: ListId, track_ids: Vec<i64>) {
-    let added = UI.with_borrow_mut(|ui| {
-        let playlists = Rc::make_mut(&mut ui.playlists);
-        let playlist = playlists.iter_mut().find(|p| p.id == id)?;
-        playlist.track_ids.extend(&track_ids);
-        Some(())
-    });
-    if added.is_some() {
-        save(Save::AddToPlaylist(id, track_ids));
-        notify(Change::Playlists);
-    }
+/// Changes the playlists: the change shows now, and the DB is updated in
+/// the background.
+pub fn edit_playlists(edit: impl FnOnce(&mut Vec<Playlist>)) {
+    let mut playlists = Vec::clone(&playlists());
+    edit(&mut playlists);
+    save(Save::Playlists(playlists.clone()));
+    set_playlists(playlists);
 }
 
 /// The main pane's track list: what a double-click puts in the queue.
@@ -214,7 +208,8 @@ pub enum Save {
     Cursor,
     /// Playback of a track (by id) started.
     Play(i64, SystemTime),
-    AddToPlaylist(ListId, Vec<i64>),
+    /// All of them, as they are now.
+    Playlists(Vec<Playlist>),
 }
 
 struct Saver {
@@ -240,20 +235,20 @@ fn saver() -> &'static Mutex<Option<Saver>> {
                 while let Ok(first) = rx.recv() {
                     let batch: Vec<Save> = std::iter::once(first).chain(rx.try_iter()).collect();
                     for save in &batch {
-                        let (result, failed) = match save {
-                            Save::Play(track_id, at) => (
-                                library.record_play(*track_id, *at),
-                                "could not record a play",
-                            ),
-                            Save::AddToPlaylist(id, track_ids) => (
-                                library.add_to_playlist(*id, track_ids),
-                                "could not add to a playlist",
-                            ),
-                            Save::Queue | Save::Cursor => continue,
-                        };
-                        if let Err(err) = result {
-                            tracing::error!(%err, "{failed}");
+                        if let Save::Play(track_id, at) = *save
+                            && let Err(err) = library.record_play(track_id, at)
+                        {
+                            tracing::error!(%err, "could not record a play");
                         }
+                    }
+                    let playlists = batch.iter().rev().find_map(|save| match save {
+                        Save::Playlists(playlists) => Some(playlists),
+                        _ => None,
+                    });
+                    if let Some(playlists) = playlists
+                        && let Err(err) = library.save_playlists(playlists)
+                    {
+                        tracing::error!(%err, "could not save the playlists");
                     }
                     let result = if batch.contains(&Save::Queue) {
                         // Saving 100k rows takes a while; don't hold the
@@ -278,8 +273,8 @@ fn saver() -> &'static Mutex<Option<Saver>> {
     })
 }
 
-/// Saves the queue, a play, or a playlist addition on a background thread;
-/// bursts of queue saves are coalesced into one.
+/// Saves the queue, a play, or the playlists on a background thread; bursts
+/// of queue or playlist saves are coalesced into one.
 pub fn save(what: Save) {
     let saver = saver().lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(saver) = saver.as_ref() {

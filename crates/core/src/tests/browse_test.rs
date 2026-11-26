@@ -1138,6 +1138,7 @@ proptest! {
         track_ids in prop::collection::vec(-2..22i64, 0..30),
         id in arb_list_id(),
         listed in any::<bool>(),
+        shown in any::<bool>(),
         selected in arb_filter_value(),
         sort in prop::option::of(arb_sort()),
         album_descending in any::<bool>(),
@@ -1146,10 +1147,10 @@ proptest! {
         let catalog = Catalog::new(tracks);
         let playlist = Playlist { id, name: "Mix".to_owned(), track_ids: track_ids.clone() };
         let playlists = if listed { vec![playlist] } else { Vec::new() };
-        let state = BrowseState { source: Source::Playlist(id), selected, sort, album_descending };
+        let state = BrowseState { source: Source::Playlist { id: shown.then_some(id) }, selected, sort, album_descending };
         let browsed = catalog.browse(&state, &playlists, &search);
 
-        let expected: Vec<i64> = if listed { track_ids } else { Vec::new() }
+        let expected: Vec<i64> = if listed && shown { track_ids } else { Vec::new() }
             .into_iter()
             .filter(|id| catalog.by_id.get(id).is_some_and(|&i| search.passes(&catalog, i)))
             .collect();

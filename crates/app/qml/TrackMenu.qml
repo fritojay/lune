@@ -18,6 +18,24 @@ Menu {
     signal playRequested(int row)
     signal albumRequested(real trackId)
 
+    // Asks for a name, then makes a playlist of the rows the menu was for.
+    function newPlaylist() {
+        const source = trackMenu.source
+        const start = trackMenu.start
+        const tracks = trackMenu.tracks
+        const dialog = nameDialog.createObject(trackMenu.parent, {
+            title: qsTr("New Playlist"),
+            name: playlists.suggestedName(qsTr("New Playlist"))
+        })
+        dialog.chosen.connect(name => trackMenu.controller.addToPlaylist(source, start, tracks, playlists.create(name)))
+        dialog.open()
+    }
+
+    Component {
+        id: nameDialog
+        PlaylistNameDialog {}
+    }
+
     function show(start: int, tracks: int) {
         trackMenu.start = start
         trackMenu.tracks = tracks
@@ -40,19 +58,29 @@ Menu {
     Menu {
         id: playlistMenu
         title: qsTr("Add to Playlist")
-        enabled: playlistItems.count > 0
+        MenuItem {
+            text: qsTr("New Playlist…")
+            onTriggered: trackMenu.newPlaylist()
+        }
+        MenuSeparator {
+            visible: playlistItems.count > 0
+            height: visible ? implicitHeight : 0
+        }
         Instantiator {
             id: playlistItems
-            model: PlaylistsModel {}
+            model: PlaylistsModel {
+                id: playlists
+            }
             delegate: MenuItem {
                 required property string playlistId
-                required property string name
+                required property string label
                 // Not a mnemonic.
-                text: name.replace(/&/g, "&&")
+                text: label.replace(/&/g, "&&")
                 onTriggered: trackMenu.controller.addToPlaylist(trackMenu.source, trackMenu.start,
                                                                 trackMenu.tracks, playlistId)
             }
-            onObjectAdded: (index, object) => playlistMenu.insertItem(index, object)
+            // After New Playlist… and the separator.
+            onObjectAdded: (index, object) => playlistMenu.insertItem(index + 2, object)
             onObjectRemoved: (index, object) => playlistMenu.removeItem(object)
         }
     }

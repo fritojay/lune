@@ -222,7 +222,7 @@ pub fn arb_list_id() -> impl Strategy<Value = ListId> {
 pub fn arb_source() -> impl Strategy<Value = Source> {
     prop_oneof![
         arb_grouping().prop_map(Source::Library),
-        arb_list_id().prop_map(Source::Playlist),
+        prop::option::of(arb_list_id()).prop_map(|id| Source::Playlist { id }),
     ]
 }
 

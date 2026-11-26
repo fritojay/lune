@@ -364,7 +364,11 @@ impl qobject::PlayerController {
         };
         let track_ids: Vec<i64> = tracks.into_iter().map(|t| t.id).collect();
         if !track_ids.is_empty() {
-            session::add_to_playlist(id, track_ids);
+            session::edit_playlists(|playlists| {
+                if let Some(playlist) = playlists.iter_mut().find(|p| p.id == id) {
+                    playlist.track_ids.extend(track_ids);
+                }
+            });
         }
     }
 

@@ -105,6 +105,11 @@ ApplicationWindow {
         onSearchCleared: filterPane.clearSearch()
     }
 
+    PlaylistsModel {
+        id: playlistsModel
+        onPlaylistChosen: id => filters.showPlaylist(id)
+    }
+
     AlbumListModel {
         id: albums
         // A rescan keeps the list where it was.
@@ -286,6 +291,8 @@ ApplicationWindow {
             onSourceChosen: (kind, sourceId) => {
                 if (kind === "grouping")
                     filters.setGrouping(sourceId)
+                else if (kind === "playlists")
+                    filters.showPlaylists()
             }
         }
 
@@ -316,13 +323,26 @@ ApplicationWindow {
                 id: filterPane
                 SplitView.preferredWidth: layout.filterPaneWidth
                 SplitView.minimumWidth: 160
-                model: filters
-                currentRow: filters.currentRow
+                // The playlists stand in for a grouping's values.
+                readonly property bool listsPlaylists: filters.sourceKind === "playlists"
+                readonly property var rows: listsPlaylists ? playlistsModel : filters
+                model: rows
+                currentRow: rows.currentRow
                 cover: player.cover
                 hasTrack: player.hasTrack
                 album: player.album
                         onSearchEdited: text => filters.setSearch(text)
-                onRowChosen: row => filters.select(row)
+                onRowChosen: row => rows.select(row)
+                onRowMenuRequested: row => {
+                    if (listsPlaylists)
+                        playlistMenu.show(row)
+                }
+                headerItems: Button {
+                    Layout.fillWidth: true
+                    visible: filterPane.listsPlaylists
+                    text: qsTr("New Playlist…")
+                    onClicked: window.newPlaylist()
+                }
                 onAlbumRequested: filters.showAlbum(player.currentTrackId)
             }
 
@@ -353,6 +373,9 @@ ApplicationWindow {
                     columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
                     albumGrid: layout.albumGrid
                     controller: player
+                    emptyHint: !filterPane.listsPlaylists ? ""
+                             : playlistsModel.count === 0 ? qsTr("No playlists yet. Click New Playlist to make one.")
+                             : qsTr("This playlist is empty. Right-click tracks and choose Add to Playlist to add them here.")
                     onAlbumGridChosen: grid => layout.albumGrid = grid
                     onSortClicked: column => filters.sortBy(column)
                     onSortChosen: (column, descending) => filters.setSort(column, descending)
@@ -411,6 +434,26 @@ ApplicationWindow {
                 onAlbumRequested: trackId => filters.showAlbum(trackId)
             }
         }
+    }
+
+    PlaylistMenu {
+        id: playlistMenu
+        playlists: playlistsModel
+    }
+
+    Component {
+        id: playlistNameDialog
+        PlaylistNameDialog {}
+    }
+
+    // Asks for a name, then shows the new, empty playlist.
+    function newPlaylist() {
+        const dialog = playlistNameDialog.createObject(window.contentItem, {
+            title: qsTr("New Playlist"),
+            name: playlistsModel.suggestedName(qsTr("New Playlist"))
+        })
+        dialog.chosen.connect(name => filters.showPlaylist(playlistsModel.create(name)))
+        dialog.open()
     }
 
     function playView(index) {

@@ -15,14 +15,14 @@ use std::sync::mpsc::{self, Sender};
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use lune_core::{
-    BrowseState, Filter, FilterValue, Grouping, Library, ListId, MenuChoice, Source, TrackFilter,
-    View, after_heading_click, menu_choice, sort_state,
+    BrowseState, Filter, FilterValue, Grouping, Library, ListId, MenuChoice, Playlist, Source,
+    TrackFilter, View, after_heading_click, menu_choice, sort_state,
 };
 
-use crate::format;
 use crate::list_model::{self, Role, text};
 use crate::property::set;
 use crate::session::{self, Change};
+use crate::{format, sources_model};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -52,6 +52,8 @@ pub mod qobject {
         #[qproperty(bool, sort_descending, cxx_name = "sortDescending", READ, NOTIFY)]
         /// Whether album order has a direction to pick in this source.
         #[qproperty(bool, album_directional, cxx_name = "albumDirectional", READ, NOTIFY)]
+        /// `SourcesModel`'s `kind` of the source.
+        #[qproperty(QString, source_kind, cxx_name = "sourceKind", READ, NOTIFY)]
         type FilterModel = super::FilterModelRust;
     }
 
@@ -65,6 +67,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "showPlaylist"]
         fn show_playlist(self: Pin<&mut FilterModel>, id: &QString);
+
+        /// Shows the playlist shown last in this run, or the first by name.
+        #[qinvokable]
+        #[cxx_name = "showPlaylists"]
+        fn show_playlists(self: Pin<&mut FilterModel>);
 
         #[qinvokable]
         fn select(self: Pin<&mut FilterModel>, row: i32);
@@ -130,6 +137,7 @@ const ROLES: &[Role<Filter>] = &[
     ("count", |f| {
         QVariant::from(&i32::try_from(f.tracks).unwrap_or(i32::MAX))
     }),
+    ("all", |f| QVariant::from(&(f.value == FilterValue::All))),
 ];
 
 pub struct FilterModelRust {
@@ -141,9 +149,11 @@ pub struct FilterModelRust {
     /// The direction of `sortColumn`'s sort, or of album order without one.
     sort_descending: bool,
     album_directional: bool,
+    source_kind: QString,
     /// What the properties show. Until the first `reload`, the last run's.
     state: BrowseState,
     rows: Vec<Filter>,
+    last_playlist: Option<ListId>,
     /// Tracks matching the search; `All` without a search.
     search: TrackFilter,
     search_generation: u64,
@@ -162,8 +172,10 @@ impl Default for FilterModelRust {
             sort_column: QString::from(sort_column),
             sort_descending,
             album_directional: state.source.has_album_direction(),
+            source_kind: QString::from(sources_model::kind(state.source)),
             state,
             rows: Vec::new(),
+            last_playlist: None,
             search: TrackFilter::All,
             search_generation: 0,
             searches: None,
@@ -244,7 +256,14 @@ impl qobject::FilterModel {
         let Ok(id) = id.to_string().parse::<ListId>() else {
             return;
         };
-        self.as_mut().show(Source::Playlist(id), FilterValue::All);
+        self.as_mut()
+            .show(Source::Playlist { id: Some(id) }, FilterValue::All);
+    }
+
+    fn show_playlists(mut self: Pin<&mut Self>) {
+        let id = self.last_playlist;
+        self.as_mut()
+            .show(Source::Playlist { id }, FilterValue::All);
     }
 
     fn show_album(mut self: Pin<&mut Self>, track_id: i64) {
@@ -282,7 +301,7 @@ impl qobject::FilterModel {
     }
 
     fn playlists_changed(self: Pin<&mut Self>) {
-        if matches!(self.state.source, Source::Playlist(_)) {
+        if matches!(self.state.source, Source::Playlist { .. }) {
             self.recompute(false);
         }
     }
@@ -348,6 +367,14 @@ impl qobject::FilterModel {
     /// tracks (otherwise "All"), and then the view.
     fn recompute(mut self: Pin<&mut Self>, reset: bool) {
         let playlists = session::playlists();
+        // Only once the library has loaded: until then there are no
+        // playlists, and the saved one would be forgotten.
+        if let Source::Playlist { id } = self.state.source
+            && session::catalog().is_some()
+        {
+            let id = Playlist::existing_or_first(id, &playlists);
+            self.as_mut().rust_mut().state.source = Source::Playlist { id };
+        }
         let browsed =
             session::catalog().map(|catalog| catalog.browse(&self.state, &playlists, &self.search));
         if let Some(browsed) = &browsed {
@@ -381,6 +408,15 @@ impl qobject::FilterModel {
     /// Shows `state` in the properties and to `session::browse`.
     fn show_state(mut self: Pin<&mut Self>) {
         let state = self.state.clone();
+        if let Source::Playlist { id: Some(id) } = state.source {
+            self.as_mut().rust_mut().last_playlist = Some(id);
+        }
+        set!(
+            self,
+            source_kind,
+            source_kind_changed,
+            QString::from(sources_model::kind(state.source))
+        );
         let (sort_column, sort_descending) = sort_state(state.sort, state.album_descending);
         set!(
             self,
@@ -405,7 +441,7 @@ impl qobject::FilterModel {
 
     fn show_view(mut self: Pin<&mut Self>, view: View, reset: bool) {
         let title = match (self.state.source, self.filter(self.current_row)) {
-            (Source::Playlist(id), _) => playlist_name(id),
+            (Source::Playlist { id }, _) => id.map(playlist_name).unwrap_or_default(),
             (Source::Library(_), Some(filter)) => format::filter_label(filter),
             (Source::Library(grouping), None) => format::filter_label(&all(grouping)),
         };
