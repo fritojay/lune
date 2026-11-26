@@ -66,6 +66,8 @@ pub enum Update {
 pub struct Folder {
     pub path: PathBuf,
     pub last_scanned_ns: Option<i64>,
+    /// What its last full scan this run left out of the library, and why.
+    pub left_out: Option<String>,
 }
 
 pub struct LibraryService {
@@ -127,8 +129,7 @@ struct Worker {
     watcher: Option<FolderWatcher>,
     jobs: Sender<Job>,
     notify: Box<dyn Fn(Update) + Send>,
-    /// Per folder, the (links, non-UTF-8 names) its last full scan skipped,
-    /// so a message dismissed isn't shown again until they change.
+    /// Per folder, the (links, non-UTF-8 names) its last full scan skipped.
     skipped: HashMap<PathBuf, (usize, usize)>,
 }
 
@@ -305,6 +306,10 @@ impl Worker {
             .map(|(path, last_scanned_ns)| Folder {
                 path: path.clone(),
                 last_scanned_ns,
+                left_out: self
+                    .skipped
+                    .get(path)
+                    .and_then(|&(links, non_utf8)| left_out(links, non_utf8)),
             })
             .collect();
         (self.notify)(Update::Folders(folders));
@@ -409,15 +414,11 @@ impl Worker {
                 Err(err) => tracing::warn!(%err, dir = %dir.display(), "could not scan"),
             }
         }
+        for (folder, counts) in skipped {
+            recorded |= self.skipped.insert(folder, counts) != Some(counts);
+        }
         if recorded {
             self.publish_folders();
-        }
-        for (folder, counts) in skipped {
-            if self.skipped.insert(folder.clone(), counts) != Some(counts)
-                && let Some(message) = skipped_message(&folder, counts.0, counts.1)
-            {
-                self.error(message);
-            }
         }
         changed
     }
@@ -468,7 +469,7 @@ pub fn existing_ancestor(dir: &Path, folders: &[PathBuf]) -> Option<PathBuf> {
 }
 
 /// What a full scan of `folder` left out, if anything.
-fn skipped_message(folder: &Path, links: usize, non_utf8: usize) -> Option<String> {
+fn left_out(links: usize, non_utf8: usize) -> Option<String> {
     let parts: Vec<String> = [
         (
             links,
@@ -490,13 +491,7 @@ fn skipped_message(folder: &Path, links: usize, non_utf8: usize) -> Option<Strin
         format!("{count} {what}{why}")
     })
     .collect();
-    (!parts.is_empty()).then(|| {
-        format!(
-            "Not in the library from {}: {}.",
-            folder.display(),
-            parts.join(" and ")
-        )
-    })
+    (!parts.is_empty()).then(|| format!("Not added: {}.", parts.join(" and ")))
 }
 
 fn progress_status(folder: &str, progress: ScanProgress) -> String {

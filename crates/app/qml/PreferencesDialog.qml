@@ -87,11 +87,23 @@ Dialog {
                     required property var modelData
                     width: ListView.view.width
                     contentItem: RowLayout {
-                        Label {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: folderRow.modelData.path
-                            textFormat: Text.PlainText
-                            elide: Text.ElideMiddle
+                            spacing: 2
+                            Label {
+                                Layout.fillWidth: true
+                                text: folderRow.modelData.path
+                                textFormat: Text.PlainText
+                                elide: Text.ElideMiddle
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: text !== ""
+                                text: folderRow.modelData.leftOut ?? ""
+                                textFormat: Text.PlainText
+                                wrapMode: Text.WordWrap
+                                opacity: 0.7
+                            }
                         }
                         Label {
                             readonly property var scanned: folderRow.modelData.lastScanned

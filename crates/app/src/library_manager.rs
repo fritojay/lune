@@ -34,8 +34,9 @@ pub mod qobject {
     extern "RustQt" {
         #[qobject]
         #[qml_element]
-        /// `{ path, lastScanned }` per folder; `lastScanned` is epoch ms,
-        /// absent if never scanned.
+        /// `{ path, lastScanned, leftOut }` per folder; `lastScanned` is
+        /// epoch ms, absent if never scanned, and `leftOut` says what a full
+        /// scan didn't add, absent if nothing.
         #[qproperty(QList_QVariant, folders, READ, NOTIFY)]
         #[qproperty(bool, busy, READ, NOTIFY)]
         #[qproperty(QString, status, READ, NOTIFY)]
@@ -241,6 +242,12 @@ fn folder_entry(folder: &Folder) -> QVariant {
         entry.insert(
             QString::from("lastScanned"),
             QVariant::from(&format::epoch_ms(ns)),
+        );
+    }
+    if let Some(left_out) = &folder.left_out {
+        entry.insert(
+            QString::from("leftOut"),
+            QVariant::from(&QString::from(left_out)),
         );
     }
     QVariant::from(&entry)

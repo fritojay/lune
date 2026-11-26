@@ -26,6 +26,7 @@ fn a_scanned_folder_entry_has_its_path_and_time_in_ms() {
     let entry = folder_entry(&Folder {
         path: PathBuf::from("/music/a"),
         last_scanned_ns: Some(1_700_000_000_123_456_789),
+        left_out: None,
     });
     let path = entry_value(&entry, "path").unwrap().value::<QString>();
     assert_eq!(path, Some(QString::from("/music/a")));
@@ -38,8 +39,21 @@ fn a_never_scanned_folder_entry_has_no_time() {
     let entry = folder_entry(&Folder {
         path: PathBuf::from("/music/a"),
         last_scanned_ns: None,
+        left_out: None,
     });
     assert!(entry_value(&entry, "lastScanned").is_none());
+    assert!(entry_value(&entry, "leftOut").is_none());
+}
+
+#[test]
+fn a_folder_entry_says_what_its_scan_left_out() {
+    let entry = folder_entry(&Folder {
+        path: PathBuf::from("/music/a"),
+        last_scanned_ns: None,
+        left_out: Some("Not added: 2 linked files.".into()),
+    });
+    let left_out = entry_value(&entry, "leftOut").unwrap().value::<QString>();
+    assert_eq!(left_out, Some(QString::from("Not added: 2 linked files.")));
 }
 
 #[test]

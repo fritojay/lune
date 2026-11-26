@@ -701,27 +701,52 @@ fn the_periodic_rescan_updates_the_folder_times() {
 
 #[test]
 fn a_full_scan_says_what_it_left_out() {
-    let folder = Path::new("/music");
     for (links, non_utf8, message) in [
         (0, 0, None),
         (
             2,
             0,
-            Some("Not in the library from /music: 2 linked files (links aren't followed)."),
+            Some("Not added: 2 linked files (links aren't followed)."),
         ),
         (
             0,
             1,
-            Some("Not in the library from /music: 1 file whose name isn't valid UTF-8."),
+            Some("Not added: 1 file whose name isn't valid UTF-8."),
         ),
         (
             1,
             3,
             Some(
-                "Not in the library from /music: 1 linked file (links aren't followed) and 3 files whose names aren't valid UTF-8.",
+                "Not added: 1 linked file (links aren't followed) and 3 files whose names aren't valid UTF-8.",
             ),
         ),
     ] {
-        assert_eq!(skipped_message(folder, links, non_utf8).as_deref(), message);
+        assert_eq!(left_out(links, non_utf8).as_deref(), message);
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn what_a_full_scan_left_out_is_listed_with_its_folder_not_reported_as_an_error() {
+    let dir = TempDir::new();
+    let song = dir.wav("a/1.wav");
+    std::os::unix::fs::symlink(&song, dir.path().join("a/link.wav")).unwrap();
+    let a = dir.path().join("a");
+    let h = Harness::start(dir);
+    h.idle();
+    h.service.send(Job::AddFolder(a.clone()));
+    // Like the launch scan: only a full scan counts what it skips.
+    h.service.send(Job::RescanAll);
+    let left_out = h.wait_for(|u| match u {
+        Update::Error(message) => panic!("reported as an error: {message}"),
+        Update::Folders(folders) => folders
+            .into_iter()
+            .find(|f| f.path == a && f.left_out.is_some())
+            .and_then(|f| f.left_out),
+        _ => None,
+    });
+    assert_eq!(
+        left_out,
+        "Not added: 1 linked file (links aren't followed)."
+    );
 }
