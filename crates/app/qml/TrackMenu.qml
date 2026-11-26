@@ -51,9 +51,8 @@ Menu {
             enabled: trackMenu.playlists.loaded
             onTriggered: trackMenu.newPlaylistRequested(trackMenu.trackIds)
         }
-        MenuSeparator {
+        CollapsingMenuSeparator {
             visible: playlistItems.count > 0
-            height: visible ? implicitHeight : 0
         }
         Instantiator {
             id: playlistItems

@@ -158,28 +158,23 @@ ColumnLayout {
         onPlayRequested: start => trackPane.playRequested(start)
         onAlbumRequested: trackId => trackPane.albumRequested(trackId)
 
-        // Collapsed rather than hidden: a hidden menu item still takes its space.
-        MenuSeparator {
+        CollapsingMenuSeparator {
             visible: trackPane.playlistShown
-            height: visible ? implicitHeight : 0
         }
-        MenuItem {
+        CollapsingMenuItem {
             text: qsTr("Remove from Playlist")
             visible: trackPane.playlistShown
-            height: visible ? implicitHeight : 0
             onTriggered: trackPane.removeFromPlaylistRequested(trackMenu.rows)
         }
-        MenuItem {
+        CollapsingMenuItem {
             text: qsTr("Move to Top")
             visible: trackPane.playlistShown
-            height: visible ? implicitHeight : 0
             enabled: trackPane.reorderable
             onTriggered: trackPane.moveRequested(trackMenu.rows, 0)
         }
-        MenuItem {
+        CollapsingMenuItem {
             text: qsTr("Move to Bottom")
             visible: trackPane.playlistShown
-            height: visible ? implicitHeight : 0
             enabled: trackPane.reorderable
             onTriggered: trackPane.moveRequested(trackMenu.rows, trackPane.trackCount)
         }
