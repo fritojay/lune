@@ -138,6 +138,48 @@ fn a_forgotten_cover_is_still_shown_until_it_is_made_again() {
 }
 
 #[test]
+fn a_forgotten_cover_dropped_from_the_queue_is_made_again_when_next_asked_for() {
+    let (gate_tx, gate) = mpsc::channel::<()>();
+    let gate = Arc::new(Mutex::new(gate));
+    let generation = Arc::new(AtomicU64::new(0));
+    let made = Arc::clone(&generation);
+    let (started_tx, started) = mpsc::channel();
+    let started_tx = Arc::new(Mutex::new(started_tx));
+    let (covers, ready) = covers_with(move |id| {
+        let _ = started_tx.lock().unwrap().send(id);
+        if id != 1 {
+            gate.lock().unwrap().recv_timeout(WAIT).unwrap();
+        }
+        Some(PathBuf::from(format!(
+            "{id}-{}.jpg",
+            made.load(Ordering::SeqCst)
+        )))
+    });
+    covers.path(1);
+    assert_eq!(ready.recv_timeout(WAIT).unwrap(), 1);
+    assert_eq!(started.recv_timeout(WAIT).unwrap(), 1);
+    generation.store(1, Ordering::SeqCst);
+    covers.forget();
+    covers.path(0);
+    assert_eq!(started.recv_timeout(WAIT).unwrap(), 0);
+    covers.path(1);
+    // The worker is busy with 0 while these push 1 out of the queue.
+    for id in 2..2 + MAX_PENDING as i64 {
+        covers.path(id);
+    }
+    for _ in 0..=MAX_PENDING {
+        gate_tx.send(()).unwrap();
+    }
+    let served: Vec<i64> = (0..=MAX_PENDING)
+        .map(|_| ready.recv_timeout(WAIT).unwrap())
+        .collect();
+    assert!(!served.contains(&1));
+    assert_eq!(covers.path(1), Some(PathBuf::from("1-0.jpg")));
+    assert_eq!(ready.recv_timeout(WAIT).unwrap(), 1);
+    assert_eq!(covers.path(1), Some(PathBuf::from("1-1.jpg")));
+}
+
+#[test]
 fn a_forgotten_failure_is_retried() {
     let (covers, ready) = covers_with(|_| None);
     assert_eq!(covers.path(6), None);

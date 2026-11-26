@@ -84,6 +84,10 @@ impl Covers {
                 && let Some(oldest) = state.pending.pop_front()
             {
                 state.queued.remove(&oldest);
+                // A stale cover dropped unmade is still stale.
+                if state.done.contains_key(&oldest) {
+                    state.stale.insert(oldest);
+                }
             }
             self.wake.notify_one();
         }
