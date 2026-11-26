@@ -235,6 +235,64 @@ fn a_new_output_goes_on_from_where_the_old_one_was_after_opens_that_fail() {
     );
 }
 
+#[derive(Debug, Clone)]
+enum WhileOpening {
+    FailedOpen,
+    TogglePause,
+    Seek(u64),
+    ChooseTrack,
+}
+
+proptest! {
+    /// While no output opens, what the user does changes where the next one
+    /// goes on from, so it never starts what they paused or moved away from.
+    #[test]
+    fn a_new_output_goes_on_from_what_the_user_left_while_there_was_none(
+        playing in any::<bool>(),
+        steps in prop::collection::vec(
+            prop_oneof![
+                Just(WhileOpening::FailedOpen),
+                Just(WhileOpening::TogglePause),
+                (0..600u64).prop_map(WhileOpening::Seek),
+                Just(WhileOpening::ChooseTrack),
+            ],
+            0..12,
+        ),
+    ) {
+        let now = Instant::now();
+        let mut model = Some((EntryId(3), Duration::from_secs(42), playing));
+        let mut opening = Opening::default();
+        prop_assert!(opening.start(model, now));
+        prop_assert_eq!(opening.finish(Err::<(), _>(())), Finished::Failed((), true));
+        for step in steps {
+            match step {
+                WhileOpening::FailedOpen => {
+                    prop_assert!(opening.start(None, now));
+                    prop_assert!(matches!(opening.finish(Err::<(), _>(())), Finished::Failed(..)));
+                }
+                WhileOpening::TogglePause => {
+                    if let Some((_, _, playing)) = &mut model {
+                        *playing = !*playing;
+                    }
+                    prop_assert_eq!(opening.toggle_resume(), model.map(|(_, _, p)| p));
+                }
+                WhileOpening::Seek(secs) => {
+                    if let Some((_, at, _)) = &mut model {
+                        *at = Duration::from_secs(secs);
+                    }
+                    opening.seek_resume(Duration::from_secs(secs));
+                }
+                WhileOpening::ChooseTrack => {
+                    prop_assert_eq!(opening.forget_resume(), model.take().is_some());
+                }
+            }
+            prop_assert_eq!(opening.resumes_playing(), model.map(|(_, _, p)| p));
+        }
+        prop_assert!(opening.start(None, now));
+        prop_assert_eq!(opening.finish(Ok::<_, ()>(())), Finished::Opened((), model));
+    }
+}
+
 #[test]
 fn a_new_output_goes_on_from_the_entry_heard_and_starts_it_only_if_it_was_playing() {
     let at = Duration::from_secs(42);

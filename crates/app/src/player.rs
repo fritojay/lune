@@ -315,6 +315,7 @@ impl qobject::PlayerController {
         let entry = session::lock_queue()
             .replace(tracks, start)
             .map(session::entry);
+        self.as_mut().forget_resume();
         if let (Some(entry), Some(player)) = (entry, &self.player) {
             log_err(player.play(entry));
         }
@@ -333,6 +334,7 @@ impl qobject::PlayerController {
                     queue.current().map(session::entry)
                 })
         };
+        self.as_mut().forget_resume();
         if let (Some(entry), Some(player)) = (entry, &self.player) {
             log_err(player.play(entry));
         }
@@ -425,6 +427,7 @@ impl qobject::PlayerController {
 
     fn clear_queue(mut self: Pin<&mut Self>) {
         session::lock_queue().clear();
+        self.as_mut().forget_resume();
         if let Some(player) = &self.player {
             log_err(player.stop());
         }
@@ -438,6 +441,9 @@ impl qobject::PlayerController {
 
     fn toggle_pause(mut self: Pin<&mut Self>) {
         let Some(player) = &self.player else {
+            if let Some(playing) = self.as_mut().rust_mut().opening.toggle_resume() {
+                set!(self, playing, playing_changed, playing);
+            }
             return;
         };
         if player.status().state != PlaybackState::Stopped {
@@ -473,13 +479,14 @@ impl qobject::PlayerController {
     }
 
     fn seek(mut self: Pin<&mut Self>, seconds: f64) {
-        let Some(player) = &self.player else {
-            return;
-        };
         if !seconds.is_finite() {
             return;
         }
         let target = Duration::from_secs_f64(seconds.max(0.0));
+        let Some(player) = &self.player else {
+            self.as_mut().rust_mut().opening.seek_resume(target);
+            return;
+        };
         log_err(player.seek(target));
         // Tell the OS now: the engine reports the new position a moment later.
         let state = player.status().state;
@@ -522,8 +529,17 @@ impl qobject::PlayerController {
         }
     }
 
-    fn media_command(self: Pin<&mut Self>, command: MediaCommand) {
-        let state = self.player.as_ref().map(|p| p.status().state);
+    fn media_command(mut self: Pin<&mut Self>, command: MediaCommand) {
+        let state = match &self.player {
+            Some(player) => Some(player.status().state),
+            None => self.opening.resumes_playing().map(|playing| {
+                if playing {
+                    PlaybackState::Playing
+                } else {
+                    PlaybackState::Paused
+                }
+            }),
+        };
         match command {
             MediaCommand::Play if state == Some(PlaybackState::Playing) => {}
             MediaCommand::Pause if state != Some(PlaybackState::Playing) => {}
@@ -531,6 +547,7 @@ impl qobject::PlayerController {
             MediaCommand::Next => self.next(),
             MediaCommand::Previous => self.previous(),
             MediaCommand::Stop => {
+                self.as_mut().forget_resume();
                 if let Some(player) = &self.player {
                     log_err(player.stop());
                 }
@@ -675,6 +692,13 @@ impl qobject::PlayerController {
         self.as_mut().rust_mut().playing_entry = None;
         set!(self, available, available_changed, false);
         self.open_output(resume);
+    }
+
+    /// See [`Opening::forget_resume`].
+    fn forget_resume(mut self: Pin<&mut Self>) {
+        if self.as_mut().rust_mut().opening.forget_resume() {
+            set!(self, playing, playing_changed, false);
+        }
     }
 
     fn go_on_from(self: Pin<&mut Self>, (entry, position, playing): Resume) {
@@ -856,6 +880,32 @@ impl Opening {
                 Finished::Failed(err, self.failures == 1)
             }
         }
+    }
+
+    /// Whether what the next output goes on from plays, if there is one.
+    fn resumes_playing(&self) -> Option<bool> {
+        self.resume.map(|(_, _, playing)| playing)
+    }
+
+    /// Pauses or unpauses what the next output goes on from, so a pause
+    /// while there is no output isn't undone when one opens.
+    fn toggle_resume(&mut self) -> Option<bool> {
+        let (_, _, playing) = self.resume.as_mut()?;
+        *playing = !*playing;
+        Some(*playing)
+    }
+
+    fn seek_resume(&mut self, position: Duration) {
+        if let Some((_, at, _)) = &mut self.resume {
+            *at = position;
+        }
+    }
+
+    /// The user chose what plays while there was no output, so the next
+    /// one doesn't go back to where the old one was. Returns whether there
+    /// was somewhere to go back to.
+    fn forget_resume(&mut self) -> bool {
+        self.resume.take().is_some()
     }
 
     /// Whether to open the output again: there is none, it failed, or it
