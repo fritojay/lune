@@ -332,7 +332,7 @@ ApplicationWindow {
                 cover: player.cover
                 hasTrack: player.hasTrack
                 album: player.album
-                        onSearchEdited: text => filters.setSearch(text)
+                onSearchEdited: text => filters.setSearch(text)
                 onRowChosen: row => rows.select(row)
                 onRowMenuRequested: row => {
                     if (listsPlaylists)
@@ -370,7 +370,7 @@ ApplicationWindow {
                     albumDirectional: filters.albumDirectional
                     hasFolders: library.folders.length > 0
                     scanStatus: library.busy ? library.status : ""
-                                currentTrackId: player.currentTrackId
+                    currentTrackId: player.currentTrackId
                     hiddenColumns: layout.hiddenColumns
                     columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
                     albumGrid: layout.albumGrid
