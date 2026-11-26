@@ -49,6 +49,10 @@ pub mod qobject {
     }
 
     unsafe extern "RustQt" {
+        /// After each reset, which keeps the queue's place.
+        #[qsignal]
+        fn refreshed(self: Pin<&mut QueueModel>);
+
         #[qinvokable]
         #[cxx_override]
         fn data(self: &QueueModel, index: &QModelIndex, role: i32) -> QVariant;
@@ -185,6 +189,7 @@ impl qobject::QueueModel {
             total_duration_changed,
             QString::from(&format::long_duration(total))
         );
+        self.refreshed();
     }
 
     fn queued(&self, row: i32) -> Option<Queued<'_>> {

@@ -34,8 +34,12 @@ ColumnLayout {
     // Rows move on every change.
     Connections {
         target: queuePane.model
-        function onModelReset() {
+        function onModelAboutToBeReset() {
+            queueList.keepPosition()
+        }
+        function onRefreshed() {
             queueSelection.clear()
+            queueList.restorePosition()
         }
     }
 

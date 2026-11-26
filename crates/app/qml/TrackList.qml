@@ -10,6 +10,17 @@ ListView {
     // The row a dragged track would land before, or -1.
     property int dropRow: -1
 
+    property real keptY
+
+    // A model reset puts the list back at its start; these keep its place.
+    function keepPosition() {
+        keptY = contentY
+    }
+
+    function restorePosition() {
+        contentY = Math.min(keptY, Math.max(0, contentHeight - height))
+    }
+
     // `rows` keep their order and go before the row now at `to`.
     signal moveRequested(list<int> rows, int to)
 

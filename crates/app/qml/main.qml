@@ -113,7 +113,7 @@ ApplicationWindow {
     AlbumListModel {
         id: albums
         // A rescan keeps the list where it was.
-        onModelAboutToBeReset: trackPane.keepPosition()
+        onModelAboutToBeReset: trackPane.list.keepPosition()
         onRefreshed: reset => trackPane.resetView(reset)
     }
 

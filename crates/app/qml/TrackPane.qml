@@ -50,7 +50,7 @@ ColumnLayout {
     }
     readonly property int tracksLeft: flat ? 0 : 2 * Theme.albumPadding + Theme.coverSize
     readonly property int tracksRight: flat ? 0 : Theme.albumPadding
-    readonly property ListView list: albumList
+    readonly property TrackList list: albumList
 
     signal sortClicked(string column)
     signal sortChosen(string column, bool descending)
@@ -63,22 +63,17 @@ ColumnLayout {
     signal addFolderRequested()
     signal albumGridChosen(bool grid)
 
-    property real keptY
     // The first grid row in view and the columns it had, so the album that
     // starts it stays in view when the grid is relaid.
     property int keptRow
     property int keptColumns: 1
-
-    function keepPosition() {
-        keptY = albumList.contentY
-    }
 
     function resetView(reset: bool) {
         trackSelection.clear()
         if (reset)
             albumList.positionViewAtBeginning()
         else
-            albumList.contentY = Math.min(keptY, Math.max(0, albumList.contentHeight - albumList.height))
+            albumList.restorePosition()
     }
 
     function keepGridPosition() {
