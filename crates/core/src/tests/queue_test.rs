@@ -352,6 +352,7 @@ proptest! {
     #[test]
     fn the_queue_and_its_cursor_survive_a_save_and_load(
         ops in prop::collection::vec(arb_op(), 0..30),
+        shuffle: Option<bool>,
         cursor: Index,
         resume_ms: u32,
     ) {
@@ -363,6 +364,9 @@ proptest! {
             model.apply(op, &mut queue);
         }
         save(&mut conn, &queue).unwrap();
+        if let Some(on) = shuffle {
+            model.apply(&Op::Shuffle(on), &mut queue);
+        }
         model.apply(&Op::SetCurrent(cursor), &mut queue);
         model.apply(&Op::SetResume(cursor, Duration::from_millis(resume_ms.into())), &mut queue);
         save_cursor(&conn, &queue).unwrap();

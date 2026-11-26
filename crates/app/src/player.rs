@@ -331,7 +331,7 @@ impl qobject::PlayerController {
         if let (Some(entry), Some(player)) = (entry, &self.player) {
             log_err(player.play(entry));
         }
-        self.as_mut().edited();
+        self.as_mut().edited(Save::Queue);
     }
 
     fn play_queue_row(mut self: Pin<&mut Self>, row: usize) {
@@ -372,7 +372,7 @@ impl qobject::PlayerController {
             return;
         };
         insert(&mut session::lock_queue(), tracks);
-        self.as_mut().edited();
+        self.as_mut().edited(Save::Queue);
     }
 
     fn add_to_playlist(
@@ -422,7 +422,7 @@ impl qobject::PlayerController {
             let slots = queue_slots(&queue, rows);
             queue.remove(&slots);
         }
-        self.as_mut().edited();
+        self.as_mut().edited(Save::Queue);
     }
 
     fn move_queue_rows(mut self: Pin<&mut Self>, rows: &QList<i32>, to: i32) {
@@ -434,7 +434,7 @@ impl qobject::PlayerController {
             let slots = queue_slots(&queue, rows);
             queue.move_to(&slots, to);
         }
-        self.as_mut().edited();
+        self.as_mut().edited(Save::Queue);
     }
 
     fn clear_queue(mut self: Pin<&mut Self>) {
@@ -443,12 +443,13 @@ impl qobject::PlayerController {
         if let Some(player) = &self.player {
             log_err(player.stop());
         }
-        self.as_mut().edited();
+        self.as_mut().edited(Save::Queue);
     }
 
     fn set_shuffle_from_qml(mut self: Pin<&mut Self>, on: bool) {
         session::lock_queue().set_shuffle(on);
-        self.as_mut().edited();
+        // The queue is saved unshuffled, so only the shuffle flag changed.
+        self.as_mut().edited(Save::Cursor);
     }
 
     fn toggle_pause(mut self: Pin<&mut Self>) {
@@ -734,12 +735,12 @@ impl qobject::PlayerController {
         self.update_now_playing();
     }
 
-    /// After a queue edit: the engine re-checks what's next, and it's saved.
-    fn edited(mut self: Pin<&mut Self>) {
+    /// After a queue edit: the engine re-checks what's next, and `save` is saved.
+    fn edited(mut self: Pin<&mut Self>, save: Save) {
         if let Some(player) = &self.player {
             log_err(player.queue_changed());
         }
-        session::save(Save::Queue);
+        session::save(save);
         let shuffle = session::lock_queue().shuffle();
         set!(self, shuffle, shuffle_changed, shuffle);
         self.as_mut().update_now_playing();
