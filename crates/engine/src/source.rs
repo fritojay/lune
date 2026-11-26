@@ -66,11 +66,11 @@ impl Source {
         }
         let decode_err = |source| EngineError::Decode {
             path: path.to_path_buf(),
-            source,
+            cause: source,
         };
         let file = File::open(path).map_err(|source| EngineError::Open {
             path: path.to_path_buf(),
-            source,
+            cause: source,
         })?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
         let mut hint = Hint::new();
@@ -211,7 +211,7 @@ impl Source {
                 Err(source) => {
                     return Err(EngineError::Decode {
                         path: self.path.clone(),
-                        source,
+                        cause: source,
                     });
                 }
             };
@@ -227,7 +227,7 @@ impl Source {
                 Err(source) => {
                     return Err(EngineError::Decode {
                         path: self.path.clone(),
-                        source,
+                        cause: source,
                     });
                 }
             };
@@ -289,7 +289,7 @@ impl Source {
             )
             .map_err(|source| EngineError::Decode {
                 path: self.path.clone(),
-                source,
+                cause: source,
             })?;
         self.decoder.reset();
         // Frames between where the demuxer landed and where we want to be,

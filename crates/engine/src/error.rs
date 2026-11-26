@@ -1,19 +1,20 @@
 use std::path::PathBuf;
 
+/// Each message includes its cause, so no variant also returns it from
+/// `source()`: a caller printing the chain (as `anyhow` does) would show it
+/// twice.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    #[error("could not open {path}: {source}")]
+    #[error("could not open {path}: {cause}")]
     Open {
         path: PathBuf,
-        #[source]
-        source: std::io::Error,
+        cause: std::io::Error,
     },
 
-    #[error("could not decode {path}: {source}")]
+    #[error("could not decode {path}: {cause}")]
     Decode {
         path: PathBuf,
-        #[source]
-        source: symphonia::core::errors::Error,
+        cause: symphonia::core::errors::Error,
     },
 
     #[error("the decoder panicked on {path}")]
@@ -29,7 +30,7 @@ pub enum EngineError {
     ResamplerPanic,
 
     #[error("resampler error: {0}")]
-    Resample(#[source] BoxError),
+    Resample(BoxError),
 
     #[error("unsupported audio format: {rate} Hz, {channels} channels")]
     UnsupportedFormat { rate: u32, channels: usize },
@@ -37,18 +38,17 @@ pub enum EngineError {
     #[error("no audio output device is available")]
     NoOutputDevice,
 
-    #[error("audio output error: {context}: {source}")]
+    #[error("audio output error: {context}: {cause}")]
     Output {
         context: &'static str,
-        #[source]
-        source: BoxError,
+        cause: BoxError,
     },
 
     #[error("invalid output configuration: {0}")]
     OutputConfig(String),
 
     #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
 
     #[error("the audio engine thread has stopped")]
     EngineStopped,
@@ -58,6 +58,12 @@ pub type Result<T> = std::result::Result<T, EngineError>;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+impl From<std::io::Error> for EngineError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
 impl EngineError {
     pub(crate) fn resample(err: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::Resample(Box::new(err))
@@ -66,7 +72,7 @@ impl EngineError {
     pub(crate) fn output(context: &'static str) -> impl FnOnce(cpal::Error) -> Self {
         move |err| Self::Output {
             context,
-            source: Box::new(err),
+            cause: Box::new(err),
         }
     }
 }
