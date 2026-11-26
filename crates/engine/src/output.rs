@@ -135,11 +135,12 @@ impl Waker {
 }
 
 /// Starts the output. `make_renderer` is called on the output thread once the
-/// output format is known.
+/// output format is known, and again for each device tried after one fails
+/// to open: the last call's renderer plays.
 pub fn start(
     kind: OutputKind,
     shared: Arc<Shared>,
-    make_renderer: impl FnOnce(OutputSpec) -> Renderer + Send + 'static,
+    make_renderer: impl FnMut(OutputSpec) -> Renderer + Send + 'static,
 ) -> Result<(Output, OutputSpec)> {
     if let OutputKind::Capture { rate, channels, .. } = &kind {
         if !CAPTURE_RATES.contains(rate) {
@@ -191,7 +192,7 @@ pub fn start(
 }
 
 fn run_device(
-    make_renderer: impl FnOnce(OutputSpec) -> Renderer,
+    mut make_renderer: impl FnMut(OutputSpec) -> Renderer,
     preferred: Option<&str>,
     shared: &Shared,
     ready: &mpsc::SyncSender<Result<OutputSpec>>,
@@ -202,11 +203,13 @@ fn run_device(
         let id = id.parse::<cpal::DeviceId>().ok()?;
         host.device_by_id(&id)
     };
-    let (stream, fell_back) = match choose_device(preferred, find, || host.default_output_device())
-        .ok_or(EngineError::NoOutputDevice)
-        .and_then(|(device, fell_back)| {
-            build_device_stream(&device, make_renderer).map(|built| (built, fell_back))
-        }) {
+    let opened = open_device(
+        preferred,
+        find,
+        || host.default_output_device(),
+        |device| build_device_stream(device, &mut make_renderer),
+    );
+    let (stream, fell_back) = match opened {
         Ok(((stream, spec), fell_back)) => {
             let _ = ready.send(Ok(spec));
             (stream, fell_back)
@@ -323,26 +326,40 @@ impl Sleeper {
     }
 }
 
-/// `preferred` if it is connected, else the default, and whether that is in
-/// its place.
-fn choose_device<D>(
+/// Opens `preferred` if it is connected and opens, else the default. The
+/// flag says the default plays in place of a preferred device that isn't
+/// connected, so it is worth watching for. One that is connected but won't
+/// open (e.g. held by another app) isn't watched: it would be found at once,
+/// and fail again.
+fn open_device<D, T>(
     preferred: Option<&str>,
     find: impl Fn(&str) -> Option<D>,
     default: impl FnOnce() -> Option<D>,
-) -> Option<(D, bool)> {
-    let Some(preferred) = preferred else {
-        return default().map(|device| (device, false));
-    };
-    match find(preferred) {
-        Some(device) => Some((device, false)),
-        None => {
+    mut open: impl FnMut(&D) -> Result<T>,
+) -> Result<(T, bool)> {
+    let watch = match preferred.map(|id| (id, find(id))) {
+        None => false,
+        Some((_, Some(device))) => match open(&device) {
+            Ok(opened) => return Ok((opened, false)),
+            Err(err) => {
+                tracing::warn!(
+                    preferred,
+                    %err,
+                    "could not open the preferred audio output; using the default"
+                );
+                false
+            }
+        },
+        Some((_, None)) => {
             tracing::warn!(
                 preferred,
                 "the preferred audio output isn't connected; using the default"
             );
-            default().map(|device| (device, true))
+            true
         }
-    }
+    };
+    let device = default().ok_or(EngineError::NoOutputDevice)?;
+    open(&device).map(|opened| (opened, watch))
 }
 
 fn build_device_stream(

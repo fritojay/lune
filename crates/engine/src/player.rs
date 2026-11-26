@@ -78,7 +78,7 @@ pub struct Player {
 impl Player {
     pub fn new(config: PlayerConfig, queue: Arc<dyn PlayQueue>) -> Result<Self> {
         let shared = Arc::new(Shared::new());
-        let (rings_tx, rings_rx) = mpsc::sync_channel(1);
+        let (rings_tx, rings_rx) = mpsc::channel();
         let buffer = config.buffer;
         let renderer_shared = Arc::clone(&shared);
         let (output, spec) = output::start(config.output, Arc::clone(&shared), move |spec| {
@@ -86,9 +86,18 @@ impl Player {
             let (samples_tx, samples_rx) = RingBuffer::new(frames.max(4096) * spec.channels);
             let (discards_tx, discards_rx) = RingBuffer::new(DISCARD_CAPACITY);
             let _ = rings_tx.send((samples_tx, discards_tx));
-            Renderer::new(samples_rx, discards_rx, spec.channels, renderer_shared)
+            Renderer::new(
+                samples_rx,
+                discards_rx,
+                spec.channels,
+                Arc::clone(&renderer_shared),
+            )
         })?;
-        let (producer, discards) = rings_rx.recv().map_err(|_| EngineError::EngineStopped)?;
+        // The rings of the renderer that plays: the last one made.
+        let (producer, discards) = rings_rx
+            .try_iter()
+            .last()
+            .ok_or(EngineError::EngineStopped)?;
 
         let timeline = Arc::new(Mutex::new(Timeline::new()));
         let (commands, command_rx) = mpsc::channel();

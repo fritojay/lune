@@ -254,19 +254,29 @@ fn restarts_that_keep_failing_fail_the_output_for_good() {
 }
 
 #[test]
-fn the_preferred_device_plays_when_connected_and_else_the_default_in_its_place() {
-    let find = |id: &str| (id == "usb").then_some("usb");
+fn the_preferred_device_plays_when_it_opens_and_else_the_default_in_its_place() {
+    let find = |id: &str| ["usb", "busy"].contains(&id).then(|| id.to_owned());
+    let open = |device: &String| match device.as_str() {
+        "busy" => Err(EngineError::OutputConfig("held by another app".into())),
+        device => Ok(device.to_owned()),
+    };
+    // (preferred, default, the device that plays and whether to watch for
+    // the preferred one)
     for (preferred, default, chosen) in [
         (Some("usb"), Some("default"), Some(("usb", false))),
         (Some("gone"), Some("default"), Some(("default", true))),
+        (Some("busy"), Some("default"), Some(("default", false))),
         (None, Some("default"), Some(("default", false))),
         (Some("gone"), None, None),
+        (Some("busy"), None, None),
+        (Some("busy"), Some("busy"), None),
+        (None, Some("busy"), None),
         (None, None, None),
     ] {
         assert_eq!(
-            choose_device(preferred, find, || default),
-            chosen,
-            "{preferred:?}"
+            open_device(preferred, find, || default.map(str::to_owned), open).ok(),
+            chosen.map(|(device, watch)| (device.to_owned(), watch)),
+            "{preferred:?}, {default:?}"
         );
     }
 }
