@@ -136,7 +136,6 @@ pub fn list_track(id: i64, album_id: i64, art_id: Option<i64>) -> ListTrack {
     }
 }
 
-/// Each entry's `key: "value"` in the QML source `qml`, in order.
 /// What an entry QML reads as an object (a `QVariantMap`) has at `key`.
 pub fn entry_value(entry: &cxx_qt_lib::QVariant, key: &str) -> Option<cxx_qt_lib::QVariant> {
     entry
