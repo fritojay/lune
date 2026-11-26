@@ -5,59 +5,43 @@ import com.lune.player
 
 Menu {
     id: sortMenu
-    required property string sortColumn
-    required property bool sortDescending
-    // Whether album order has a direction in this grouping.
-    required property bool albumDirectional
-    readonly property bool sorted: sortColumn !== ""
-    readonly property bool directional: sorted || albumDirectional
+    // FilterModel's sortMenu.
+    required property var items
+
     signal sortChosen(string column, bool descending)
 
     component SortMenuItem: MenuItem {
         id: sortItem
-        required property string column
-        required property bool descending
-        required property bool selected
+        required property var item
+        text: item.text
+        enabled: item.enabled
         checkable: true
-        checked: selected
+        checked: item.checked
         onTriggered: {
-            (menu as SortMenu).sortChosen(sortItem.column, sortItem.descending)
+            (menu as SortMenu).sortChosen(sortItem.item.column, sortItem.item.descending)
             // A click toggles `checked`, which breaks its binding.
-            checked = Qt.binding(() => sortItem.selected)
+            checked = Qt.binding(() => sortItem.item.checked)
         }
     }
 
     SortMenuItem {
-        text: qsTr("Album Order")
-        column: ""
-        descending: sortMenu.sortDescending
-        selected: !sortMenu.sorted
+        item: sortMenu.items.albumOrder
     }
     MenuSeparator {}
     Repeater {
+        // One item per column, the same ones whatever the sort, so the
+        // items aren't made again on each change.
         model: Columns.all
         SortMenuItem {
-            required property var modelData
-            text: modelData.menuTitle
-            column: modelData.id
-            // Album order's direction is about years, not columns.
-            descending: sortMenu.sorted && sortMenu.sortDescending
-            selected: sortMenu.sortColumn === column
+            required property int index
+            item: sortMenu.items.columns[index]
         }
     }
     MenuSeparator {}
     SortMenuItem {
-        text: qsTr("Ascending")
-        enabled: sortMenu.directional
-        column: sortMenu.sortColumn
-        descending: false
-        selected: sortMenu.directional && !sortMenu.sortDescending
+        item: sortMenu.items.directions[0]
     }
     SortMenuItem {
-        text: qsTr("Descending")
-        enabled: sortMenu.directional
-        column: sortMenu.sortColumn
-        descending: true
-        selected: sortMenu.directional && sortMenu.sortDescending
+        item: sortMenu.items.directions[1]
     }
 }

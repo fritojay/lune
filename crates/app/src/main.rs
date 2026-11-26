@@ -22,6 +22,7 @@ mod preferences;
 mod property;
 mod queue_model;
 mod session;
+mod sort_menu;
 mod sources_model;
 #[cfg(test)]
 #[path = "tests/test_util.rs"]

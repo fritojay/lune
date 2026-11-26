@@ -81,9 +81,7 @@ ApplicationWindow {
             MenuSeparator {}
             SortMenu {
                 title: qsTr("&Sort")
-                sortColumn: filters.sortColumn
-                sortDescending: filters.sortDescending
-                albumDirectional: filters.albumDirectional
+                items: filters.sortMenu
                 onSortChosen: (column, descending) => filters.setSort(column, descending)
             }
             ColumnsMenu {
@@ -383,9 +381,8 @@ ApplicationWindow {
                     trackCount: filters.trackCount
                     title: filters.title
                     loading: filters.loading
-                    sortColumn: filters.sortColumn
-                    sortDescending: filters.sortDescending
-                    albumDirectional: filters.albumDirectional
+                    sortMenu: filters.sortMenu
+                    sortHeadings: filters.sortHeadings
                     scanStatus: library.busy ? library.status : ""
                     currentTrackId: player.currentTrackId
                     hiddenColumns: layout.hiddenColumns

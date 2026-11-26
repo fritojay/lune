@@ -22,6 +22,7 @@ use lune_core::{
 use crate::list_model::{self, Role, text};
 use crate::property::set;
 use crate::session::{self, Change};
+use crate::sort_menu::{SortMenu, headings, headings_variant, menu_variant, sort_menu};
 use crate::{format, sources_model};
 
 #[cxx_qt::bridge]
@@ -48,10 +49,10 @@ pub mod qobject {
         #[qproperty(i32, current_row, cxx_name = "currentRow", READ, NOTIFY)]
         #[qproperty(QString, title, READ, NOTIFY)]
         #[qproperty(i32, track_count, cxx_name = "trackCount", READ, NOTIFY)]
-        #[qproperty(QString, sort_column, cxx_name = "sortColumn", READ, NOTIFY)]
-        #[qproperty(bool, sort_descending, cxx_name = "sortDescending", READ, NOTIFY)]
-        /// Whether album order has a direction to pick in this source.
-        #[qproperty(bool, album_directional, cxx_name = "albumDirectional", READ, NOTIFY)]
+        /// The sort menu's items; see `sort_menu::menu_variant`.
+        #[qproperty(QVariant, sort_menu, cxx_name = "sortMenu", READ, NOTIFY)]
+        /// The column headings; see `sort_menu::headings_variant`.
+        #[qproperty(QVariant, sort_headings, cxx_name = "sortHeadings", READ, NOTIFY)]
         /// `SourcesModel`'s `kind` of the source.
         #[qproperty(QString, source_kind, cxx_name = "sourceKind", READ, NOTIFY)]
         /// The main pane is a track list, not albums with covers.
@@ -100,7 +101,7 @@ pub mod qobject {
         fn search_cleared(self: Pin<&mut FilterModel>);
 
         /// A click on column `column`'s heading. Columns go by
-        /// `SortColumn::name`; `sortColumn` is empty in album order.
+        /// `SortColumn::name`.
         #[qinvokable]
         #[cxx_name = "sortBy"]
         fn sort_by(self: Pin<&mut FilterModel>, column: &QString);
@@ -157,10 +158,10 @@ pub struct FilterModelRust {
     current_row: i32,
     title: QString,
     track_count: i32,
-    sort_column: QString,
-    /// The direction of `sortColumn`'s sort, or of album order without one.
-    sort_descending: bool,
-    album_directional: bool,
+    sort_menu: QVariant,
+    sort_headings: QVariant,
+    /// What `sort_menu` and `sort_headings` show.
+    shown_sort: (SortMenu, Vec<(&'static str, String, bool)>),
     source_kind: QString,
     flat: bool,
     reorderable: bool,
@@ -180,15 +181,15 @@ pub struct FilterModelRust {
 impl Default for FilterModelRust {
     fn default() -> Self {
         let state = session::browse();
-        let (sort_column, sort_descending) = sort_state(state.sort, state.album_descending);
+        let shown_sort = sort_of(&state);
         Self {
             loading: true,
             current_row: 0,
             title: QString::default(),
             track_count: 0,
-            sort_column: QString::from(sort_column),
-            sort_descending,
-            album_directional: state.source.has_album_direction(),
+            sort_menu: menu_variant(&shown_sort.0),
+            sort_headings: headings_variant(&shown_sort.1),
+            shown_sort,
             source_kind: QString::from(sources_model::kind(state.source)),
             flat: false,
             reorderable: false,
@@ -445,25 +446,16 @@ impl qobject::FilterModel {
             source_kind_changed,
             QString::from(sources_model::kind(state.source))
         );
-        let (sort_column, sort_descending) = sort_state(state.sort, state.album_descending);
-        set!(
-            self,
-            album_directional,
-            album_directional_changed,
-            state.source.has_album_direction()
-        );
-        set!(
-            self,
-            sort_column,
-            sort_column_changed,
-            QString::from(sort_column)
-        );
-        set!(
-            self,
-            sort_descending,
-            sort_descending_changed,
-            sort_descending
-        );
+        let sort = sort_of(&state);
+        if sort.0 != self.shown_sort.0 {
+            self.as_mut().rust_mut().sort_menu = menu_variant(&sort.0);
+            self.as_mut().sort_menu_changed();
+        }
+        if sort.1 != self.shown_sort.1 {
+            self.as_mut().rust_mut().sort_headings = headings_variant(&sort.1);
+            self.as_mut().sort_headings_changed();
+        }
+        self.as_mut().rust_mut().shown_sort = sort;
         session::set_browse(state);
     }
 
@@ -526,6 +518,14 @@ impl qobject::FilterModel {
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
         list_model::role_names(ROLES)
     }
+}
+
+fn sort_of(state: &BrowseState) -> (SortMenu, Vec<(&'static str, String, bool)>) {
+    let (column, descending) = sort_state(state.sort, state.album_descending);
+    (
+        sort_menu(column, descending, state.source.has_album_direction()),
+        headings(column, descending),
+    )
 }
 
 fn playlist_name(id: ListId) -> String {

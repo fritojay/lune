@@ -17,9 +17,9 @@ ColumnLayout {
     required property int trackCount
     required property string title
     required property bool loading
-    required property string sortColumn
-    required property bool sortDescending
-    required property bool albumDirectional
+    // FilterModel's.
+    required property var sortMenu
+    required property var sortHeadings
     required property string scanStatus
     required property real currentTrackId
     required property var hiddenColumns
@@ -123,10 +123,6 @@ ColumnLayout {
         }
     }
 
-    function heading(text: string, column: string): string {
-        return text + (sortColumn === column ? (sortDescending ? " ▼" : " ▲") : "")
-    }
-
     component SortHeading: Label {
         id: sortHeading
         property bool active
@@ -183,9 +179,7 @@ ColumnLayout {
 
     SortMenu {
         id: sortMenu
-        sortColumn: trackPane.sortColumn
-        sortDescending: trackPane.sortDescending
-        albumDirectional: trackPane.albumDirectional
+        items: trackPane.sortMenu
         onSortChosen: (column, descending) => trackPane.sortChosen(column, descending)
 
         MenuSeparator {}
@@ -302,11 +296,12 @@ ColumnLayout {
                     required property var modelData
                     required property int index
                     readonly property real columnWidth: trackPane.columnWidths[index] ?? 0
+                    readonly property var heading: trackPane.sortHeadings[modelData.id]
                     visible: columnWidth > 0
                     Layout.preferredWidth: columnWidth
                     horizontalAlignment: modelData.alignRight ? Text.AlignRight : Text.AlignLeft
-                    text: trackPane.heading(modelData.title, modelData.id)
-                    active: trackPane.sortColumn === modelData.id
+                    text: heading.text
+                    active: heading.active
                     onClicked: trackPane.sortClicked(modelData.id)
                 }
             }
