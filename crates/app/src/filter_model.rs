@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 
-use cxx_qt::{CxxQtType, Threading};
+use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use lune_core::{
     BrowseState, Filter, FilterValue, Grouping, Library, ListId, MenuChoice, Playlist, Source,
@@ -208,39 +208,8 @@ impl Default for FilterModelRust {
 
 impl cxx_qt::Initialize for qobject::FilterModel {
     fn initialize(mut self: Pin<&mut Self>) {
-        let (tx, rx) = mpsc::channel::<(u64, String)>();
-        let qt_thread = self.qt_thread();
-        let db_path = crate::config().db_path.clone();
-        std::thread::spawn(move || {
-            let library = match Library::open(&db_path) {
-                Ok(library) => library,
-                Err(err) => {
-                    session::report_error(&format!("Search is unavailable: {err}"));
-                    return;
-                }
-            };
-            while let Ok(first) = rx.recv() {
-                // Only the latest text matters; skip what was typed meanwhile.
-                let Some((generation, text)) = std::iter::once(first).chain(rx.try_iter()).last()
-                else {
-                    continue;
-                };
-                let matches = match library.search_ids(&text) {
-                    Ok(ids) => ids,
-                    Err(err) => {
-                        session::report_error(&format!("Search failed: {err}"));
-                        continue;
-                    }
-                };
-                if qt_thread
-                    .queue(move |model| model.apply_search(generation, matches))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-        self.as_mut().rust_mut().searches = Some(tx);
+        let searches = start_search(self.qt_thread());
+        self.as_mut().rust_mut().searches = searches;
         session::on_change(self.qt_thread(), |model, change| match change {
             Change::Catalog => model.reload(),
             Change::Played => model.played(),
@@ -518,6 +487,51 @@ impl qobject::FilterModel {
 
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
         list_model::role_names(ROLES)
+    }
+}
+
+/// Runs searches on their own thread and DB connection. `None` when the
+/// thread couldn't start; search is then unavailable.
+fn start_search(qt_thread: CxxQtThread<qobject::FilterModel>) -> Option<Sender<(u64, String)>> {
+    let (tx, rx) = mpsc::channel::<(u64, String)>();
+    let db_path = crate::config().db_path.clone();
+    let spawned = std::thread::Builder::new()
+        .name("lune-search".into())
+        .spawn(move || {
+            let library = match Library::open(&db_path) {
+                Ok(library) => library,
+                Err(err) => {
+                    session::report_error(&format!("Search is unavailable: {err}"));
+                    return;
+                }
+            };
+            while let Ok(first) = rx.recv() {
+                // Only the latest text matters; skip what was typed meanwhile.
+                let Some((generation, text)) = std::iter::once(first).chain(rx.try_iter()).last()
+                else {
+                    continue;
+                };
+                let matches = match library.search_ids(&text) {
+                    Ok(ids) => ids,
+                    Err(err) => {
+                        session::report_error(&format!("Search failed: {err}"));
+                        continue;
+                    }
+                };
+                if qt_thread
+                    .queue(move |model| model.apply_search(generation, matches))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    match spawned {
+        Ok(_) => Some(tx),
+        Err(err) => {
+            session::report_error(&format!("Search is unavailable: {err}"));
+            None
+        }
     }
 }
 
