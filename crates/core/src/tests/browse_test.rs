@@ -572,6 +572,21 @@ fn all_has_every_field_once_in_declaration_order() {
     }
 }
 
+/// No wildcard arm, so a new order doesn't compile until it's counted here.
+fn order_count() -> usize {
+    match Order::Catalog {
+        Order::Catalog | Order::Year | Order::Added | Order::Played => 4,
+    }
+}
+
+#[test]
+fn all_has_every_order_once_in_declaration_order() {
+    assert_eq!(Order::ALL.len(), order_count());
+    for (i, order) in Order::ALL.into_iter().enumerate() {
+        assert_eq!(order as usize, i);
+    }
+}
+
 #[test]
 fn a_groupings_name_is_the_one_it_is_saved_under() {
     for grouping in Grouping::ALL {
@@ -845,6 +860,51 @@ proptest! {
                 prop_assert_eq!(values, albums);
             }
             _ => prop_assert_eq!(newest, filters),
+        }
+    }
+
+    #[test]
+    fn an_order_lists_tracks_at_most_once_with_whole_albums_in_catalog_order(
+        tracks in arb_tracks(),
+        grouping in arb_grouping(),
+    ) {
+        let catalog = Catalog::new(tracks);
+        let order: Vec<usize> = catalog.order(grouping).collect();
+        let mut seen = HashSet::new();
+        let mut done_albums = HashSet::new();
+        for (at, &i) in order.iter().enumerate() {
+            prop_assert!(i < catalog.len());
+            prop_assert!(seen.insert(i));
+            let album = catalog.track(i).unwrap().album_id;
+            match at.checked_sub(1).map(|prev| order[prev]) {
+                Some(prev) if catalog.track(prev).unwrap().album_id == album => {
+                    prop_assert!(prev < i);
+                }
+                Some(prev) => {
+                    done_albums.insert(catalog.track(prev).unwrap().album_id);
+                    prop_assert!(!done_albums.contains(&album));
+                }
+                None => {}
+            }
+        }
+    }
+
+    #[test]
+    fn a_recorded_play_tops_recently_played_and_leaves_the_other_orders_alone(
+        tracks in arb_tracks(),
+        pick in any::<Index>(),
+    ) {
+        prop_assume!(!tracks.is_empty());
+        let mut catalog = Catalog::new(tracks);
+        let before = catalog.clone();
+        let played = catalog.track(pick.index(catalog.len())).unwrap().clone();
+        catalog.record_play(played.id, SystemTime::now());
+        let top = catalog.order(Grouping::RecentlyPlayed).next();
+        prop_assert_eq!(top.map(|i| catalog.track(i).unwrap().album_id), Some(played.album_id));
+        for grouping in Grouping::ALL {
+            if grouping != Grouping::RecentlyPlayed {
+                prop_assert!(catalog.order(grouping).eq(before.order(grouping)), "{:?}", grouping);
+            }
         }
     }
 }

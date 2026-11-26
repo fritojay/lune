@@ -63,7 +63,7 @@ impl Grouping {
     /// which [`Catalog::newest_first`] reverses. Groupings ordered by date
     /// are always newest first.
     pub fn has_album_direction(self) -> bool {
-        matches!(self.def().0, Order::Catalog | Order::Year)
+        matches!(self.def().0.def().direction, Direction::UserPicks { .. })
     }
 
     /// The order its values are listed in, and what they are.
@@ -221,6 +221,84 @@ enum Order {
     Year,
     Added,
     Played,
+}
+
+impl Order {
+    /// In declaration order, so [`Catalog`] can index its orders by discriminant.
+    const ALL: [Self; 4] = [Self::Catalog, Self::Year, Self::Added, Self::Played];
+
+    fn def(self) -> OrderDef {
+        match self {
+            Self::Catalog => OrderDef {
+                tracks: TrackOrder::Catalog,
+                direction: Direction::UserPicks {
+                    within: |t| &t.album_artist_key,
+                },
+                depends_on_played: false,
+            },
+            Self::Year => OrderDef {
+                tracks: TrackOrder::StableBy(|a, b| {
+                    let year = |t: &ListTrack| (t.album_year.is_none(), t.album_year);
+                    year(a).cmp(&year(b))
+                }),
+                direction: Direction::UserPicks { within: |_| "" },
+                depends_on_played: false,
+            },
+            Self::Added => OrderDef {
+                tracks: TrackOrder::AlbumRecency(|t| t.added_ns),
+                direction: Direction::AlwaysNewestFirst,
+                depends_on_played: false,
+            },
+            Self::Played => OrderDef {
+                tracks: TrackOrder::AlbumRecency(|t| t.played_ns),
+                direction: Direction::AlwaysNewestFirst,
+                depends_on_played: true,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OrderDef {
+    tracks: TrackOrder,
+    direction: Direction,
+    /// Whether [`Catalog::record_play`] has to rebuild it.
+    depends_on_played: bool,
+}
+
+#[derive(Clone, Copy)]
+enum TrackOrder {
+    Catalog,
+    /// Catalog order, stably sorted by this.
+    StableBy(fn(&ListTrack, &ListTrack) -> Ordering),
+    /// Only albums with this date, by their newest, newest first.
+    AlbumRecency(fn(&ListTrack) -> Option<i64>),
+}
+
+impl TrackOrder {
+    /// Indices of `tracks` in this order; `None` for catalog order, which
+    /// needs no index.
+    fn index(self, tracks: &[ListTrack]) -> Option<Vec<usize>> {
+        match self {
+            Self::Catalog => None,
+            Self::StableBy(compare) => {
+                let mut order: Vec<usize> = (0..tracks.len()).collect();
+                order.sort_by(|&a, &b| compare(&tracks[a], &tracks[b]));
+                Some(order)
+            }
+            Self::AlbumRecency(date) => Some(by_recency(tracks, date)),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Direction {
+    /// [`Catalog::newest_first`] lists years descending among the albums
+    /// that share this key, keeping the order of the keys.
+    UserPicks {
+        within: fn(&ListTrack) -> &str,
+    },
+    AlwaysNewestFirst,
 }
 
 /// A value of a grouping; the grouping's [`Field`] says what it is.
@@ -447,15 +525,8 @@ pub struct Catalog {
     title_keys: Vec<String>,
     /// Albums with a track on a disc after the first.
     multi_disc: HashSet<i64>,
-    /// Indices of `tracks` in year order: album year (Unknown last), then
-    /// album artist order.
-    by_year: Vec<usize>,
-    /// Indices of `tracks` in [`Grouping::RecentlyAdded`] order, without
-    /// undated albums.
-    by_added: Vec<usize>,
-    /// Indices of `tracks` in [`Grouping::RecentlyPlayed`] order, without
-    /// albums never played.
-    by_played: Vec<usize>,
+    /// Per order, by discriminant: [`TrackOrder::index`].
+    orders: [Option<Vec<usize>>; Order::ALL.len()],
     by_id: HashMap<i64, usize>,
 }
 
@@ -472,23 +543,14 @@ impl Catalog {
             .filter(|t| t.disc_no.is_some_and(|d| d > 1))
             .map(|t| t.album_id)
             .collect();
-        let mut by_year: Vec<usize> = (0..tracks.len()).collect();
-        // Stable, so album artist order is kept within each year.
-        by_year.sort_by_key(|&i| {
-            let year = tracks[i].album_year;
-            (year.is_none(), year)
-        });
-        let by_added = by_recency(&tracks, |t| t.added_ns);
-        let by_played = by_recency(&tracks, |t| t.played_ns);
+        let orders = Order::ALL.map(|order| order.def().tracks.index(&tracks));
         let by_id = tracks.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
         Self {
             tracks,
             text_keys,
             title_keys,
             multi_disc,
-            by_year,
-            by_added,
-            by_played,
+            orders,
             by_id,
         }
     }
@@ -504,7 +566,12 @@ impl Catalog {
             return;
         };
         track.played_ns = Some(unix_ns(at));
-        self.by_played = by_recency(&self.tracks, |t| t.played_ns);
+        for order in Order::ALL {
+            let def = order.def();
+            if def.depends_on_played {
+                self.orders[order as usize] = def.tracks.index(&self.tracks);
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -665,13 +732,12 @@ impl Catalog {
             (year.is_none(), Reverse(year))
         };
         let mut albums = view.albums.clone();
-        match grouping.def().0 {
-            // Stable, so album title order is kept within each year.
-            Order::Catalog => {
-                albums.sort_by_key(|album| (first(album).album_artist_key.as_str(), year(album)));
+        match grouping.def().0.def().direction {
+            // Stable, so the order within each year is kept.
+            Direction::UserPicks { within } => {
+                albums.sort_by_key(|album| (within(first(album)), year(album)));
             }
-            Order::Year => albums.sort_by_key(year),
-            Order::Added | Order::Played => return view,
+            Direction::AlwaysNewestFirst => return view,
         }
         let mut newest = View::default();
         for album in albums {
@@ -683,11 +749,9 @@ impl Catalog {
     }
 
     fn order(&self, grouping: Grouping) -> Box<dyn Iterator<Item = usize> + '_> {
-        match grouping.def().0 {
-            Order::Catalog => Box::new(0..self.tracks.len()),
-            Order::Year => Box::new(self.by_year.iter().copied()),
-            Order::Added => Box::new(self.by_added.iter().copied()),
-            Order::Played => Box::new(self.by_played.iter().copied()),
+        match &self.orders[grouping.def().0 as usize] {
+            None => Box::new(0..self.tracks.len()),
+            Some(order) => Box::new(order.iter().copied()),
         }
     }
 }
