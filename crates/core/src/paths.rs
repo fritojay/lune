@@ -95,11 +95,25 @@ fn beside_db(db_path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Links followed to a DB not made yet, as many as Linux follows: past
+/// that they likely form a loop.
+const MAX_LINKS: usize = 40;
+
 /// `db_path` with links resolved, so every path to one library finds one
-/// lock. The DB may not exist yet; its folder does.
+/// lock. The DB may not exist yet, even when `db_path` is a link to it; its
+/// folder does.
 fn resolved(db_path: &Path) -> PathBuf {
-    if let Ok(path) = std::fs::canonicalize(db_path) {
-        return path;
+    let mut db_path = db_path.to_path_buf();
+    for _ in 0..MAX_LINKS {
+        if let Ok(path) = std::fs::canonicalize(&db_path) {
+            return path;
+        }
+        let Ok(target) = std::fs::read_link(&db_path) else {
+            break;
+        };
+        db_path = db_path
+            .parent()
+            .map_or_else(|| target.clone(), |dir| dir.join(&target));
     }
     let dir = db_path
         .parent()

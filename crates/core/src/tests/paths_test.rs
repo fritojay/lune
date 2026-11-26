@@ -53,24 +53,46 @@ fn a_library_reached_through_links_is_the_same_library() {
     let dir = TempDir::new();
     let real_dir = dir.path().join("data");
     let db = real_dir.join("library.sqlite3");
-    let held = lock_library(&db).unwrap();
-    let linked_dir = dir.path().join("linked");
-    symlink(&real_dir, &linked_dir).unwrap();
-    let through_dir = linked_dir.join("library.sqlite3");
-    assert!(
-        matches!(lock_library(&through_dir), Err(CoreError::LibraryInUse(path)) if path == through_dir)
-    );
-    drop(held);
-    dir.touch("data/library.sqlite3");
-    let held = lock_library(&db).unwrap();
-    let linked_db = dir.path().join("link.sqlite3");
-    symlink(&db, &linked_db).unwrap();
-    assert!(matches!(
-        lock_library(&linked_db),
-        Err(CoreError::LibraryInUse(_))
-    ));
-    drop(held);
-    let _again = lock_library(&linked_db).unwrap();
+    drop(lock_library(&db).unwrap());
+    symlink(&real_dir, dir.path().join("linked")).unwrap();
+    symlink(&db, dir.path().join("link.sqlite3")).unwrap();
+    symlink("data/library.sqlite3", dir.path().join("relative.sqlite3")).unwrap();
+    symlink("link.sqlite3", dir.path().join("link-to-link.sqlite3")).unwrap();
+    let links = [
+        "linked/library.sqlite3",
+        "link.sqlite3",
+        "relative.sqlite3",
+        "link-to-link.sqlite3",
+    ]
+    .map(|link| dir.path().join(link));
+    // Before and after the DB is made: a link to it can lead nowhere yet.
+    for made in [false, true] {
+        if made {
+            dir.touch("data/library.sqlite3");
+        }
+        let held = lock_library(&db).unwrap();
+        for link in &links {
+            assert!(
+                matches!(lock_library(link), Err(CoreError::LibraryInUse(path)) if &path == link),
+                "{link:?}, made: {made}"
+            );
+        }
+        drop(held);
+        let held = lock_library(&links[3]).unwrap();
+        assert!(matches!(lock_library(&db), Err(CoreError::LibraryInUse(_))));
+        drop(held);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn links_in_a_loop_still_lock() {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::new();
+    let a = dir.path().join("a.sqlite3");
+    symlink("b.sqlite3", &a).unwrap();
+    symlink("a.sqlite3", dir.path().join("b.sqlite3")).unwrap();
+    let _held = lock_library(&a).unwrap();
 }
 
 #[test]
