@@ -1,36 +1,48 @@
-//! Logs to stderr, or without a console (a Windows release build) to a log
-//! file, so a failure that would otherwise go unseen is recorded.
+//! Logs to the console when there is one, and always to a log file, so a
+//! bug report has the log even when the app was started from the desktop.
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::fmt;
+use tracing_subscriber::prelude::*;
 
 /// False exactly where `windows_subsystem = "windows"` applies (main.rs).
 pub const HAS_CONSOLE: bool = !cfg!(all(windows, not(debug_assertions)));
 
-/// Without a console, warnings are logged too unless `RUST_LOG` says
-/// otherwise (it is awkward to set for a GUI app), and so are panics.
+static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// The log file this run writes, if one could be opened.
+pub fn log_path() -> Option<&'static Path> {
+    LOG_PATH.get().map(PathBuf::as_path)
+}
+
+/// Warnings are logged too unless `RUST_LOG` says otherwise (it is awkward
+/// to set for a GUI app), and so are panics.
 pub fn init() {
-    if HAS_CONSOLE {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-        return;
-    }
     let filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::WARN.into())
         .from_env_lossy();
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_ansi(false);
-    match open_first(&log_paths()) {
-        Some(file) => subscriber.with_writer(Mutex::new(file)).init(),
-        None => subscriber.init(),
-    }
-    std::panic::set_hook(Box::new(|info| tracing::error!("{info}")));
+    let file = open_first(&log_paths()).map(|(path, file)| {
+        let _ = LOG_PATH.set(path);
+        fmt::layer().with_ansi(false).with_writer(Mutex::new(file))
+    });
+    let console = HAS_CONSOLE.then(fmt::layer);
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(console)
+        .with(file)
+        .init();
+    std::panic::set_hook(Box::new(|info| {
+        let backtrace = std::backtrace::Backtrace::capture();
+        match backtrace.status() {
+            std::backtrace::BacktraceStatus::Captured => tracing::error!("{info}\n{backtrace}"),
+            _ => tracing::error!("{info}"),
+        }
+    }));
 }
 
 /// The app's own log, then one in the temp folder for when the app's folder
@@ -46,8 +58,10 @@ fn log_paths() -> Vec<PathBuf> {
 
 /// The first of `paths` that can be created and isn't another running
 /// instance's log, emptied so it only holds this run.
-fn open_first(paths: &[PathBuf]) -> Option<File> {
-    paths.iter().find_map(|path| open_log(path))
+fn open_first(paths: &[PathBuf]) -> Option<(PathBuf, File)> {
+    paths
+        .iter()
+        .find_map(|path| Some((path.clone(), open_log(path)?)))
 }
 
 #[expect(

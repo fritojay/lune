@@ -262,7 +262,7 @@ The app icon is a placeholder: `packaging/icon/lune.svg`. After changing it, re-
 
 ## Logging
 
-Both binaries use `tracing`. Set `RUST_LOG`, for example `RUST_LOG=debug` or `RUST_LOG=lune_engine=trace`. The CLI defaults to `warn` and logs to stderr. A Windows release build of the app has no console, so it logs to `lune.log` in its data folder instead (`data\lune.log` in the zip), emptied at each launch. There it logs warnings as well as errors unless `RUST_LOG` is set, and panics too. If that file can't be written (the folder is read-only, or another running Lune has it), it logs to `%TEMP%\lune.log`.
+Both binaries use `tracing`. Set `RUST_LOG`, for example `RUST_LOG=debug` or `RUST_LOG=lune_engine=trace`. The CLI defaults to `warn` and logs to stderr. The app logs warnings, errors, and panics unless `RUST_LOG` says otherwise: to its console if it has one (a Windows release build doesn't), and always to `lune.log` in its data folder (`~/.local/share/lune/` on Linux, `data\lune.log` in the Windows zip), emptied at each launch. The About dialog shows the file's path. If that file can't be written (the folder is read-only, or another running Lune has it), the app logs to `lune.log` in the temp folder.
 
 ## Running a subset of tests
 

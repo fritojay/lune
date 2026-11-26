@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import com.lune.player
 
 Dialog {
     title: qsTr("About Lune")
@@ -30,6 +31,20 @@ Dialog {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("Version %1").arg(Qt.application.version)
             opacity: 0.7
+        }
+
+        // Selectable, so it can be copied into a bug report.
+        TextEdit {
+            Layout.fillWidth: true
+            visible: Preferences.logFile !== ""
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: TextEdit.WrapAnywhere
+            readOnly: true
+            selectByMouse: true
+            textFormat: TextEdit.PlainText
+            color: palette.text
+            opacity: 0.7
+            text: qsTr("Log: %1").arg(Preferences.logFile)
         }
 
         Label {

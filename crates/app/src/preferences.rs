@@ -38,6 +38,8 @@ pub mod qobject {
         #[qproperty(i32, min_scroll_speed, cxx_name = "minScrollSpeed", READ, CONSTANT)]
         #[qproperty(i32, max_scroll_speed, cxx_name = "maxScrollSpeed", READ, CONSTANT)]
         #[qproperty(QString, error, READ, NOTIFY)]
+        /// Empty when there is none.
+        #[qproperty(QString, log_file, cxx_name = "logFile", READ, CONSTANT)]
         /// What `outputDevice` picks from: the system default first.
         #[qproperty(QStringList, output_devices, cxx_name = "outputDevices", READ, NOTIFY)]
         #[qproperty(i32, output_device, cxx_name = "outputDevice", READ, WRITE = set_output_device, NOTIFY)]
@@ -67,6 +69,7 @@ pub struct PreferencesRust {
     min_scroll_speed: i32,
     max_scroll_speed: i32,
     error: QString,
+    log_file: QString,
     output_devices: QStringList,
     output_device: i32,
     /// The device each of `output_devices` names; `None` is the default.
@@ -80,6 +83,9 @@ impl Default for PreferencesRust {
             min_scroll_speed: qml_int(*SCROLL_SPEEDS.start()),
             max_scroll_speed: qml_int(*SCROLL_SPEEDS.end()),
             error: QString::default(),
+            log_file: crate::logging::log_path()
+                .map(|path| QString::from(&path.display().to_string()))
+                .unwrap_or_default(),
             output_devices: QStringList::default(),
             output_device: 0,
             output_ids: Vec::new(),
