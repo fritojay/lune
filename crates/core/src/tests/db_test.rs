@@ -8,6 +8,19 @@ fn a_negative_schema_version_is_rejected() {
 }
 
 #[test]
+fn a_failed_migration_leaves_no_transaction_open_and_the_version_as_it_was() {
+    let conn = open_in_memory().unwrap();
+    // v4 drops `art.cache_path`, which the latest schema no longer has.
+    conn.pragma_update(None, "user_version", 3).unwrap();
+    assert!(migrate(&conn).is_err());
+    assert!(conn.is_autocommit());
+    let v: i64 = conn
+        .pragma_query_value(None, "user_version", |r| r.get("user_version"))
+        .unwrap();
+    assert_eq!(v, 3);
+}
+
+#[test]
 fn a_newer_schema_is_rejected_and_migrations_reach_the_latest() {
     let conn = open_in_memory().unwrap();
     let v: i64 = conn

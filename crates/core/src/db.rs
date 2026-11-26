@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::{CoreError, Result};
 
@@ -245,20 +245,14 @@ fn migrate(conn: &Connection) -> Result<()> {
         let next = version as i64 + 1;
         // Several connections can open a new file at once (the app's
         // threads): take the write lock, then check nobody migrated meanwhile.
-        conn.execute_batch("BEGIN IMMEDIATE")?;
+        let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
         let current: i64 =
-            conn.pragma_query_value(None, "user_version", |row| row.get("user_version"))?;
-        if current >= next {
-            conn.execute_batch("COMMIT")?;
-            continue;
+            tx.pragma_query_value(None, "user_version", |row| row.get("user_version"))?;
+        if current < next {
+            tracing::info!(from = version, to = next, "migrating library schema");
+            tx.execute_batch(&format!("{sql}; PRAGMA user_version = {next};"))?;
         }
-        tracing::info!(from = version, to = next, "migrating library schema");
-        let migrated = conn.execute_batch(&format!("{sql}; PRAGMA user_version = {next};"));
-        if let Err(err) = migrated {
-            let _ = conn.execute_batch("ROLLBACK");
-            return Err(err.into());
-        }
-        conn.execute_batch("COMMIT")?;
+        tx.commit()?;
     }
     Ok(())
 }
