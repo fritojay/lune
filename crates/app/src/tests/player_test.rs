@@ -1,41 +1,89 @@
+use std::path::PathBuf;
+
 use lune_core::Grouping;
+use proptest::prelude::*;
 
 use super::*;
 use crate::test_util::list_track;
 
-fn ids(tracks: &[(i64, PathBuf)]) -> Vec<i64> {
-    tracks.iter().map(|(id, _)| *id).collect()
+fn queued(track_ids: &[i64]) -> Vec<QueueItem> {
+    (0..)
+        .zip(track_ids)
+        .map(|(slot, &track_id)| QueueItem {
+            slot: SlotId(slot),
+            track_id,
+            path: PathBuf::from(format!("queued {track_id}")),
+        })
+        .collect()
+}
+
+proptest! {
+    #[test]
+    fn a_selection_is_its_lists_rows_in_order_without_rows_past_the_end(
+        albums in prop::collection::vec(1..4i64, 0..6),
+        queue in prop::collection::vec(0..9i64, 0..6),
+        source in prop::sample::select(vec!["view", "queue"]),
+        start in -2..9i32,
+        count in prop_oneof![-2..9i32, Just(i32::MAX)],
+    ) {
+        let catalog = Catalog::new(
+            (1..).zip(&albums).map(|(id, &album)| list_track(id, album, None)).collect(),
+        );
+        let view = catalog.view(Grouping::AlbumArtist, &lune_core::TrackFilter::All);
+        let queue = queued(&queue);
+        let selection = Selection::new(source, start, count);
+        prop_assert_eq!(selection.is_some(), start >= 0 && count >= 0);
+        let Some(selection) = selection else { return Ok(()) };
+
+        let rows = |row: usize| {
+            row >= start as usize && (row - start as usize) < count as usize
+        };
+        let expected: Vec<TrackRef> = match source {
+            "view" => (0..)
+                .zip(&view.tracks)
+                .filter(|(row, _)| rows(*row))
+                .map(|(_, &i)| {
+                    let track = catalog.track(i).unwrap();
+                    TrackRef { id: track.id, path: track.path.clone() }
+                })
+                .collect(),
+            _ => (0..)
+                .zip(&queue)
+                .filter(|(row, _)| rows(*row))
+                .map(|(_, item)| TrackRef { id: item.track_id, path: item.path.clone() })
+                .collect(),
+        };
+        prop_assert_eq!(selection.tracks(&catalog, &view, &queue), expected);
+    }
 }
 
 #[test]
-fn view_tracks_takes_a_range_of_the_view_in_order() {
-    let catalog = Catalog::new(vec![
-        list_track(1, 1, None),
-        list_track(2, 1, None),
-        list_track(3, 2, None),
-        list_track(4, 2, None),
-    ]);
-    let view = catalog.view(Grouping::AlbumArtist, &lune_core::TrackFilter::All);
-    assert_eq!(
-        ids(&view_tracks(&catalog, &view, 0, usize::MAX)),
-        [1, 2, 3, 4]
-    );
-    // An album: its first index and track count.
-    assert_eq!(ids(&view_tracks(&catalog, &view, 2, 2)), [3, 4]);
-    assert_eq!(
-        view_tracks(&catalog, &view, 1, 1)[0].1,
-        PathBuf::from("2.flac")
-    );
+fn an_unknown_source_selects_nothing() {
+    assert_eq!(Selection::new("playlist", 0, 1), None);
+    assert_eq!(Selection::new("", 0, 1), None);
 }
 
 #[test]
-fn view_tracks_clamps_to_the_view() {
-    let catalog = Catalog::new(vec![list_track(1, 1, None), list_track(2, 1, None)]);
-    let view = catalog.view(Grouping::AlbumArtist, &lune_core::TrackFilter::All);
-    assert_eq!(ids(&view_tracks(&catalog, &view, 1, 10)), [2]);
-    assert!(view_tracks(&catalog, &view, 5, 1).is_empty());
-    assert!(view_tracks(&catalog, &view, 0, 0).is_empty());
-    assert!(view_tracks(&catalog, &View::default(), 0, usize::MAX).is_empty());
+fn every_track_list_qml_names_is_a_selection_source() {
+    let panes = [
+        include_str!("../../qml/TrackPane.qml"),
+        include_str!("../../qml/QueuePane.qml"),
+    ];
+    let menus = panes
+        .iter()
+        .flat_map(|qml| qml.lines())
+        .filter_map(|line| line.trim().strip_prefix("source: \""));
+    let plays = include_str!("../../qml/main.qml")
+        .split("player.play(\"")
+        .skip(1);
+    let names: Vec<&str> = menus
+        .chain(plays)
+        .map(|rest| &rest[..rest.find('"').unwrap()])
+        .collect();
+    assert_eq!(names, ["view", "queue", "queue", "view"]);
+    for name in names {
+        assert!(Selection::new(name, 0, 1).is_some(), "{name}");
+    }
 }
 
 fn unmuted(level: f64) -> Volume {

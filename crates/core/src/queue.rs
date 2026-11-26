@@ -17,6 +17,12 @@ use crate::lists::{self, ListId};
 pub struct SlotId(pub u64);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackRef {
+    pub id: i64,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueItem {
     pub slot: SlotId,
     pub track_id: i64,
@@ -112,7 +118,7 @@ impl Queue {
     /// first. Returns the item to play.
     pub fn replace(
         &mut self,
-        tracks: impl IntoIterator<Item = (i64, PathBuf)>,
+        tracks: impl IntoIterator<Item = TrackRef>,
         start: usize,
     ) -> Option<&QueueItem> {
         self.items = self.new_items(tracks);
@@ -131,7 +137,7 @@ impl Queue {
 
     /// Inserts `tracks` right after the current item (at the front when
     /// nothing is current).
-    pub fn play_next(&mut self, tracks: impl IntoIterator<Item = (i64, PathBuf)>) {
+    pub fn play_next(&mut self, tracks: impl IntoIterator<Item = TrackRef>) {
         let new = self.new_items(tracks);
         let at = self.insertion_point();
         if let Some(original) = &mut self.original {
@@ -144,7 +150,7 @@ impl Queue {
         self.items.splice(at..at, new);
     }
 
-    pub fn add(&mut self, tracks: impl IntoIterator<Item = (i64, PathBuf)>) {
+    pub fn add(&mut self, tracks: impl IntoIterator<Item = TrackRef>) {
         let new = self.new_items(tracks);
         if let Some(original) = &mut self.original {
             original.extend(new.iter().map(|item| item.slot));
@@ -242,7 +248,7 @@ impl Queue {
     /// Rebuilds a queue loaded from the database, from its unshuffled order.
     /// A shuffled queue is shuffled anew, with the current item first.
     pub(crate) fn restore(
-        tracks: Vec<(i64, PathBuf)>,
+        tracks: Vec<TrackRef>,
         shuffle: bool,
         cursor: Option<usize>,
         resume: Duration,
@@ -285,15 +291,15 @@ impl Queue {
         }
     }
 
-    fn new_items(&mut self, tracks: impl IntoIterator<Item = (i64, PathBuf)>) -> Vec<QueueItem> {
+    fn new_items(&mut self, tracks: impl IntoIterator<Item = TrackRef>) -> Vec<QueueItem> {
         tracks
             .into_iter()
-            .map(|(track_id, path)| {
+            .map(|TrackRef { id, path }| {
                 let slot = SlotId(self.next_slot);
                 self.next_slot += 1;
                 QueueItem {
                     slot,
-                    track_id,
+                    track_id: id,
                     path,
                 }
             })
@@ -401,7 +407,7 @@ pub(crate) fn load(conn: &Connection) -> Result<Queue> {
         if Some(position as i64) == cursor {
             new_cursor = Some(tracks.len());
         }
-        tracks.push((track_id, path));
+        tracks.push(TrackRef { id: track_id, path });
     }
     let resume = Duration::from_millis(u64::try_from(resume_ms).unwrap_or(0));
     Ok(Queue::restore(tracks, shuffle, new_cursor, resume))

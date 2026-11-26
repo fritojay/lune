@@ -352,13 +352,13 @@ ApplicationWindow {
                     hiddenColumns: layout.hiddenColumns
                     columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
                     albumGrid: layout.albumGrid
+                    controller: player
                     onAlbumGridChosen: grid => layout.albumGrid = grid
                     onSortClicked: column => filters.sortBy(column)
                     onSortChosen: (column, descending) => filters.setSort(column, descending)
                     onColumnToggled: (column, shown) => layout.setColumnShown(column, shown)
                     onPlayRequested: start => window.playView(start)
-                    onPlayNextRequested: (start, tracks) => player.playNextFromView(start, tracks)
-                    onAddToQueueRequested: (start, tracks) => player.addFromView(start, tracks)
+                    onAlbumRequested: trackId => filters.showAlbum(trackId)
                     onAddFolderRequested: folderDialog.open()
                 }
 
@@ -402,9 +402,10 @@ ApplicationWindow {
                 currentRow: queueModel.currentRow
                 totalDuration: queueModel.totalDuration
                 shuffle: player.shuffle
+                controller: player
                         onShuffleToggled: shuffle => player.setShuffle(shuffle)
                 onClearRequested: player.clearQueue()
-                onPlayRequested: row => player.playQueueRow(row)
+                onPlayRequested: row => player.play("queue", row)
                 onRemoveRequested: row => player.removeQueueRow(row)
                 onMoveRequested: (from, to) => player.moveQueueRow(from, to)
                 onAlbumRequested: trackId => filters.showAlbum(trackId)
@@ -413,7 +414,7 @@ ApplicationWindow {
     }
 
     function playView(index) {
-        player.playView(index)
+        player.play("view", index)
         queuePane.showCurrent()
     }
 

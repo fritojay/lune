@@ -26,6 +26,7 @@ ColumnLayout {
     required property var hiddenColumns
     required property var columnWidths
     required property bool albumGrid
+    required property PlayerController controller
     // The tracks' cells: under the headings in the list, inside the open
     // album's panel in the grid.
     readonly property real rowWidth: grid ? albumRows.panelWidth - tracksLeft - tracksRight
@@ -50,8 +51,7 @@ ColumnLayout {
     signal sortChosen(string column, bool descending)
     signal columnToggled(string column, bool shown)
     signal playRequested(int start)
-    signal playNextRequested(int start, int tracks)
-    signal addToQueueRequested(int start, int tracks)
+    signal albumRequested(real trackId)
     signal addFolderRequested()
     signal albumGridChosen(bool grid)
 
@@ -104,12 +104,6 @@ ColumnLayout {
         shownAlbumId = -1
     }
 
-    function showMenu(start: int, tracks: int) {
-        trackMenu.start = start
-        trackMenu.tracks = tracks
-        trackMenu.popup()
-    }
-
     onGridChanged: dropAlbum()
 
     // A rescan took the open album out of the view. Only `openAlbumId` is
@@ -145,22 +139,12 @@ ColumnLayout {
 
     spacing: 0
 
-    Menu {
+    TrackMenu {
         id: trackMenu
-        property int start: 0
-        property int tracks: 1
-        MenuItem {
-            text: qsTr("Play")
-            onTriggered: trackPane.playRequested(trackMenu.start)
-        }
-        MenuItem {
-            text: qsTr("Play Next")
-            onTriggered: trackPane.playNextRequested(trackMenu.start, trackMenu.tracks)
-        }
-        MenuItem {
-            text: qsTr("Add to Queue")
-            onTriggered: trackPane.addToQueueRequested(trackMenu.start, trackMenu.tracks)
-        }
+        controller: trackPane.controller
+        source: "view"
+        onPlayRequested: start => trackPane.playRequested(start)
+        onAlbumRequested: trackId => trackPane.albumRequested(trackId)
     }
 
     SortMenu {
@@ -326,7 +310,7 @@ ColumnLayout {
             gutter: albumScroll.gutter
             onTrackClicked: viewIndex => albumList.selectedIndex = viewIndex
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
-            onMenuRequested: (start, tracks) => trackPane.showMenu(start, tracks)
+            onMenuRequested: (start, tracks) => trackMenu.show(start, tracks)
         }
     }
 
@@ -394,7 +378,7 @@ ColumnLayout {
                         currentTrackId: trackPane.currentTrackId
                         onOpened: albumId => trackPane.toggleAlbum(albumId)
                         onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
-                        onMenuRequested: (start, tracks) => trackPane.showMenu(start, tracks)
+                        onMenuRequested: (start, tracks) => trackMenu.show(start, tracks)
                     }
                 }
             }
@@ -453,7 +437,7 @@ ColumnLayout {
                                 gutter: 0
                                 onTrackClicked: viewIndex => albumRows.selectedIndex = viewIndex
                                 onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
-                                onMenuRequested: (start, tracks) => trackPane.showMenu(start, tracks)
+                                onMenuRequested: (start, tracks) => trackMenu.show(start, tracks)
                             }
                         }
                     }

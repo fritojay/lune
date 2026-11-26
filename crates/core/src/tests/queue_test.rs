@@ -5,9 +5,12 @@ use super::*;
 use crate::db;
 use crate::test_util::library_with_tracks;
 
-fn tracks(ids: impl IntoIterator<Item = i64>) -> Vec<(i64, PathBuf)> {
+fn tracks(ids: impl IntoIterator<Item = i64>) -> Vec<TrackRef> {
     ids.into_iter()
-        .map(|id| (id, PathBuf::from(format!("{id}.mp3"))))
+        .map(|id| TrackRef {
+            id,
+            path: PathBuf::from(format!("{id}.mp3")),
+        })
         .collect()
 }
 

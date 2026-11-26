@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use rusqlite::Connection;
 
 use crate::art;
-use crate::lists::{self, Playlist};
+use crate::lists::{self, ListId, Playlist};
 use crate::query::{self, AlbumRow, LibraryStats, ListTrack, MissingTrack};
 use crate::queue::{self, Queue};
 use crate::scan::{self, ScanMode, ScanProgress, ScanReport};
@@ -120,6 +120,15 @@ impl Library {
 
     pub fn playlists(&self) -> Result<Vec<Playlist>> {
         lists::load_playlists(&self.conn)
+    }
+
+    /// Appends `track_ids` to playlist `id`. Does nothing when `id` is not a
+    /// playlist, so the queue is never changed this way.
+    pub fn add_to_playlist(&mut self, id: ListId, track_ids: &[i64]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        lists::append_to_playlist(&tx, id, track_ids)?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn save_queue(&mut self, queue: &Queue) -> Result<()> {

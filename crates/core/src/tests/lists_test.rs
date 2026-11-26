@@ -79,6 +79,43 @@ proptest! {
 
 proptest! {
     #[test]
+    fn appending_adds_to_the_end_of_a_playlist_and_never_changes_the_queue_or_other_lists(
+        appends in prop::collection::vec(
+            (0..4i64, prop::collection::vec(0..8i64, 0..5)),
+            0..8,
+        ),
+        queued in prop::collection::vec(0..8i64, 0..5),
+    ) {
+        // Lists 2 and 3 are playlists; 1 is the queue and 0 doesn't exist.
+        let mut conn = db::open_in_memory().unwrap();
+        save(&mut conn, ListId::QUEUE, &queued);
+        for id in [2, 3] {
+            conn.execute(
+                "INSERT INTO lists (id, kind, created_ns) VALUES (:id, 'playlist', :id)",
+                named_params! { ":id": id },
+            )
+            .unwrap();
+        }
+        let mut expected = [Vec::new(), Vec::new()];
+        for (id, track_ids) in &appends {
+            let tx = conn.transaction().unwrap();
+            append_to_playlist(&tx, ListId(*id), track_ids).unwrap();
+            tx.commit().unwrap();
+            if let Some(playlist) = id.checked_sub(2).and_then(|i| expected.get_mut(i as usize)) {
+                playlist.extend(track_ids);
+            }
+        }
+        let loaded: Vec<Vec<i64>> =
+            load_playlists(&conn).unwrap().into_iter().map(|p| p.track_ids).collect();
+        prop_assert_eq!(loaded, expected);
+        let queue: Vec<i64> =
+            load_items(&conn, ListId::QUEUE).unwrap().into_iter().map(|(id, _)| id).collect();
+        prop_assert_eq!(queue, queued);
+    }
+}
+
+proptest! {
+    #[test]
     fn a_list_id_parses_back_from_how_it_is_shown(id in any::<i64>()) {
         prop_assert_eq!(ListId(id).to_string().parse::<ListId>().unwrap(), ListId(id));
     }

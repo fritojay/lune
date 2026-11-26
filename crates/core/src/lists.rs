@@ -5,7 +5,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use rusqlite::{Connection, Transaction, named_params};
+use rusqlite::{Connection, OptionalExtension, Transaction, named_params};
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
@@ -95,14 +95,33 @@ pub(crate) fn save_items(tx: &Transaction, id: ListId, track_ids: &[i64]) -> Res
         "DELETE FROM list_items WHERE list_id = :list_id",
         named_params! { ":list_id": id.0 },
     )?;
+    insert_items(tx, id, 0, track_ids)
+}
+
+pub(crate) fn append_to_playlist(tx: &Transaction, id: ListId, track_ids: &[i64]) -> Result<()> {
+    let end: Option<i64> = tx
+        .query_row(
+            "SELECT (SELECT COALESCE(MAX(position) + 1, 0) FROM list_items WHERE list_id = l.id)
+             FROM lists l WHERE l.id = :list_id AND l.kind = 'playlist'",
+            named_params! { ":list_id": id.0 },
+            |row| row.get(0),
+        )
+        .optional()?;
+    match end {
+        Some(end) => insert_items(tx, id, end, track_ids),
+        None => Ok(()),
+    }
+}
+
+fn insert_items(tx: &Transaction, id: ListId, first: i64, track_ids: &[i64]) -> Result<()> {
     let mut insert = tx.prepare(
         "INSERT INTO list_items (list_id, position, track_id)
          VALUES (:list_id, :position, :track_id)",
     )?;
-    for (position, track_id) in track_ids.iter().enumerate() {
+    for (position, track_id) in (first..).zip(track_ids) {
         insert.execute(named_params! {
             ":list_id": id.0,
-            ":position": position as i64,
+            ":position": position,
             ":track_id": track_id,
         })?;
     }

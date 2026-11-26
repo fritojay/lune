@@ -11,6 +11,7 @@ ColumnLayout {
     required property int currentRow
     required property string totalDuration
     required property bool shuffle
+    required property PlayerController controller
 
     signal shuffleToggled(bool shuffle)
     signal clearRequested()
@@ -25,25 +26,17 @@ ColumnLayout {
 
     spacing: 0
 
-    Menu {
+    TrackMenu {
         id: queueMenu
-        property int row: -1
-        property real trackId: -1
-        MenuItem {
-            text: qsTr("Play")
-            onTriggered: queuePane.playRequested(queueMenu.row)
-        }
+        controller: queuePane.controller
+        source: "queue"
+        onPlayRequested: row => queuePane.playRequested(row)
+        onAlbumRequested: trackId => queuePane.albumRequested(trackId)
+        MenuSeparator {}
         MenuItem {
             text: qsTr("Remove")
-            onTriggered: queuePane.removeRequested(queueMenu.row)
+            onTriggered: queuePane.removeRequested(queueMenu.start)
         }
-        MenuSeparator {}
-        MenuItem {
-            text: qsTr("Go to Album")
-            enabled: queueMenu.trackId >= 0
-            onTriggered: queuePane.albumRequested(queueMenu.trackId)
-        }
-        MenuSeparator {}
         MenuItem {
             text: qsTr("Clear Queue")
             onTriggered: queuePane.clearRequested()
@@ -149,11 +142,7 @@ ColumnLayout {
             dropRow: queueList.dropRow
             gutter: queueScroll.gutter
             onPlayRequested: queuePane.playRequested(queueRow.index)
-            onMenuRequested: {
-                queueMenu.row = queueRow.index
-                queueMenu.trackId = queueRow.trackId
-                queueMenu.popup()
-            }
+            onMenuRequested: queueMenu.show(queueRow.index, 1)
             onDragMoved: y => queueList.dropRow = queueList.dropTarget(queueRow, y)
             onDragEnded: if (queueList.dropRow >= 0) {
                 queuePane.moveRequested(queueRow.index, queueList.dropRow)

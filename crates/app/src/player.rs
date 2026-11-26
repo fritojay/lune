@@ -7,14 +7,14 @@
     reason = "the CXX-Qt bridge below generates its FFI glue as unsafe code"
 )]
 
-use std::path::PathBuf;
+use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QString, QUrl};
-use lune_core::{Catalog, SlotId, View};
+use lune_core::{Catalog, ListId, Queue, QueueItem, SlotId, TrackRef, View};
 use lune_engine::{EntryId, PlaybackState, Player, PlayerConfig};
 
 use crate::media_controls::{self, MediaCommand, MediaControls, NowPlaying, Playback};
@@ -52,25 +52,37 @@ pub mod qobject {
         type PlayerController = super::PlayerControllerRust;
     }
 
+    // Each `source` is a list of tracks by its name in `Selection::new`.
     unsafe extern "RustQt" {
-        /// Replaces the queue with the whole main-pane view and plays from
-        /// view index `index`.
+        /// From the main pane, replaces the queue with the whole view and
+        /// plays from `row`; from the queue, plays its `row`.
         #[qinvokable]
-        #[cxx_name = "playView"]
-        fn play_view(self: Pin<&mut PlayerController>, index: i32);
+        fn play(self: Pin<&mut PlayerController>, source: &QString, row: i32);
 
-        /// Inserts view indices `start..start + count` after the current track.
+        /// Inserts rows `start..start + count` after the current track.
         #[qinvokable]
-        #[cxx_name = "playNextFromView"]
-        fn play_next_from_view(self: Pin<&mut PlayerController>, start: i32, count: i32);
-
-        #[qinvokable]
-        #[cxx_name = "addFromView"]
-        fn add_from_view(self: Pin<&mut PlayerController>, start: i32, count: i32);
+        #[cxx_name = "playNext"]
+        fn play_next(self: Pin<&mut PlayerController>, source: &QString, start: i32, count: i32);
 
         #[qinvokable]
-        #[cxx_name = "playQueueRow"]
-        fn play_queue_row(self: Pin<&mut PlayerController>, row: i32);
+        #[cxx_name = "addToQueue"]
+        fn add_to_queue(self: Pin<&mut PlayerController>, source: &QString, start: i32, count: i32);
+
+        /// `playlist` is its `ListId` as text.
+        #[qinvokable]
+        #[cxx_name = "addToPlaylist"]
+        fn add_to_playlist(
+            self: Pin<&mut PlayerController>,
+            source: &QString,
+            start: i32,
+            count: i32,
+            playlist: &QString,
+        );
+
+        /// The track at `row`, or -1 when it isn't in the library.
+        #[qinvokable]
+        #[cxx_name = "trackId"]
+        fn track_id(self: &PlayerController, source: &QString, row: i32) -> i64;
 
         #[qinvokable]
         #[cxx_name = "removeQueueRow"]
@@ -212,33 +224,79 @@ impl cxx_qt::Initialize for qobject::PlayerController {
     }
 }
 
-/// The tracks at view indices `start..start + count` (clamped to the view),
-/// as queue input.
-pub fn view_tracks(
-    catalog: &Catalog,
-    view: &View,
-    start: usize,
-    count: usize,
-) -> Vec<(i64, PathBuf)> {
-    view.tracks
-        .iter()
-        .skip(start)
-        .take(count)
-        .filter_map(|&i| catalog.track(i))
-        .map(|t| (t.id, t.path.clone()))
-        .collect()
+/// Rows of one of the lists QML shows tracks in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    /// Indices into the main pane's view.
+    View(Range<usize>),
+    Queue(Range<usize>),
+}
+
+impl Selection {
+    pub fn new(source: &str, start: i32, count: i32) -> Option<Self> {
+        let start = index(start)?;
+        let rows = start..start.saturating_add(index(count)?);
+        match source {
+            "view" => Some(Self::View(rows)),
+            "queue" => Some(Self::Queue(rows)),
+            _ => {
+                tracing::error!(source, "no such track list");
+                None
+            }
+        }
+    }
+
+    /// Its tracks, in order. Rows past the end of the list are left out.
+    pub fn tracks(&self, catalog: &Catalog, view: &View, queue: &[QueueItem]) -> Vec<TrackRef> {
+        match self {
+            Self::View(rows) => rows_of(&view.tracks, rows)
+                .iter()
+                .filter_map(|&i| catalog.track(i))
+                .map(|t| TrackRef {
+                    id: t.id,
+                    path: t.path.clone(),
+                })
+                .collect(),
+            Self::Queue(rows) => rows_of(queue, rows)
+                .iter()
+                .map(|item| TrackRef {
+                    id: item.track_id,
+                    path: item.path.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+fn rows_of<'a, T>(list: &'a [T], rows: &Range<usize>) -> &'a [T] {
+    let end = rows.end.min(list.len());
+    list.get(rows.start..end).unwrap_or_default()
 }
 
 fn index(i: i32) -> Option<usize> {
     usize::try_from(i).ok()
 }
 
+/// `None` until the library has loaded.
+fn selected_tracks(selection: &Selection) -> Option<Vec<TrackRef>> {
+    let catalog = session::catalog()?;
+    let queue = session::lock_queue();
+    Some(selection.tracks(&catalog, &session::view(), queue.items()))
+}
+
 impl qobject::PlayerController {
-    fn play_view(mut self: Pin<&mut Self>, index: i32) {
-        let (Some(catalog), Some(start)) = (session::catalog(), self::index(index)) else {
+    fn play(self: Pin<&mut Self>, source: &QString, row: i32) {
+        match Selection::new(&source.to_string(), row, 1) {
+            Some(Selection::View(rows)) => self.play_view(rows.start),
+            Some(Selection::Queue(rows)) => self.play_queue_row(rows.start),
+            None => {}
+        }
+    }
+
+    fn play_view(mut self: Pin<&mut Self>, start: usize) {
+        let Some(tracks) = selected_tracks(&Selection::View(0..usize::MAX)) else {
             return;
         };
-        let tracks = view_tracks(&catalog, &session::view(), 0, usize::MAX);
         let entry = session::lock_queue()
             .replace(tracks, start)
             .map(session::entry);
@@ -248,44 +306,74 @@ impl qobject::PlayerController {
         self.as_mut().edited();
     }
 
-    fn play_next_from_view(self: Pin<&mut Self>, start: i32, count: i32) {
-        self.insert_from_view(start, count, true);
-    }
-
-    fn add_from_view(self: Pin<&mut Self>, start: i32, count: i32) {
-        self.insert_from_view(start, count, false);
-    }
-
-    fn insert_from_view(mut self: Pin<&mut Self>, start: i32, count: i32, next: bool) {
-        let (Some(catalog), Some(start), Some(count)) =
-            (session::catalog(), index(start), index(count))
-        else {
-            return;
+    fn play_queue_row(mut self: Pin<&mut Self>, row: usize) {
+        let entry = {
+            let mut queue = session::lock_queue();
+            queue
+                .items()
+                .get(row)
+                .map(|item| item.slot)
+                .and_then(|slot| {
+                    queue.set_current(slot);
+                    queue.current().map(session::entry)
+                })
         };
-        let tracks = view_tracks(&catalog, &session::view(), start, count);
-        {
-            let mut queue = session::lock_queue();
-            if next {
-                queue.play_next(tracks);
-            } else {
-                queue.add(tracks);
-            }
-        }
-        self.as_mut().edited();
-    }
-
-    fn play_queue_row(mut self: Pin<&mut Self>, row: i32) {
-        let entry = index(row).and_then(|row| {
-            let mut queue = session::lock_queue();
-            let slot = queue.items().get(row)?.slot;
-            queue.set_current(slot);
-            queue.current().map(session::entry)
-        });
         if let (Some(entry), Some(player)) = (entry, &self.player) {
             log_err(player.play(entry));
         }
         session::save(Save::Cursor);
         self.as_mut().update_now_playing();
+    }
+
+    fn play_next(self: Pin<&mut Self>, source: &QString, start: i32, count: i32) {
+        self.insert(source, start, count, Queue::play_next);
+    }
+
+    fn add_to_queue(self: Pin<&mut Self>, source: &QString, start: i32, count: i32) {
+        self.insert(source, start, count, Queue::add);
+    }
+
+    fn insert(
+        mut self: Pin<&mut Self>,
+        source: &QString,
+        start: i32,
+        count: i32,
+        insert: fn(&mut Queue, Vec<TrackRef>),
+    ) {
+        let Some(tracks) =
+            Selection::new(&source.to_string(), start, count).and_then(|s| selected_tracks(&s))
+        else {
+            return;
+        };
+        insert(&mut session::lock_queue(), tracks);
+        self.as_mut().edited();
+    }
+
+    fn add_to_playlist(
+        self: Pin<&mut Self>,
+        source: &QString,
+        start: i32,
+        count: i32,
+        playlist: &QString,
+    ) {
+        let (Some(tracks), Ok(id)) = (
+            Selection::new(&source.to_string(), start, count).and_then(|s| selected_tracks(&s)),
+            playlist.to_string().parse::<ListId>(),
+        ) else {
+            return;
+        };
+        let track_ids: Vec<i64> = tracks.into_iter().map(|t| t.id).collect();
+        if !track_ids.is_empty() {
+            session::add_to_playlist(id, track_ids);
+        }
+    }
+
+    fn track_id(&self, source: &QString, row: i32) -> i64 {
+        let catalog = session::catalog();
+        Selection::new(&source.to_string(), row, 1)
+            .and_then(|selection| selected_tracks(&selection)?.first().map(|t| t.id))
+            .filter(|&id| catalog.is_some_and(|c| c.by_id(id).is_some()))
+            .unwrap_or(-1)
     }
 
     fn remove_queue_row(mut self: Pin<&mut Self>, row: i32) {

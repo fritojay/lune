@@ -66,3 +66,21 @@ fn nothing_is_sent_without_a_change() {
     let _ = (catalog(), view(), missing());
     assert!(changes.borrow().is_empty());
 }
+
+#[test]
+fn adding_to_a_playlist_appends_at_once_and_an_unknown_playlist_is_left_alone() {
+    let playlist = |id: &str, track_ids: Vec<i64>| Playlist {
+        id: id.parse().unwrap(),
+        name: format!("list {id}"),
+        track_ids,
+    };
+    set_playlists(vec![playlist("2", vec![5]), playlist("3", vec![1])]);
+    let changes = recorded();
+    add_to_playlist("2".parse().unwrap(), vec![1, 5]);
+    add_to_playlist("9".parse().unwrap(), vec![7]);
+    assert_eq!(
+        *playlists(),
+        [playlist("2", vec![5, 1, 5]), playlist("3", vec![1])]
+    );
+    assert_eq!(*changes.borrow(), [Change::Playlists]);
+}

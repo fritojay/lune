@@ -16,6 +16,7 @@ mod logging;
 mod media_controls;
 mod missing_model;
 mod player;
+mod playlists_model;
 mod preferences;
 mod property;
 mod queue_model;
