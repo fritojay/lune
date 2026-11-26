@@ -69,7 +69,7 @@ ColumnLayout {
     }
 
     function resetView(reset: bool) {
-        albumList.selectedIndex = -1
+        trackSelection.clear()
         if (reset)
             albumList.positionViewAtBeginning()
         else
@@ -91,12 +91,12 @@ ColumnLayout {
     }
 
     function toggleAlbum(albumId: real) {
-        albumRows.selectedIndex = -1
+        trackSelection.clear()
         openAlbumId = openAlbumId === albumId ? -1 : albumId
     }
 
     function closeAlbum() {
-        albumRows.selectedIndex = -1
+        trackSelection.clear()
         openAlbumId = -1
     }
 
@@ -141,6 +141,11 @@ ColumnLayout {
     }
 
     spacing: 0
+
+    // The selected tracks, as rows of the view.
+    TrackSelection {
+        id: trackSelection
+    }
 
     TrackMenu {
         id: trackMenu
@@ -311,21 +316,18 @@ ColumnLayout {
         WheelScroller {
             view: albumList
         }
-        property int selectedIndex: -1
-
         delegate: AlbumDelegate {
             width: ListView.view.width
             sorted: trackPane.sorted
             tracksLeft: trackPane.tracksLeft
             tracksRight: trackPane.tracksRight
-            selectedIndex: albumList.selectedIndex
+            selection: trackSelection
             currentTrackId: trackPane.currentTrackId
             hiddenColumns: trackPane.hiddenColumns
             columnWidths: trackPane.columnWidths
             gutter: albumScroll.gutter
-            onTrackClicked: viewIndex => albumList.selectedIndex = viewIndex
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
-            onMenuRequested: (start, tracks) => trackMenu.show(start, tracks)
+            onMenuRequested: trackMenu.show(trackSelection.rows())
         }
     }
 
@@ -343,7 +345,6 @@ ColumnLayout {
         readonly property int columns: Math.max(1, Math.floor(usableWidth / tileWidth))
         // Spare width goes between the tiles rather than after the last one.
         readonly property real cellWidth: Math.floor(usableWidth / columns)
-        property int selectedIndex: -1
         Layout.fillWidth: true
         Layout.fillHeight: true
         visible: trackPane.grid && !trackPane.hinted && (trackPane.albumCount > 0 || trackPane.hasFolders)
@@ -393,7 +394,10 @@ ColumnLayout {
                         currentTrackId: trackPane.currentTrackId
                         onOpened: albumId => trackPane.toggleAlbum(albumId)
                         onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
-                        onMenuRequested: (start, tracks) => trackMenu.show(start, tracks)
+                        onMenuRequested: (start, tracks) => {
+                            trackSelection.selectRange(start, tracks)
+                            trackMenu.show(trackSelection.rows())
+                        }
                     }
                 }
             }
@@ -445,14 +449,13 @@ ColumnLayout {
                                 sorted: false
                                 tracksLeft: trackPane.tracksLeft
                                 tracksRight: trackPane.tracksRight
-                                selectedIndex: albumRows.selectedIndex
+                                selection: trackSelection
                                 currentTrackId: trackPane.currentTrackId
                                 hiddenColumns: trackPane.hiddenColumns
                                 columnWidths: trackPane.columnWidths
                                 gutter: 0
-                                onTrackClicked: viewIndex => albumRows.selectedIndex = viewIndex
                                 onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
-                                onMenuRequested: (start, tracks) => trackMenu.show(start, tracks)
+                                onMenuRequested: trackMenu.show(trackSelection.rows())
                             }
                         }
                     }

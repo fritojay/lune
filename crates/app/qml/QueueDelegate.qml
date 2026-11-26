@@ -17,16 +17,21 @@ Rectangle {
     // Where a dragged row would land, or -1.
     required property int dropRow
     required property real gutter
+    required property TrackSelection selection
     readonly property bool current: index === currentRow
+    readonly property bool selected: selection.revision >= 0 && selection.contains(index)
+    readonly property color textColor: selected ? palette.highlightedText : palette.text
 
     signal playRequested()
+    // For `selection`'s rows.
     signal menuRequested()
     // `y` is in this row's coordinates.
     signal dragMoved(real y)
     signal dragEnded()
 
     height: Theme.rowHeight + 14
-    color: rowArea.containsMouse ? Theme.hoverColor(palette)
+    color: selected ? palette.highlight
+         : rowArea.containsMouse ? Theme.hoverColor(palette)
          : index % 2 ? Theme.stripeColor(palette) : "transparent"
 
     Rectangle {
@@ -68,7 +73,7 @@ Rectangle {
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 font.bold: queueRow.current
-                color: queueRow.palette.text
+                color: queueRow.textColor
             }
             Text {
                 width: parent.width
@@ -77,7 +82,7 @@ Rectangle {
                 elide: Text.ElideRight
                 opacity: 0.7
                 font.pointSize: 9
-                color: queueRow.palette.text
+                color: queueRow.textColor
             }
         }
         Image {
@@ -97,7 +102,7 @@ Rectangle {
             text: queueRow.duration
             font.features: { "tnum": 1 }
             opacity: 0.7
-            color: queueRow.palette.text
+            color: queueRow.textColor
         }
     }
 
@@ -111,8 +116,13 @@ Rectangle {
                 queueRow.playRequested()
         }
         onClicked: mouse => {
-            if (mouse.button === Qt.RightButton)
+            if (mouse.button === Qt.RightButton) {
+                queueRow.selection.keep(queueRow.index)
                 queueRow.menuRequested()
+            } else {
+                queueRow.selection.click(queueRow.index, (mouse.modifiers & Qt.ShiftModifier) !== 0,
+                                         (mouse.modifiers & Qt.ControlModifier) !== 0)
+            }
         }
     }
 

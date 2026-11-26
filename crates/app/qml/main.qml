@@ -429,8 +429,8 @@ ApplicationWindow {
                         onShuffleToggled: shuffle => player.setShuffle(shuffle)
                 onClearRequested: player.clearQueue()
                 onPlayRequested: row => player.play("queue", row)
-                onRemoveRequested: row => player.removeQueueRow(row)
-                onMoveRequested: (from, to) => player.moveQueueRow(from, to)
+                onRemoveRequested: rows => player.removeQueueRows(rows)
+                onMoveRequested: (rows, to) => player.moveQueueRows(rows, to)
                 onAlbumRequested: trackId => filters.showAlbum(trackId)
             }
         }

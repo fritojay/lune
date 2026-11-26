@@ -34,6 +34,7 @@ fn main() -> std::io::Result<()> {
             "src/preferences.rs",
             "src/queue_model.rs",
             "src/sources_model.rs",
+            "src/track_selection.rs",
             "src/window_layout.rs",
         ])
         .qrc_resources([

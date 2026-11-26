@@ -7,13 +7,13 @@
     reason = "the CXX-Qt bridge below generates its FFI glue as unsafe code"
 )]
 
-use std::ops::Range;
+use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use cxx_qt::{CxxQtType, Threading};
-use cxx_qt_lib::{QString, QUrl};
+use cxx_qt_lib::{QList, QString, QUrl};
 use lune_core::{Catalog, ListId, Queue, QueueItem, SlotId, TrackRef, View};
 use lune_engine::{EntryId, PlaybackState, Player, PlayerConfig};
 
@@ -29,6 +29,8 @@ pub mod qobject {
         type QString = cxx_qt_lib::QString;
         include!("cxx-qt-lib/qurl.h");
         type QUrl = cxx_qt_lib::QUrl;
+        include!("cxx-qt-lib/qlist.h");
+        type QList_i32 = cxx_qt_lib::QList<i32>;
     }
 
     extern "RustQt" {
@@ -52,21 +54,22 @@ pub mod qobject {
         type PlayerController = super::PlayerControllerRust;
     }
 
-    // Each `source` is a list of tracks by its name in `Selection::new`.
+    // Each `source` is a list of tracks by its name in `Selection::new`, and
+    // `rows` are some of its rows, in any order.
     unsafe extern "RustQt" {
         /// From the main pane, replaces the queue with the whole view and
         /// plays from `row`; from the queue, plays its `row`.
         #[qinvokable]
         fn play(self: Pin<&mut PlayerController>, source: &QString, row: i32);
 
-        /// Inserts rows `start..start + count` after the current track.
+        /// Inserts the rows' tracks after the current track.
         #[qinvokable]
         #[cxx_name = "playNext"]
-        fn play_next(self: Pin<&mut PlayerController>, source: &QString, start: i32, count: i32);
+        fn play_next(self: Pin<&mut PlayerController>, source: &QString, rows: &QList_i32);
 
         #[qinvokable]
         #[cxx_name = "addToQueue"]
-        fn add_to_queue(self: Pin<&mut PlayerController>, source: &QString, start: i32, count: i32);
+        fn add_to_queue(self: Pin<&mut PlayerController>, source: &QString, rows: &QList_i32);
 
         /// `playlist` is its `ListId` as text.
         #[qinvokable]
@@ -74,8 +77,7 @@ pub mod qobject {
         fn add_to_playlist(
             self: Pin<&mut PlayerController>,
             source: &QString,
-            start: i32,
-            count: i32,
+            rows: &QList_i32,
             playlist: &QString,
         );
 
@@ -85,13 +87,14 @@ pub mod qobject {
         fn track_id(self: &PlayerController, source: &QString, row: i32) -> i64;
 
         #[qinvokable]
-        #[cxx_name = "removeQueueRow"]
-        fn remove_queue_row(self: Pin<&mut PlayerController>, row: i32);
+        #[cxx_name = "removeQueueRows"]
+        fn remove_queue_rows(self: Pin<&mut PlayerController>, rows: &QList_i32);
 
-        /// Moves queue row `from` to before the row now at `to`.
+        /// Moves the queue's `rows`, keeping their order, to before the row
+        /// now at `to`.
         #[qinvokable]
-        #[cxx_name = "moveQueueRow"]
-        fn move_queue_row(self: Pin<&mut PlayerController>, from: i32, to: i32);
+        #[cxx_name = "moveQueueRows"]
+        fn move_queue_rows(self: Pin<&mut PlayerController>, rows: &QList_i32, to: i32);
 
         #[qinvokable]
         #[cxx_name = "clearQueue"]
@@ -224,18 +227,24 @@ impl cxx_qt::Initialize for qobject::PlayerController {
     }
 }
 
-/// Rows of one of the lists QML shows tracks in.
+/// Rows of one of the lists QML shows tracks in, ascending and without
+/// repeats.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
     /// Indices into the main pane's view.
-    View(Range<usize>),
-    Queue(Range<usize>),
+    View(Vec<usize>),
+    Queue(Vec<usize>),
 }
 
 impl Selection {
-    pub fn new(source: &str, start: i32, count: i32) -> Option<Self> {
-        let start = index(start)?;
-        let rows = start..start.saturating_add(index(count)?);
+    /// Negative rows are left out.
+    pub fn new(source: &str, rows: impl IntoIterator<Item = i32>) -> Option<Self> {
+        let rows: Vec<usize> = rows
+            .into_iter()
+            .filter_map(index)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         match source {
             "view" => Some(Self::View(rows)),
             "queue" => Some(Self::Queue(rows)),
@@ -250,7 +259,6 @@ impl Selection {
     pub fn tracks(&self, catalog: &Catalog, view: &View, queue: &[QueueItem]) -> Vec<TrackRef> {
         match self {
             Self::View(rows) => rows_of(&view.tracks, rows)
-                .iter()
                 .filter_map(|&i| catalog.track(i))
                 .map(|t| TrackRef {
                     id: t.id,
@@ -258,7 +266,6 @@ impl Selection {
                 })
                 .collect(),
             Self::Queue(rows) => rows_of(queue, rows)
-                .iter()
                 .map(|item| TrackRef {
                     id: item.track_id,
                     path: item.path.clone(),
@@ -268,13 +275,23 @@ impl Selection {
     }
 }
 
-fn rows_of<'a, T>(list: &'a [T], rows: &Range<usize>) -> &'a [T] {
-    let end = rows.end.min(list.len());
-    list.get(rows.start..end).unwrap_or_default()
+fn rows_of<'a, T>(list: &'a [T], rows: &'a [usize]) -> impl Iterator<Item = &'a T> {
+    rows.iter().filter_map(|&row| list.get(row))
 }
 
 fn index(i: i32) -> Option<usize> {
     usize::try_from(i).ok()
+}
+
+fn selection(source: &QString, rows: &QList<i32>) -> Option<Selection> {
+    Selection::new(&source.to_string(), rows.iter().copied())
+}
+
+fn queue_slots(queue: &Queue, rows: &QList<i32>) -> Vec<SlotId> {
+    let rows = rows.iter().filter_map(|&row| index(row));
+    rows.filter_map(|row| queue.items().get(row))
+        .map(|item| item.slot)
+        .collect()
 }
 
 /// `None` until the library has loaded.
@@ -286,15 +303,16 @@ fn selected_tracks(selection: &Selection) -> Option<Vec<TrackRef>> {
 
 impl qobject::PlayerController {
     fn play(self: Pin<&mut Self>, source: &QString, row: i32) {
-        match Selection::new(&source.to_string(), row, 1) {
-            Some(Selection::View(rows)) => self.play_view(rows.start),
-            Some(Selection::Queue(rows)) => self.play_queue_row(rows.start),
-            None => {}
+        match Selection::new(&source.to_string(), [row]) {
+            Some(Selection::View(rows)) if !rows.is_empty() => self.play_view(rows[0]),
+            Some(Selection::Queue(rows)) if !rows.is_empty() => self.play_queue_row(rows[0]),
+            _ => {}
         }
     }
 
     fn play_view(mut self: Pin<&mut Self>, start: usize) {
-        let Some(tracks) = selected_tracks(&Selection::View(0..usize::MAX)) else {
+        let every_row = (0..session::view().len()).collect();
+        let Some(tracks) = selected_tracks(&Selection::View(every_row)) else {
             return;
         };
         let entry = session::lock_queue()
@@ -325,24 +343,21 @@ impl qobject::PlayerController {
         self.as_mut().update_now_playing();
     }
 
-    fn play_next(self: Pin<&mut Self>, source: &QString, start: i32, count: i32) {
-        self.insert(source, start, count, Queue::play_next);
+    fn play_next(self: Pin<&mut Self>, source: &QString, rows: &QList<i32>) {
+        self.insert(source, rows, Queue::play_next);
     }
 
-    fn add_to_queue(self: Pin<&mut Self>, source: &QString, start: i32, count: i32) {
-        self.insert(source, start, count, Queue::add);
+    fn add_to_queue(self: Pin<&mut Self>, source: &QString, rows: &QList<i32>) {
+        self.insert(source, rows, Queue::add);
     }
 
     fn insert(
         mut self: Pin<&mut Self>,
         source: &QString,
-        start: i32,
-        count: i32,
+        rows: &QList<i32>,
         insert: fn(&mut Queue, Vec<TrackRef>),
     ) {
-        let Some(tracks) =
-            Selection::new(&source.to_string(), start, count).and_then(|s| selected_tracks(&s))
-        else {
+        let Some(tracks) = selection(source, rows).and_then(|s| selected_tracks(&s)) else {
             return;
         };
         insert(&mut session::lock_queue(), tracks);
@@ -352,12 +367,11 @@ impl qobject::PlayerController {
     fn add_to_playlist(
         self: Pin<&mut Self>,
         source: &QString,
-        start: i32,
-        count: i32,
+        rows: &QList<i32>,
         playlist: &QString,
     ) {
         let (Some(tracks), Ok(id)) = (
-            Selection::new(&source.to_string(), start, count).and_then(|s| selected_tracks(&s)),
+            selection(source, rows).and_then(|s| selected_tracks(&s)),
             playlist.to_string().parse::<ListId>(),
         ) else {
             return;
@@ -374,38 +388,29 @@ impl qobject::PlayerController {
 
     fn track_id(&self, source: &QString, row: i32) -> i64 {
         let catalog = session::catalog();
-        Selection::new(&source.to_string(), row, 1)
+        Selection::new(&source.to_string(), [row])
             .and_then(|selection| selected_tracks(&selection)?.first().map(|t| t.id))
             .filter(|&id| catalog.is_some_and(|c| c.by_id(id).is_some()))
             .unwrap_or(-1)
     }
 
-    fn remove_queue_row(mut self: Pin<&mut Self>, row: i32) {
+    fn remove_queue_rows(mut self: Pin<&mut Self>, rows: &QList<i32>) {
         {
             let mut queue = session::lock_queue();
-            let Some(slot) = index(row)
-                .and_then(|r| queue.items().get(r))
-                .map(|i| i.slot)
-            else {
-                return;
-            };
-            queue.remove(&[slot]);
+            let slots = queue_slots(&queue, rows);
+            queue.remove(&slots);
         }
         self.as_mut().edited();
     }
 
-    fn move_queue_row(mut self: Pin<&mut Self>, from: i32, to: i32) {
+    fn move_queue_rows(mut self: Pin<&mut Self>, rows: &QList<i32>, to: i32) {
+        let Some(to) = index(to) else {
+            return;
+        };
         {
             let mut queue = session::lock_queue();
-            let (Some(slot), Some(to)) = (
-                index(from)
-                    .and_then(|r| queue.items().get(r))
-                    .map(|i| i.slot),
-                index(to),
-            ) else {
-                return;
-            };
-            queue.move_to(&[slot], to);
+            let slots = queue_slots(&queue, rows);
+            queue.move_to(&slots, to);
         }
         self.as_mut().edited();
     }

@@ -4,15 +4,15 @@ import QtQuick.Controls
 import com.lune.player
 
 // What can be done with some rows of a track list. Items declared inside a
-// TrackMenu come after these.
+// TrackMenu come after these. Play and Go to Album use the first row.
 Menu {
     id: trackMenu
     required property PlayerController controller
     // The list the rows are in: "view" (the main pane) or "queue", as
     // Selection::new in player.rs reads it.
     required property string source
-    property int start: 0
-    property int tracks: 1
+    // Ascending.
+    property list<int> rows
     property real trackId: -1
 
     signal playRequested(int row)
@@ -21,13 +21,12 @@ Menu {
     // Asks for a name, then makes a playlist of the rows the menu was for.
     function newPlaylist() {
         const source = trackMenu.source
-        const start = trackMenu.start
-        const tracks = trackMenu.tracks
+        const rows = trackMenu.rows
         const dialog = nameDialog.createObject(trackMenu.parent, {
             title: qsTr("New Playlist"),
             name: playlists.suggestedName(qsTr("New Playlist"))
         })
-        dialog.chosen.connect(name => trackMenu.controller.addToPlaylist(source, start, tracks, playlists.create(name)))
+        dialog.chosen.connect(name => trackMenu.controller.addToPlaylist(source, rows, playlists.create(name)))
         dialog.open()
     }
 
@@ -36,24 +35,25 @@ Menu {
         PlaylistNameDialog {}
     }
 
-    function show(start: int, tracks: int) {
-        trackMenu.start = start
-        trackMenu.tracks = tracks
-        trackId = controller.trackId(source, start)
+    function show(rows: list<int>) {
+        if (rows.length === 0)
+            return
+        trackMenu.rows = rows
+        trackId = controller.trackId(source, rows[0])
         popup()
     }
 
     MenuItem {
         text: qsTr("Play")
-        onTriggered: trackMenu.playRequested(trackMenu.start)
+        onTriggered: trackMenu.playRequested(trackMenu.rows[0])
     }
     MenuItem {
         text: qsTr("Play Next")
-        onTriggered: trackMenu.controller.playNext(trackMenu.source, trackMenu.start, trackMenu.tracks)
+        onTriggered: trackMenu.controller.playNext(trackMenu.source, trackMenu.rows)
     }
     MenuItem {
         text: qsTr("Add to Queue")
-        onTriggered: trackMenu.controller.addToQueue(trackMenu.source, trackMenu.start, trackMenu.tracks)
+        onTriggered: trackMenu.controller.addToQueue(trackMenu.source, trackMenu.rows)
     }
     Menu {
         id: playlistMenu
@@ -76,8 +76,7 @@ Menu {
                 required property string label
                 // Not a mnemonic.
                 text: label.replace(/&/g, "&&")
-                onTriggered: trackMenu.controller.addToPlaylist(trackMenu.source, trackMenu.start,
-                                                                trackMenu.tracks, playlistId)
+                onTriggered: trackMenu.controller.addToPlaylist(trackMenu.source, trackMenu.rows, playlistId)
             }
             // After New Playlist… and the separator.
             onObjectAdded: (index, object) => playlistMenu.insertItem(index + 2, object)

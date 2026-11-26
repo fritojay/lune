@@ -19,7 +19,7 @@ Item {
     required property var trackIds
 
     required property bool sorted
-    required property int selectedIndex
+    required property TrackSelection selection
     required property real currentTrackId
     required property var hiddenColumns
     required property var columnWidths
@@ -27,9 +27,9 @@ Item {
     required property int tracksLeft
     required property int tracksRight
 
-    signal trackClicked(int viewIndex)
     signal playRequested(int viewIndex)
-    signal menuRequested(int start, int tracks)
+    // For `selection`'s rows.
+    signal menuRequested()
 
     height: sorted ? Theme.rowHeight
                    : Math.max(Theme.coverSize, header.height + trackCount * Theme.rowHeight)
@@ -51,8 +51,10 @@ Item {
                     album.playRequested(album.firstIndex)
             }
             onClicked: mouse => {
-                if (mouse.button === Qt.RightButton)
-                    album.menuRequested(album.firstIndex, album.trackCount)
+                if (mouse.button === Qt.RightButton) {
+                    album.selection.selectRange(album.firstIndex, album.trackCount)
+                    album.menuRequested()
+                }
             }
         }
     }
@@ -95,7 +97,7 @@ Item {
                 id: trackRow
                 required property int index
                 readonly property int viewIndex: album.firstIndex + index
-                readonly property bool selected: album.selectedIndex === viewIndex
+                readonly property bool selected: album.selection.revision >= 0 && album.selection.contains(viewIndex)
                 readonly property bool nowPlaying: album.trackIds[index] === album.currentTrackId
                 // With reuseItems, a recycled album can get its new trackCount
                 // before its new lists, so an index may briefly be past their end.
@@ -150,9 +152,13 @@ Item {
                     hoverEnabled: true
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: mouse => {
-                        album.trackClicked(trackRow.viewIndex)
-                        if (mouse.button === Qt.RightButton)
-                            album.menuRequested(trackRow.viewIndex, 1)
+                        if (mouse.button === Qt.RightButton) {
+                            album.selection.keep(trackRow.viewIndex)
+                            album.menuRequested()
+                        } else {
+                            album.selection.click(trackRow.viewIndex, (mouse.modifiers & Qt.ShiftModifier) !== 0,
+                                                  (mouse.modifiers & Qt.ControlModifier) !== 0)
+                        }
                     }
                     onDoubleClicked: mouse => {
                         if (mouse.button === Qt.LeftButton)

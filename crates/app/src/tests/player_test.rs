@@ -19,25 +19,19 @@ fn queued(track_ids: &[i64]) -> Vec<QueueItem> {
 
 proptest! {
     #[test]
-    fn a_selection_is_its_lists_rows_in_order_without_rows_past_the_end(
+    fn a_selection_is_its_rows_in_list_order_once_each_without_rows_past_the_end(
         albums in prop::collection::vec(1..4i64, 0..6),
         queue in prop::collection::vec(0..9i64, 0..6),
         source in prop::sample::select(vec!["view", "queue"]),
-        start in -2..9i32,
-        count in prop_oneof![-2..9i32, Just(i32::MAX)],
+        rows in prop::collection::vec(prop_oneof![-2..9i32, Just(i32::MAX)], 0..8),
     ) {
         let catalog = Catalog::new(
             (1..).zip(&albums).map(|(id, &album)| list_track(id, album, None)).collect(),
         );
         let view = catalog.view(Grouping::AlbumArtist, &lune_core::TrackFilter::All);
         let queue = queued(&queue);
-        let selection = Selection::new(source, start, count);
-        prop_assert_eq!(selection.is_some(), start >= 0 && count >= 0);
-        let Some(selection) = selection else { return Ok(()) };
-
-        let rows = |row: usize| {
-            row >= start as usize && (row - start as usize) < count as usize
-        };
+        let selection = Selection::new(source, rows.iter().copied()).unwrap();
+        let rows = |row: usize| rows.iter().any(|&r| usize::try_from(r) == Ok(row));
         let expected: Vec<TrackRef> = match source {
             "view" => (0..)
                 .zip(&view.tracks)
@@ -59,8 +53,8 @@ proptest! {
 
 #[test]
 fn an_unknown_source_selects_nothing() {
-    assert_eq!(Selection::new("playlist", 0, 1), None);
-    assert_eq!(Selection::new("", 0, 1), None);
+    assert_eq!(Selection::new("playlist", [0]), None);
+    assert_eq!(Selection::new("", [0]), None);
 }
 
 #[test]
@@ -82,7 +76,7 @@ fn every_track_list_qml_names_is_a_selection_source() {
         .collect();
     assert_eq!(names, ["view", "queue", "queue", "view"]);
     for name in names {
-        assert!(Selection::new(name, 0, 1).is_some(), "{name}");
+        assert!(Selection::new(name, [0]).is_some(), "{name}");
     }
 }
 

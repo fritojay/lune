@@ -16,8 +16,9 @@ ColumnLayout {
     signal shuffleToggled(bool shuffle)
     signal clearRequested()
     signal playRequested(int row)
-    signal removeRequested(int row)
-    signal moveRequested(int from, int to)
+    signal removeRequested(list<int> rows)
+    // `rows` keep their order and go before the row now at `to`.
+    signal moveRequested(list<int> rows, int to)
     signal albumRequested(real trackId)
 
     function showCurrent() {
@@ -25,6 +26,18 @@ ColumnLayout {
     }
 
     spacing: 0
+
+    TrackSelection {
+        id: queueSelection
+    }
+
+    // Rows move on every change.
+    Connections {
+        target: queuePane.model
+        function onModelReset() {
+            queueSelection.clear()
+        }
+    }
 
     TrackMenu {
         id: queueMenu
@@ -35,7 +48,7 @@ ColumnLayout {
         MenuSeparator {}
         MenuItem {
             text: qsTr("Remove")
-            onTriggered: queuePane.removeRequested(queueMenu.start)
+            onTriggered: queuePane.removeRequested(queueMenu.rows)
         }
         MenuItem {
             text: qsTr("Clear Queue")
@@ -141,11 +154,13 @@ ColumnLayout {
             rowCount: queuePane.count
             dropRow: queueList.dropRow
             gutter: queueScroll.gutter
+            selection: queueSelection
             onPlayRequested: queuePane.playRequested(queueRow.index)
-            onMenuRequested: queueMenu.show(queueRow.index, 1)
+            onMenuRequested: queueMenu.show(queueSelection.rows())
             onDragMoved: y => queueList.dropRow = queueList.dropTarget(queueRow, y)
             onDragEnded: if (queueList.dropRow >= 0) {
-                queuePane.moveRequested(queueRow.index, queueList.dropRow)
+                queuePane.moveRequested(queueSelection.contains(queueRow.index) ? queueSelection.rows() : [queueRow.index],
+                                        queueList.dropRow)
                 queueList.dropRow = -1
             }
         }

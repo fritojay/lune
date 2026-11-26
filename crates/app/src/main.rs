@@ -25,6 +25,7 @@ mod sources_model;
 #[cfg(test)]
 #[path = "tests/test_util.rs"]
 mod test_util;
+mod track_selection;
 mod window_layout;
 
 use std::path::PathBuf;
