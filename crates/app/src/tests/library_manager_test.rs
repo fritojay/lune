@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_util::TempDir;
+use crate::test_util::{TempDir, entry_value};
 
 #[test]
 fn a_flatpak_is_detected_by_its_info_file() {
@@ -12,13 +12,6 @@ fn a_flatpak_is_detected_by_its_info_file() {
 fn without_the_info_file_it_is_not_a_flatpak() {
     let dir = TempDir::new();
     assert!(!in_flatpak(&dir.path().join(".flatpak-info")));
-}
-
-fn entry_value(entry: &QVariant, key: &str) -> Option<QVariant> {
-    entry
-        .value::<QMap<QMapPair_QString_QVariant>>()
-        .unwrap()
-        .get(&QString::from(key))
 }
 
 #[test]

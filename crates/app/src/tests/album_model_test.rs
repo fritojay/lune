@@ -2,7 +2,7 @@ use lune_core::{Grouping, Sort, SortColumn, TrackFilter};
 use proptest::prelude::*;
 
 use super::*;
-use crate::test_util::{list_track as track, qml_values};
+use crate::test_util::list_track as track;
 
 #[test]
 fn cover_rows_lists_every_album_showing_each_cover() {
@@ -207,15 +207,6 @@ fn a_track_without_an_artist_shows_the_album_artist_or_unknown() {
     }
     t.album_artist = String::new();
     assert_eq!(track_artist(&t), "Unknown Artist");
-}
-
-#[test]
-fn columns_qml_has_every_column_once() {
-    let mut ids = qml_values(include_str!("../../qml/Columns.qml"), "id");
-    ids.sort_unstable();
-    let mut names = SortColumn::ALL.map(SortColumn::name);
-    names.sort_unstable();
-    assert_eq!(ids, names);
 }
 
 fn assert_column_texts(track: &ListTrack, texts: [(SortColumn, &str); SortColumn::ALL.len()]) {

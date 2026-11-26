@@ -4,7 +4,7 @@ fn main() -> std::io::Result<()> {
     // Every QML file in `qml/` is in the module, so a new component can't be left out.
     println!("cargo::rerun-if-changed=qml");
     println!("cargo::rerun-if-changed=../../packaging/icon/lune.svg");
-    const SINGLETONS: [&str; 2] = ["qml/Columns.qml", "qml/Theme.qml"];
+    const SINGLETONS: [&str; 1] = ["qml/Theme.qml"];
     let mut components = Vec::new();
     for entry in std::fs::read_dir("qml")? {
         let path = entry?.path();
@@ -24,6 +24,7 @@ fn main() -> std::io::Result<()> {
             "src/album_grid_model.rs",
             "src/album_model.rs",
             "src/bench.rs",
+            "src/columns.rs",
             "src/desktop_entry.rs",
             "src/filter_model.rs",
             "src/library_manager.rs",

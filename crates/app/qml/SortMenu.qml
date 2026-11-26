@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import com.lune.player
 
 Menu {
     id: sortMenu
@@ -37,7 +38,7 @@ Menu {
         model: Columns.all
         SortMenuItem {
             required property var modelData
-            text: modelData.menuTitle ?? modelData.title
+            text: modelData.menuTitle
             column: modelData.id
             // Album order's direction is about years, not columns.
             descending: sortMenu.sorted && sortMenu.sortDescending

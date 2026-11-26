@@ -5,6 +5,7 @@
 mod album_grid_model;
 mod album_model;
 mod bench;
+mod columns;
 mod covers;
 mod desktop_entry;
 mod filter_model;

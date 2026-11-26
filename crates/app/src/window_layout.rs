@@ -13,6 +13,7 @@ use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QList, QString, QStringList};
 use lune_core::{SortColumn, WindowState};
 
+use crate::columns::{COLUMNS, Column, SPACING};
 use crate::property::set;
 use crate::{format::qml_int, session};
 
@@ -214,54 +215,6 @@ fn with_column_shown(
     changed.then_some(hidden)
 }
 
-struct ColumnSize {
-    column: SortColumn,
-    width: f64,
-    max_share: Option<f64>,
-    hideable: bool,
-}
-
-const COLUMN_SIZES: [ColumnSize; 6] = [
-    ColumnSize {
-        column: SortColumn::TrackNumber,
-        width: 32.0,
-        max_share: None,
-        hideable: false,
-    },
-    ColumnSize {
-        column: SortColumn::Title,
-        width: 120.0,
-        max_share: None,
-        hideable: false,
-    },
-    ColumnSize {
-        column: SortColumn::Artist,
-        width: 220.0,
-        max_share: Some(0.25),
-        hideable: true,
-    },
-    ColumnSize {
-        column: SortColumn::FileType,
-        width: 76.0,
-        max_share: None,
-        hideable: true,
-    },
-    ColumnSize {
-        column: SortColumn::BitRate,
-        width: 72.0,
-        max_share: None,
-        hideable: true,
-    },
-    ColumnSize {
-        column: SortColumn::Duration,
-        width: 56.0,
-        max_share: None,
-        hideable: false,
-    },
-];
-
-const COLUMN_SPACING: f64 = 10.0;
-
 const MIN_SHRUNK_WIDTH: f64 = 40.0;
 
 /// When the row is too narrow, hideable columns shrink, then drop out from the
@@ -272,17 +225,17 @@ fn column_widths(available: f64, hidden: &BTreeSet<SortColumn>) -> Vec<f64> {
     } else {
         0.0
     };
-    let shown: Vec<&ColumnSize> = COLUMN_SIZES
+    let shown: Vec<&Column> = COLUMNS
         .iter()
         .filter(|size| !hidden.contains(&size.column))
         .collect();
-    let natural = |size: &ColumnSize| {
+    let natural = |size: &Column| {
         size.max_share
             .map_or(size.width, |share| size.width.min(available * share))
     };
     let mut kept = vec![true; shown.len()];
     loop {
-        let gaps = COLUMN_SPACING * kept.iter().filter(|&&k| k).count().saturating_sub(1) as f64;
+        let gaps = SPACING * kept.iter().filter(|&&k| k).count().saturating_sub(1) as f64;
         let (mut fixed, mut flexible) = (0.0, 0.0);
         for (size, _) in shown.iter().zip(&kept).filter(|(_, k)| **k) {
             if size.hideable {

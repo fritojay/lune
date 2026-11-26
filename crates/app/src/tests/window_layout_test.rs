@@ -2,7 +2,6 @@ use proptest::prelude::*;
 use proptest::sample::select;
 
 use super::*;
-use crate::test_util::qml_values;
 
 #[test]
 fn qml_sizes_round_to_whole_pixels() {
@@ -51,26 +50,6 @@ fn a_wide_row_gives_the_title_what_the_others_leave() {
     assert_eq!(widths(1000.0, &[]), [32.0, 494.0, 220.0, 76.0, 72.0, 56.0]);
 }
 
-#[test]
-fn columns_qml_matches_the_rust_column_sizes() {
-    let qml = include_str!("../../qml/Columns.qml");
-    let order: Vec<&str> = COLUMN_SIZES.iter().map(|size| size.column.name()).collect();
-    assert_eq!(qml_values(qml, "id"), order);
-    let hideable: Vec<&str> = qml
-        .split("{ id: \"")
-        .skip(1)
-        .filter(|entry| entry.contains("hideable: true"))
-        .map(|entry| &entry[..entry.find('"').unwrap()])
-        .collect();
-    let expected: Vec<&str> = COLUMN_SIZES
-        .iter()
-        .filter(|size| size.hideable)
-        .map(|size| size.column.name())
-        .collect();
-    assert_eq!(hideable, expected);
-    assert!(qml.contains(&format!("readonly property int spacing: {COLUMN_SPACING}")));
-}
-
 fn arb_hidden() -> impl Strategy<Value = BTreeSet<SortColumn>> {
     prop::collection::btree_set(select(&SortColumn::ALL[..]), 0..=SortColumn::ALL.len())
 }
@@ -114,7 +93,7 @@ proptest! {
     ) {
         let widths = column_widths(available, &hidden);
         let row = if available.is_finite() { available.max(0.0) } else { 0.0 };
-        let shown: Vec<&ColumnSize> = COLUMN_SIZES.iter().filter(|s| !hidden.contains(&s.column)).collect();
+        let shown: Vec<&Column> = COLUMNS.iter().filter(|s| !hidden.contains(&s.column)).collect();
         prop_assert_eq!(widths.len(), shown.len());
         let mut dropped = false;
         let mut title = None;
@@ -133,13 +112,13 @@ proptest! {
             }
         }
         let kept = widths.iter().filter(|&&w| w > 0.0).count() + usize::from(title == Some(0.0));
-        let gaps = COLUMN_SPACING * kept.saturating_sub(1) as f64;
+        let gaps = SPACING * kept.saturating_sub(1) as f64;
         let used = widths.iter().sum::<f64>() + gaps;
         let hideable_shown = shown.iter().zip(&widths).any(|(s, &w)| s.hideable && w > 0.0);
         if hideable_shown {
             prop_assert!(used <= row, "the shown hideable columns fit: {widths:?}");
         }
-        let title_width = COLUMN_SIZES
+        let title_width = COLUMNS
             .iter()
             .find(|s| s.column == SortColumn::Title)
             .unwrap()

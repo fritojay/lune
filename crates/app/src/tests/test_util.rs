@@ -137,14 +137,12 @@ pub fn list_track(id: i64, album_id: i64, art_id: Option<i64>) -> ListTrack {
 }
 
 /// Each entry's `key: "value"` in the QML source `qml`, in order.
-pub fn qml_values(qml: &'static str, key: &str) -> Vec<&'static str> {
-    let pattern = format!("{key}: \"");
-    qml.match_indices(&pattern)
-        .map(|(at, _)| {
-            let value = &qml[at + pattern.len()..];
-            &value[..value.find('"').unwrap()]
-        })
-        .collect()
+/// What an entry QML reads as an object (a `QVariantMap`) has at `key`.
+pub fn entry_value(entry: &cxx_qt_lib::QVariant, key: &str) -> Option<cxx_qt_lib::QVariant> {
+    entry
+        .value::<cxx_qt_lib::QMap<cxx_qt_lib::QMapPair_QString_QVariant>>()
+        .unwrap()
+        .get(&cxx_qt_lib::QString::from(key))
 }
 
 // Its only test plants a link with `std::os::unix`.

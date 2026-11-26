@@ -133,7 +133,7 @@ Item {
                             id: cell
                             required property var modelData
                             required property int index
-                            readonly property bool marker: (modelData.marksPlaying ?? false) && trackRow.nowPlaying
+                            readonly property bool marker: modelData.marksPlaying && trackRow.nowPlaying
                             readonly property real columnWidth: album.columnWidths[index] ?? 0
                             visible: columnWidth > 0
                             Layout.preferredWidth: columnWidth
@@ -143,7 +143,7 @@ Item {
                             elide: Text.ElideRight
                             color: trackRow.textColor
                             opacity: modelData.primary || trackRow.nowPlaying ? 1 : 0.7
-                            font.bold: (modelData.primary ?? false) && trackRow.nowPlaying
+                            font.bold: modelData.primary && trackRow.nowPlaying
                             font.features: modelData.alignRight ? { "tnum": 1 } : {}
 
                             Loader {
