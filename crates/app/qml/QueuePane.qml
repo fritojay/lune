@@ -82,21 +82,14 @@ ColumnLayout {
         }
     }
 
-    Rectangle {
+    Divider {
         Layout.fillWidth: true
-        implicitHeight: 1
-        color: queuePane.palette.mid
     }
 
-    Label {
+    EmptyHint {
         Layout.fillWidth: true
         Layout.fillHeight: true
         visible: queueModel.count === 0
-        padding: 16
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        wrapMode: Text.Wrap
-        opacity: 0.6
         text: qsTr("The queue is empty.\nDouble-click a track to play it, or right-click to add it here.")
     }
 

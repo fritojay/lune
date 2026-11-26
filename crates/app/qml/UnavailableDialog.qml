@@ -27,15 +27,10 @@ Dialog {
             Layout.preferredHeight: 360
             padding: 0
 
-            ListView {
+            ScrollingList {
                 id: trackList
                 anchors.fill: parent
-                clip: true
                 model: MissingModel {}
-                ScrollBar.vertical: ListScrollBar {}
-                WheelScroller {
-                    view: trackList
-                }
 
                 Label {
                     anchors.centerIn: parent

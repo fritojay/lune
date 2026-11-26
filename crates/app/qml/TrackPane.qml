@@ -228,15 +228,10 @@ ColumnLayout {
         }
     }
 
-    Label {
+    EmptyHint {
         Layout.fillWidth: true
         Layout.fillHeight: true
         visible: Filters.emptyHint !== ""
-        padding: 16
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        wrapMode: Text.Wrap
-        opacity: 0.6
         text: Filters.emptyHint
     }
 
@@ -276,11 +271,9 @@ ColumnLayout {
             }
         }
 
-        Rectangle {
+        Divider {
             anchors.bottom: parent.bottom
             width: parent.width
-            height: 1
-            color: trackPane.palette.mid
         }
     }
 
@@ -313,14 +306,14 @@ ColumnLayout {
 
     // A ListView of rows of tiles rather than a GridView, so the open album
     // can sit between two rows.
-    ListView {
+    ScrollingList {
         id: albumRows
         readonly property real tileWidth: Theme.coverSize + 2 * Theme.albumPadding
         readonly property real tileHeight: Theme.coverSize + 2 * Theme.albumPadding + 2 * Theme.rowHeight
         // The scroll bar's width is kept free even while it is hidden: the
         // column count decides whether it shows, so following its gutter
         // would be a binding loop.
-        readonly property real usableWidth: width - gridScroll.width
+        readonly property real usableWidth: width - scrollBar.width
         readonly property real panelWidth: usableWidth - 2 * Theme.albumPadding
         readonly property int columns: Math.max(1, Math.floor(usableWidth / tileWidth))
         // Spare width goes between the tiles rather than after the last one.
@@ -329,15 +322,6 @@ ColumnLayout {
         Layout.fillHeight: true
         visible: trackPane.grid && albums.albumCount > 0
         model: gridModel
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        maximumFlickVelocity: Theme.maxFlickVelocity
-        ScrollBar.vertical: ListScrollBar {
-            id: gridScroll
-        }
-        WheelScroller {
-            view: albumRows
-        }
 
         delegate: Column {
             id: gridRow

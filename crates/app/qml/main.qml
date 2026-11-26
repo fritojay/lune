@@ -218,10 +218,8 @@ ApplicationWindow {
             }
         }
 
-        Rectangle {
+        Divider {
             Layout.fillWidth: true
-            implicitHeight: 1
-            color: window.palette.mid
         }
 
         SplitView {
@@ -260,10 +258,8 @@ ApplicationWindow {
                     onPlayRequested: start => window.playView(start)
                 }
 
-                Rectangle {
+                Divider {
                     Layout.fillWidth: true
-                    implicitHeight: 1
-                    color: window.palette.mid
                 }
 
                 NowPlayingBar {

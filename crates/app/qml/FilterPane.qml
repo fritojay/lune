@@ -86,15 +86,12 @@ ColumnLayout {
         onClicked: newPlaylist.createObject(filterPane).open()
     }
 
-    ListView {
+    ScrollingList {
         id: filterList
         Layout.fillWidth: true
         Layout.fillHeight: true
         model: filterPane.rows
-        clip: true
         reuseItems: true
-        boundsBehavior: Flickable.StopAtBounds
-        maximumFlickVelocity: Theme.maxFlickVelocity
         currentIndex: filterPane.rows.currentRow
         // Only the keys and clicks choose a row: the current index also moves
         // when the model resets or is swapped, which is no choice.
@@ -107,13 +104,6 @@ ColumnLayout {
             incrementCurrentIndex()
             filterPane.rows.select(currentIndex)
         }
-        ScrollBar.vertical: ListScrollBar {
-            id: filterScroll
-        }
-        WheelScroller {
-            view: filterList
-        }
-
         delegate: Rectangle {
             id: filterRow
             required property int index
@@ -130,7 +120,7 @@ ColumnLayout {
             ColumnLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 10
-                anchors.rightMargin: 10 + filterScroll.gutter
+                anchors.rightMargin: 10 + filterList.gutter
                 spacing: 0
                 RowLayout {
                     Layout.fillWidth: true

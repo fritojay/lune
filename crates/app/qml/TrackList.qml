@@ -1,12 +1,8 @@
 import QtQuick
-import QtQuick.Controls
 import com.lune.player
 
 // A scrolling list of track rows that can be dragged to reorder.
-ListView {
-    id: list
-    // How far rows keep their text from the scroll bar.
-    readonly property real gutter: scrollBar.gutter
+ScrollingList {
     // The row a dragged track would land before, or -1.
     property int dropRow: -1
 
@@ -41,14 +37,5 @@ ListView {
         return p.y - under.y > under.height / 2 ? row + 1 : row
     }
 
-    clip: true
     reuseItems: true
-    boundsBehavior: Flickable.StopAtBounds
-    maximumFlickVelocity: Theme.maxFlickVelocity
-    ScrollBar.vertical: ListScrollBar {
-        id: scrollBar
-    }
-    WheelScroller {
-        view: list
-    }
 }

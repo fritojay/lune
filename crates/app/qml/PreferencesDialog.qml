@@ -50,15 +50,10 @@ Dialog {
             Layout.preferredHeight: 200
             padding: 0
 
-            ListView {
+            ScrollingList {
                 id: folderList
                 anchors.fill: parent
-                clip: true
                 model: Library.folders
-                ScrollBar.vertical: ListScrollBar {}
-                WheelScroller {
-                    view: folderList
-                }
 
                 Label {
                     anchors.centerIn: parent
