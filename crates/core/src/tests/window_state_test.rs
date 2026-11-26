@@ -105,8 +105,6 @@ fn a_malformed_file_is_an_error() {
     let dir = TempDir::new();
     for (name, text) in [
         ("broken.toml", "width = ".as_bytes()),
-        ("wrong-type.toml", b"maximized = \"yes\""),
-        ("negative.toml", b"width = -5"),
         ("binary.toml", &[0xff, 0xfe, 0x00]),
     ] {
         let path = dir.write(name, text);
@@ -331,6 +329,19 @@ fn arb_window_state() -> impl Strategy<Value = WindowState> {
         )
 }
 
+fn table(state: &WindowState) -> toml::Table {
+    toml::Table::try_from(state).unwrap()
+}
+
+/// Of the wrong type for every field.
+fn arb_unreadable() -> impl Strategy<Value = toml::Value> {
+    prop_oneof![
+        Just(toml::Value::from("not this")),
+        Just(toml::Value::from(-5)),
+        Just(toml::Value::Array(vec![toml::Value::from(true)])),
+    ]
+}
+
 /// A screen size, sometimes unknown (0).
 fn arb_screen() -> impl Strategy<Value = u32> {
     prop_oneof![Just(0), arb_size()]
@@ -354,6 +365,24 @@ proptest! {
                 ..state
             }
         );
+    }
+
+    #[test]
+    fn a_value_this_version_cant_read_gets_its_default_and_the_rest_is_kept(
+        state in arb_window_state(),
+        key in prop::sample::select(table(&WindowState::default()).keys().cloned().collect::<Vec<_>>()),
+        unreadable in arb_unreadable(),
+    ) {
+        let dir = TempDir::new();
+        let load = |name: &str, table: &toml::Table| {
+            let path = dir.write(name, toml::to_string(table).unwrap().as_bytes());
+            WindowState::load(&path).unwrap()
+        };
+        let mut saved = table(&state);
+        saved.insert(key.clone(), unreadable);
+        let mut expected = table(&state);
+        expected.insert(key.clone(), table(&WindowState::default())[&key].clone());
+        prop_assert_eq!(load("saved.toml", &saved), load("expected.toml", &expected));
     }
 
     #[test]

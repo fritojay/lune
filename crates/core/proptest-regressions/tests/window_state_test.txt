@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3e03423803786dd713d4a37a3797a04028ac08e538481bcab0c0573312adf045 # shrinks to state = WindowState { width: 0, height: 0, maximized: false, filter_pane_width: 0, queue_pane_width: 0, queue_shown: false, hidden_columns: {}, album_grid: false, browse: BrowseState { source: Library(AlbumArtist), selected: All, sort: None, album_descending: false } }, key = "filter_pane_width", unreadable = String("not this")

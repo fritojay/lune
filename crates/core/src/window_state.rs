@@ -31,7 +31,6 @@ pub struct WindowState {
     pub hidden_columns: BTreeSet<SortColumn>,
     /// The main pane shows albums as a grid of covers rather than a list.
     pub album_grid: bool,
-    #[serde(deserialize_with = "browse_or_default")]
     pub browse: BrowseState,
 }
 
@@ -105,10 +104,12 @@ impl WindowState {
                 });
             }
         };
-        let state: Self = toml::from_str(&text).map_err(|err| CoreError::WindowState {
+        let error = |err: toml::de::Error| CoreError::WindowState {
             path: path.to_path_buf(),
             message: err.to_string(),
-        })?;
+        };
+        let state: Self = crate::lenient::from_table(toml::from_str(&text).map_err(error)?, &[])
+            .map_err(error)?;
         Ok(Self {
             width: state.width.max(MIN_WINDOW_WIDTH),
             height: state.height.max(MIN_WINDOW_HEIGHT),
@@ -156,18 +157,6 @@ impl WindowState {
             ..self
         }
     }
-}
-
-/// A browse section that isn't a table falls back to the defaults without
-/// losing the window's size.
-fn browse_or_default<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> std::result::Result<BrowseState, D::Error> {
-    let value = toml::Value::deserialize(deserializer)?;
-    Ok(value.try_into().unwrap_or_else(|err| {
-        tracing::warn!(%err, "the saved browse position is ignored");
-        BrowseState::default()
-    }))
 }
 
 /// A browse value this version can't read, such as a source from a newer

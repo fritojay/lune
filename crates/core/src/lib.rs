@@ -5,6 +5,7 @@ mod art;
 mod browse;
 mod db;
 mod error;
+mod lenient;
 mod library;
 mod lists;
 pub mod normalize;
