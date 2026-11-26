@@ -8,14 +8,12 @@ ScrollBar {
 
     // The app runs Fusion (see main.rs), whose handle uses palette.mid; a tint of the
     // text color, like Theme's stripes, shows in light and dark mode. High contrast
-    // gets the full text color. The check guards a style picked through
-    // QT_QUICK_CONTROLS_STYLE whose handle isn't a Rectangle.
+    // gets the full text color.
     Component.onCompleted: {
-        if (contentItem instanceof Rectangle)
-            contentItem.color = Qt.binding(() => {
-                if (Application.styleHints.accessibility.contrastPreference === Qt.HighContrast)
-                    return pressed ? palette.highlight : palette.text
-                return Qt.rgba(palette.text.r, palette.text.g, palette.text.b, pressed ? 0.65 : 0.45)
-            })
+        (contentItem as Rectangle).color = Qt.binding(() => {
+            if (Application.styleHints.accessibility.contrastPreference === Qt.HighContrast)
+                return pressed ? palette.highlight : palette.text
+            return Qt.rgba(palette.text.r, palette.text.g, palette.text.b, pressed ? 0.65 : 0.45)
+        })
     }
 }

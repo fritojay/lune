@@ -128,11 +128,9 @@ fn run(started: Instant) -> anyhow::Result<()> {
     // platform styles don't: KDE's can't load the icons in our QML module and
     // runs menu shortcuts into their text, Windows' draw their own light or
     // dark controls under the app's palette-tinted text and backgrounds, and
-    // macOS's can't be restyled. A non-empty env var still overrides this, for
-    // trying other styles; Qt ignores an empty one.
-    if std::env::var_os("QT_QUICK_CONTROLS_STYLE").is_none_or(|style| style.is_empty()) {
-        cxx_qt_lib::QQuickStyle::set_style(&cxx_qt_lib::QString::from("Fusion"));
-    }
+    // macOS's can't be restyled. This takes precedence over Qt's
+    // QT_QUICK_CONTROLS_STYLE.
+    cxx_qt_lib::QQuickStyle::set_style(&QString::from("Fusion"));
     desktop_entry::register();
     let mut engine = QQmlApplicationEngine::new();
 
