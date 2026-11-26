@@ -1,20 +1,30 @@
+use std::path::{Path, PathBuf};
+
 use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
 
+/// The files in `dir` ending in `.extension`, sorted.
+fn files(dir: &str, extension: &str) -> std::io::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|ext| ext == extension) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
 fn main() -> std::io::Result<()> {
-    // Every QML file in `qml/` is in the module, so a new component can't be left out.
+    // Every QML file and icon in `qml/` is built in, so a new one can't be left out.
     println!("cargo::rerun-if-changed=qml");
     println!("cargo::rerun-if-changed=../../packaging/icon/lune.svg");
     const SINGLETONS: [&str; 1] = ["qml/Theme.qml"];
-    let mut components = Vec::new();
-    for entry in std::fs::read_dir("qml")? {
-        let path = entry?.path();
-        if path.extension().is_some_and(|ext| ext == "qml")
-            && !SINGLETONS.iter().any(|singleton| path.ends_with(singleton))
-        {
-            components.push(path);
-        }
-    }
-    components.sort();
+    let is_singleton = |path: &Path| SINGLETONS.iter().any(|singleton| path.ends_with(singleton));
+    let components: Vec<PathBuf> = files("qml", "qml")?
+        .into_iter()
+        .filter(|path| !is_singleton(path))
+        .collect();
     let module = QmlModule::new("com.lune.player")
         .qml_files(components)
         .qml_files(SINGLETONS.map(|path| QmlFile::from(path).singleton(true)));
@@ -38,20 +48,7 @@ fn main() -> std::io::Result<()> {
             "src/track_selection.rs",
             "src/window_layout.rs",
         ])
-        .qrc_resources([
-            "qml/icons/clear.svg",
-            "qml/icons/error.svg",
-            "qml/icons/grid.svg",
-            "qml/icons/list.svg",
-            "qml/icons/missing.svg",
-            "qml/icons/next.svg",
-            "qml/icons/previous.svg",
-            "qml/icons/queue.svg",
-            "qml/icons/shuffle.svg",
-            "qml/icons/volume-high.svg",
-            "qml/icons/volume-low.svg",
-            "qml/icons/volume-muted.svg",
-        ])
+        .qrc_resources(files("qml/icons", "svg")?)
         // The app icon stays in packaging/, where the bundles take it from.
         .qrc("icon.qrc")
         .qt_module("Quick")
