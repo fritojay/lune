@@ -6,12 +6,10 @@
     reason = "the CXX-Qt bridge below generates its FFI glue as unsafe code"
 )]
 
-use std::collections::HashMap;
 use std::ops::Range;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{
     QHash, QHashPair_i32_QByteArray, QList, QMap, QMapPair_QString_QVariant, QModelIndex, QString,
@@ -20,7 +18,7 @@ use cxx_qt_lib::{
 use lune_core::{Catalog, View};
 
 use crate::album_model::{self, Album, album_at};
-use crate::covers;
+use crate::covers::{self, CoverRows};
 use crate::list_model;
 use crate::session::{self, Change};
 
@@ -147,7 +145,7 @@ pub struct AlbumGridModelRust {
     active: bool,
     catalog: Option<Rc<Catalog>>,
     view: Rc<View>,
-    cover_rows: HashMap<i64, Vec<i32>>,
+    cover_rows: CoverRows,
 }
 
 impl Default for AlbumGridModelRust {
@@ -157,14 +155,14 @@ impl Default for AlbumGridModelRust {
             active: false,
             catalog: None,
             view: Rc::default(),
-            cover_rows: HashMap::new(),
+            cover_rows: CoverRows::new(),
         }
     }
 }
 
 impl cxx_qt::Initialize for qobject::AlbumGridModel {
     fn initialize(self: Pin<&mut Self>) {
-        covers::on_ready(self.qt_thread(), Self::cover_ready);
+        covers::update_rows_on_ready(self.qt_thread(), |model| &model.cover_rows, ALBUMS_ROLE);
         session::on_change(self.qt_thread(), |model, change| {
             if let Change::View { reset } = change {
                 model.refresh(reset);
@@ -232,12 +230,6 @@ impl qobject::AlbumGridModel {
         i32::try_from(relaid).unwrap_or(i32::MAX)
     }
 
-    fn cover_ready(self: Pin<&mut Self>, art_id: i64) {
-        if let Some(rows) = self.cover_rows.get(&art_id).cloned() {
-            list_model::role_changed(self.upcast_pin(), &rows, ALBUMS_ROLE);
-        }
-    }
-
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
         let tiles = usize::try_from(index.row())
             .ok()
@@ -276,7 +268,7 @@ fn grid_row(albums: usize, columns: usize, row: usize) -> Option<GridRow> {
 }
 
 /// For each cover in `view`, the grid rows that show it.
-fn grid_cover_rows(catalog: &Catalog, view: &View, columns: usize) -> HashMap<i64, Vec<i32>> {
+fn grid_cover_rows(catalog: &Catalog, view: &View, columns: usize) -> CoverRows {
     let every_album: Vec<usize> = (0..view.albums.len()).collect();
     let mut rows = album_model::cover_rows(catalog, view, &every_album);
     for grid_rows in rows.values_mut() {

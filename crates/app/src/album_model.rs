@@ -8,12 +8,10 @@
     reason = "the CXX-Qt bridge below generates its FFI glue as unsafe code"
 )]
 
-use std::collections::HashMap;
 use std::ops::Range;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{
     QHash, QHashPair_i32_QByteArray, QList, QMap, QMapPair_QString_QVariant, QModelIndex, QString,
@@ -21,10 +19,11 @@ use cxx_qt_lib::{
 };
 use lune_core::{Catalog, ListTrack, SortColumn, View, file_type};
 
+use crate::covers::{self, CoverRows};
+use crate::format;
 use crate::list_model::{self, text};
 use crate::property::set;
 use crate::session::{self, Change};
-use crate::{covers, format};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -148,7 +147,7 @@ pub struct AlbumListModelRust {
     /// The view's album indices, one per row.
     rows: Vec<usize>,
     /// The rows showing each cover, so a finished cover doesn't scan every album.
-    cover_rows: HashMap<i64, Vec<i32>>,
+    cover_rows: CoverRows,
 }
 
 impl Default for AlbumListModelRust {
@@ -160,14 +159,14 @@ impl Default for AlbumListModelRust {
             catalog: None,
             view: Rc::default(),
             rows: Vec::new(),
-            cover_rows: HashMap::new(),
+            cover_rows: CoverRows::new(),
         }
     }
 }
 
 impl cxx_qt::Initialize for qobject::AlbumListModel {
     fn initialize(self: Pin<&mut Self>) {
-        covers::on_ready(self.qt_thread(), Self::cover_ready);
+        covers::update_rows_on_ready(self.qt_thread(), |model| &model.cover_rows, COVER_ROLE);
         session::on_change(self.qt_thread(), |model, change| {
             if let Change::View { reset } = change {
                 model.refresh(reset);
@@ -213,12 +212,6 @@ impl qobject::AlbumListModel {
         self.as_mut().end_reset_model();
         set!(self, album_count, album_count_changed, count);
         self.refreshed(reset);
-    }
-
-    fn cover_ready(self: Pin<&mut Self>, art_id: i64) {
-        if let Some(rows) = self.cover_rows.get(&art_id).cloned() {
-            list_model::role_changed(self.upcast_pin(), &rows, COVER_ROLE);
-        }
     }
 
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
@@ -330,7 +323,7 @@ fn shown_rows(
 }
 
 /// For each cover of `view`'s albums at `rows`, the rows that show it.
-pub fn cover_rows(catalog: &Catalog, view: &View, rows: &[usize]) -> HashMap<i64, Vec<i32>> {
+pub fn cover_rows(catalog: &Catalog, view: &View, rows: &[usize]) -> CoverRows {
     covers::rows_by_cover(
         rows.iter().map(|&album| {
             first_track(Some(catalog), view, album).and_then(|t| shown_cover(view, t))

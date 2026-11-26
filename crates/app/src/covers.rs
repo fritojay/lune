@@ -8,9 +8,12 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 
+use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtThread, Threading};
 use cxx_qt_lib::{QString, QUrl, QVariant};
 use lune_core::Library;
+
+use crate::list_model::{self, QAbstractListModel};
 
 /// Longest side, in pixels: album covers are 160 logical pixels, and this
 /// keeps them sharp on 2x displays. The now-playing cover can be larger, so
@@ -116,8 +119,12 @@ impl Covers {
     }
 }
 
+/// The rows of a model showing each cover, so a finished cover updates only
+/// those.
+pub type CoverRows = HashMap<i64, Vec<i32>>;
+
 /// For each cover in `covers` (one entry per model row), the rows showing it.
-pub fn rows_by_cover(covers: impl IntoIterator<Item = Option<i64>>) -> HashMap<i64, Vec<i32>> {
+pub fn rows_by_cover(covers: impl IntoIterator<Item = Option<i64>>) -> CoverRows {
     let mut rows: HashMap<i64, Vec<i32>> = HashMap::new();
     for (row, art_id) in covers.into_iter().enumerate() {
         if let (Some(art_id), Ok(row)) = (art_id, i32::try_from(row)) {
@@ -132,6 +139,21 @@ pub fn on_ready<T: Threading + 'static>(qt_thread: CxxQtThread<T>, ready: fn(Pin
     covers().subscribe(move |art_id| {
         // An error means the object is gone (the app is quitting).
         let _ = qt_thread.queue(move |object| ready(object, art_id));
+    });
+}
+
+/// Updates `role` of the rows `rows` gives for each finished cover.
+pub fn update_rows_on_ready<T>(qt_thread: CxxQtThread<T>, rows: fn(&T) -> &CoverRows, role: i32)
+where
+    T: Threading + Upcast<QAbstractListModel> + 'static,
+{
+    covers().subscribe(move |art_id| {
+        // An error means the object is gone (the app is quitting).
+        let _ = qt_thread.queue(move |model| {
+            if let Some(changed) = rows(&model).get(&art_id).cloned() {
+                list_model::role_changed(model.upcast_pin(), &changed, role);
+            }
+        });
     });
 }
 

@@ -12,15 +12,15 @@ use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::rc::Rc;
 
-use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use lune_core::{Catalog, ListTrack, MissingTrack};
 
+use crate::covers::{self, CoverRows};
+use crate::format;
 use crate::list_model::{self, text};
 use crate::property::set;
 use crate::session::{self, Change};
-use crate::{covers, format};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -123,7 +123,7 @@ pub struct QueueModelRust {
     /// The queued tracks whose files are missing (not in the catalog).
     missing: HashMap<i64, MissingTrack>,
     /// The rows showing each cover, so a finished cover doesn't scan the queue.
-    cover_rows: HashMap<i64, Vec<i32>>,
+    cover_rows: CoverRows,
 }
 
 impl Default for QueueModelRust {
@@ -135,14 +135,14 @@ impl Default for QueueModelRust {
             track_ids: Vec::new(),
             catalog: None,
             missing: HashMap::new(),
-            cover_rows: HashMap::new(),
+            cover_rows: CoverRows::new(),
         }
     }
 }
 
 impl cxx_qt::Initialize for qobject::QueueModel {
     fn initialize(self: Pin<&mut Self>) {
-        covers::on_ready(self.qt_thread(), Self::cover_ready);
+        covers::update_rows_on_ready(self.qt_thread(), |model| &model.cover_rows, COVER_ROLE);
         session::on_change(self.qt_thread(), |model, change| {
             if matches!(change, Change::Catalog | Change::Missing | Change::Queue) {
                 model.refresh();
@@ -187,12 +187,6 @@ impl qobject::QueueModel {
         );
     }
 
-    fn cover_ready(self: Pin<&mut Self>, art_id: i64) {
-        if let Some(rows) = self.cover_rows.get(&art_id).cloned() {
-            list_model::role_changed(self.upcast_pin(), &rows, COVER_ROLE);
-        }
-    }
-
     fn queued(&self, row: i32) -> Option<Queued<'_>> {
         let &id = self.track_ids.get(usize::try_from(row).ok()?)?;
         Some(
@@ -220,7 +214,7 @@ impl qobject::QueueModel {
 }
 
 /// For each cover, the rows of the queue `track_ids` showing it.
-fn cover_rows(catalog: Option<&Catalog>, track_ids: &[i64]) -> HashMap<i64, Vec<i32>> {
+fn cover_rows(catalog: Option<&Catalog>, track_ids: &[i64]) -> CoverRows {
     covers::rows_by_cover(track_ids.iter().map(|&id| catalog?.by_id(id)?.art_id))
 }
 
