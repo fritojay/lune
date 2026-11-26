@@ -23,6 +23,28 @@ fn a_failed_migration_leaves_no_transaction_open_and_the_version_as_it_was() {
 }
 
 #[test]
+fn a_migration_that_fails_to_commit_leaves_no_transaction_open() {
+    let dir = crate::test_util::TempDir::new();
+    let path = dir.path().join("library.sqlite3");
+    let conn = Connection::open(&path).unwrap();
+    conn.busy_timeout(Duration::ZERO).unwrap();
+    // A reader's open transaction holds the file, so the first migration
+    // runs but its COMMIT is refused as busy.
+    let reader = Connection::open(&path).unwrap();
+    reader
+        .execute_batch("BEGIN; SELECT count(*) FROM sqlite_master;")
+        .unwrap();
+    assert!(migrate(&conn).is_err());
+    assert!(conn.is_autocommit());
+    reader.execute_batch("COMMIT").unwrap();
+    let v: i64 = reader
+        .pragma_query_value(None, "user_version", |r| r.get("user_version"))
+        .unwrap();
+    assert_eq!(v, 0);
+    migrate(&conn).unwrap();
+}
+
+#[test]
 fn a_newer_schema_is_rejected_and_migrations_reach_the_latest() {
     let conn = open_in_memory().unwrap();
     let v: i64 = conn
