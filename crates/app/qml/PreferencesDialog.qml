@@ -18,6 +18,32 @@ Dialog {
     modal: true
     standardButtons: Dialog.Close
 
+    // Removing a folder deletes its tracks from the library. Adding it back
+    // gives them new ids, so playlists and play history never get them back.
+    Component {
+        id: confirmRemove
+        Dialog {
+            id: confirm
+            required property int row
+            required property string path
+            parent: Overlay.overlay
+            anchors.centerIn: parent
+            width: Math.min(440, parent.width - 40)
+            modal: true
+            title: qsTr("Remove Folder")
+            standardButtons: Dialog.Ok | Dialog.Cancel
+            Component.onCompleted: standardButton(Dialog.Ok).text = qsTr("Remove")
+            onAccepted: preferences.removeFolderRequested(row)
+            onClosed: destroy()
+            Label {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                textFormat: Text.PlainText
+                text: qsTr("Remove “%1” from the library? Its tracks are also taken out of your playlists and Recently Played, even if you add the folder again. The files themselves are not touched.").arg(confirm.path)
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 8
@@ -77,7 +103,10 @@ Dialog {
                         Button {
                             text: qsTr("Remove")
                             flat: true
-                            onClicked: preferences.removeFolderRequested(folderRow.index)
+                            onClicked: confirmRemove.createObject(preferences.parent, {
+                                row: folderRow.index,
+                                path: folderRow.modelData.path
+                            }).open()
                         }
                     }
                 }
