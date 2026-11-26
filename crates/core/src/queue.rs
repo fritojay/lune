@@ -239,43 +239,50 @@ impl Queue {
         self.items.iter().position(|item| item.slot == slot)
     }
 
-    /// Rebuilds a queue loaded from the database. `original` holds, for each
-    /// item, its index in the unshuffled order (all `Some` when shuffled).
+    /// Rebuilds a queue loaded from the database, from its unshuffled order.
+    /// A shuffled queue is shuffled anew, with the current item first.
     pub(crate) fn restore(
         tracks: Vec<(i64, PathBuf)>,
-        original: Option<Vec<usize>>,
+        shuffle: bool,
         cursor: Option<usize>,
         resume: Duration,
     ) -> Self {
         let mut queue = Self::default();
         queue.items = queue.new_items(tracks);
-        queue.original = original.map(|positions| {
-            let mut order: Vec<(usize, SlotId)> = positions
-                .into_iter()
-                .zip(queue.items.iter().map(|item| item.slot))
-                .collect();
-            order.sort_unstable_by_key(|&(position, _)| position);
-            order.into_iter().map(|(_, slot)| slot).collect()
-        });
         if let Some(item) = cursor.and_then(|c| queue.items.get(c)) {
             queue.current = Some(item.slot);
             queue.cursor = cursor.unwrap_or(0);
             queue.resume = Some((item.slot, resume));
         }
+        queue.set_shuffle(shuffle);
         queue
     }
 
-    /// For each item, its index in the unshuffled order (`None` when not shuffled).
-    pub(crate) fn original_positions(&self) -> Option<Vec<usize>> {
-        let original = self.original.as_ref()?;
-        let position: std::collections::HashMap<SlotId, usize> =
-            original.iter().enumerate().map(|(i, &s)| (s, i)).collect();
-        Some(
-            self.items
-                .iter()
-                .map(|item| position.get(&item.slot).copied().unwrap_or(usize::MAX))
-                .collect(),
-        )
+    /// The track ids in the order shuffle off would put them.
+    pub(crate) fn unshuffled_track_ids(&self) -> Vec<i64> {
+        match &self.original {
+            None => self.items.iter().map(|item| item.track_id).collect(),
+            Some(original) => {
+                let track_id: HashMap<SlotId, i64> = self
+                    .items
+                    .iter()
+                    .map(|item| (item.slot, item.track_id))
+                    .collect();
+                original
+                    .iter()
+                    .filter_map(|slot| track_id.get(slot).copied())
+                    .collect()
+            }
+        }
+    }
+
+    /// The current item's index in [`Queue::unshuffled_track_ids`].
+    pub(crate) fn unshuffled_current_index(&self) -> Option<usize> {
+        let i = self.current_index()?;
+        match &self.original {
+            None => Some(i),
+            Some(original) => original.iter().position(|&slot| slot == self.items[i].slot),
+        }
     }
 
     fn new_items(&mut self, tracks: impl IntoIterator<Item = (i64, PathBuf)>) -> Vec<QueueItem> {
@@ -337,24 +344,11 @@ impl Queue {
     }
 }
 
-/// Replaces the saved queue with `queue`, in one transaction.
+/// Replaces the saved queue with `queue`, in one transaction. The queue is
+/// saved unshuffled: a shuffled order lasts only until the app quits.
 pub(crate) fn save(conn: &mut Connection, queue: &Queue) -> Result<()> {
     let tx = conn.transaction()?;
-    let track_ids: Vec<i64> = queue.items.iter().map(|item| item.track_id).collect();
-    lists::save_items(&tx, ListId::QUEUE, &track_ids)?;
-    tx.execute("DELETE FROM queue_shuffle", [])?;
-    if let Some(original) = queue.original_positions() {
-        let mut insert = tx.prepare(
-            "INSERT INTO queue_shuffle (position, original_position)
-             VALUES (:position, :original_position)",
-        )?;
-        for (i, original) in original.into_iter().enumerate() {
-            insert.execute(named_params! {
-                ":position": i as i64,
-                ":original_position": original as i64,
-            })?;
-        }
-    }
+    lists::save_items(&tx, ListId::QUEUE, &queue.unshuffled_track_ids())?;
     save_state(&tx, queue)?;
     tx.commit()?;
     Ok(())
@@ -372,7 +366,7 @@ fn save_state(conn: &Connection, queue: &Queue) -> Result<()> {
          ON CONFLICT (id) DO UPDATE SET cursor = excluded.cursor, shuffle = excluded.shuffle,
              resume_ms = excluded.resume_ms",
         named_params! {
-            ":cursor": queue.current_index().map(|i| i as i64),
+            ":cursor": queue.unshuffled_current_index().map(|i| i as i64),
             ":shuffle": queue.shuffle(),
             ":resume_ms": i64::try_from(queue.resume_position().as_millis()).unwrap_or(i64::MAX),
         },
@@ -397,39 +391,20 @@ pub(crate) fn load(conn: &Connection) -> Result<Queue> {
         )
         .optional()?
         .unwrap_or((None, false, 0));
-    let mut stmt = conn.prepare("SELECT position, original_position FROM queue_shuffle")?;
-    let saved_original: HashMap<i64, i64> = stmt
-        .query_map([], |row| {
-            Ok((row.get("position")?, row.get("original_position")?))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
     let mut tracks = Vec::new();
-    let mut original = Vec::new();
     let mut new_cursor = None;
     for (position, (track_id, path)) in lists::load_items(conn, ListId::QUEUE)?
         .into_iter()
         .enumerate()
     {
         let Some(path) = path else { continue };
-        let position = position as i64;
-        if Some(position) == cursor {
+        if Some(position as i64) == cursor {
             new_cursor = Some(tracks.len());
         }
         tracks.push((track_id, path));
-        original.push(saved_original.get(&position).copied().unwrap_or(i64::MAX));
     }
-    let original = shuffle.then(|| {
-        // Rank the saved positions, which have gaps where tracks were dropped.
-        let mut ranked: Vec<usize> = (0..original.len()).collect();
-        ranked.sort_by_key(|&i| original[i]);
-        let mut positions = vec![0; original.len()];
-        for (rank, i) in ranked.into_iter().enumerate() {
-            positions[i] = rank;
-        }
-        positions
-    });
     let resume = Duration::from_millis(u64::try_from(resume_ms).unwrap_or(0));
-    Ok(Queue::restore(tracks, original, new_cursor, resume))
+    Ok(Queue::restore(tracks, shuffle, new_cursor, resume))
 }
 
 #[cfg(test)]

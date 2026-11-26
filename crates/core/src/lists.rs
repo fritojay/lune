@@ -34,7 +34,7 @@ pub(crate) fn load_items(conn: &Connection, id: ListId) -> Result<Vec<(i64, Opti
 }
 
 /// Replaces the items of list `id`. Item `i` is saved at position `i`, which
-/// the queue's cursor and shuffle order refer to.
+/// the queue's cursor refers to.
 pub(crate) fn save_items(tx: &Transaction, id: ListId, track_ids: &[i64]) -> Result<()> {
     tx.execute(
         "DELETE FROM list_items WHERE list_id = :list_id",

@@ -129,7 +129,6 @@ const UNDO_V12: &str = "
         track_id          INTEGER NOT NULL,
         original_position INTEGER
     );
-    DROP TABLE queue_shuffle;
     DROP TABLE list_items;
     DROP TABLE lists;";
 
@@ -253,7 +252,7 @@ fn a_v10_database_keeps_its_queue_and_resumes_from_the_start() {
 }
 
 #[test]
-fn a_v11_database_keeps_its_shuffled_queue_cursor_and_resume_position() {
+fn a_v11_database_keeps_its_queue_unshuffled_with_its_cursor_and_resume_position() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(&format!(
         "BEGIN; {}; PRAGMA user_version = 11; COMMIT;",
@@ -264,19 +263,16 @@ fn a_v11_database_keeps_its_shuffled_queue_cursor_and_resume_position() {
     conn.execute_batch(
         "INSERT INTO queue (position, track_id, original_position)
          VALUES (0, 2, 1), (1, 3, 3), (2, 1, 0), (3, 2, 2);
-         INSERT INTO queue_state (id, cursor, shuffle, resume_ms) VALUES (1, 1, 1, 1234);",
+         INSERT INTO queue_state (id, cursor, shuffle, resume_ms) VALUES (1, 0, 1, 1234);",
     )
     .unwrap();
     migrate(&conn).unwrap();
     let mut queue = crate::queue::load(&conn).unwrap();
-    let ids = |queue: &crate::Queue| -> Vec<i64> {
-        queue.items().iter().map(|item| item.track_id).collect()
-    };
-    assert_eq!(ids(&queue), [2, 3, 1, 2]);
-    assert_eq!(queue.current_index(), Some(1));
     assert!(queue.shuffle());
+    assert_eq!(queue.current_index(), Some(0));
     assert_eq!(queue.resume_position(), Duration::from_millis(1234));
     queue.set_shuffle(false);
-    assert_eq!(ids(&queue), [1, 2, 2, 3]);
-    assert_eq!(queue.current().unwrap().track_id, 3);
+    let ids: Vec<i64> = queue.items().iter().map(|item| item.track_id).collect();
+    assert_eq!(ids, [1, 2, 2, 3]);
+    assert_eq!(queue.current_index(), Some(1), "the first of the two 2s");
 }

@@ -367,13 +367,22 @@ proptest! {
         let entries = |queue: &Queue| -> Vec<(i64, PathBuf)> {
             queue.items().iter().map(|i| (i.track_id, i.path.clone())).collect()
         };
-        prop_assert_eq!(entries(&loaded), entries(&queue));
-        prop_assert_eq!(loaded.current_index(), queue.current_index());
+        let current = |queue: &Queue| queue.current().map(|item| item.track_id);
+        prop_assert_eq!(current(&loaded), current(&queue));
         prop_assert_eq!(loaded.shuffle(), queue.shuffle());
         prop_assert_eq!(loaded.resume_position(), queue.resume_position());
+        if queue.shuffle() && queue.current().is_some() {
+            prop_assert_eq!(loaded.current_index(), Some(0));
+        }
+        let sorted = |queue: &Queue| {
+            let mut ids = ids(queue);
+            ids.sort_unstable();
+            ids
+        };
+        prop_assert_eq!(sorted(&loaded), sorted(&queue));
         queue.set_shuffle(false);
         loaded.set_shuffle(false);
-        prop_assert_eq!(ids(&loaded), ids(&queue));
+        prop_assert_eq!(entries(&loaded), entries(&queue));
         prop_assert_eq!(loaded.current_index(), queue.current_index());
     }
 }

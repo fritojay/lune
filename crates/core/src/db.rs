@@ -144,8 +144,9 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE queue_state ADD COLUMN resume_ms INTEGER NOT NULL DEFAULT 0;
     "#,
     // v12: ordered track lists, so playlists can share the queue's storage.
-    // The queue becomes list 1; its shuffle order, cursor, and resume
-    // position stay queue-only.
+    // The queue becomes list 1, saved unshuffled: a shuffled queue is
+    // shuffled anew when loaded, so `cursor` becomes a position in the
+    // unshuffled order.
     r#"
     CREATE TABLE lists (
         id         INTEGER PRIMARY KEY,
@@ -159,17 +160,18 @@ const MIGRATIONS: &[&str] = &[
         track_id INTEGER NOT NULL,          -- no foreign key, as with v1's queue
         PRIMARY KEY (list_id, position)
     ) WITHOUT ROWID;
-    -- While shuffled: each queue position's place in the unshuffled order.
-    CREATE TABLE queue_shuffle (
-        position          INTEGER PRIMARY KEY,
-        original_position INTEGER NOT NULL
-    );
     INSERT INTO lists (id, kind, created_ns)
         VALUES (1, 'queue', CAST(unixepoch('subsec') * 1000 AS INTEGER) * 1000000);
+    CREATE TEMP TABLE unshuffled AS
+        SELECT position, track_id,
+               ROW_NUMBER() OVER (ORDER BY COALESCE(original_position, position), position) - 1
+                   AS new_position
+        FROM queue;
     INSERT INTO list_items (list_id, position, track_id)
-        SELECT 1, position, track_id FROM queue;
-    INSERT INTO queue_shuffle (position, original_position)
-        SELECT position, original_position FROM queue WHERE original_position IS NOT NULL;
+        SELECT 1, new_position, track_id FROM unshuffled;
+    UPDATE queue_state
+        SET cursor = (SELECT new_position FROM unshuffled WHERE position = queue_state.cursor);
+    DROP TABLE unshuffled;
     DROP TABLE queue;
     "#,
 ];
