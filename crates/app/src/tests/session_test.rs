@@ -22,6 +22,9 @@ fn each_setter_sends_its_change() {
     queue_edited();
     set_browse(BrowseState::default());
     set_browse(BrowseState::default());
+    set_has_folders(true);
+    set_has_folders(true);
+    set_has_folders(false);
     assert_eq!(
         *changes.borrow(),
         [
@@ -32,6 +35,8 @@ fn each_setter_sends_its_change() {
             Change::Playlists,
             Change::Queue,
             Change::Browse,
+            Change::Folders,
+            Change::Folders,
         ]
     );
 }

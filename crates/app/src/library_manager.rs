@@ -148,6 +148,7 @@ impl qobject::LibraryManager {
             Update::Folders(folders) => {
                 let list: QList<QVariant> = folders.iter().map(folder_entry).collect();
                 let paths: Vec<PathBuf> = folders.into_iter().map(|f| f.path).collect();
+                session::set_has_folders(!paths.is_empty());
                 let saved =
                     with_store(|store| store.update(|s| replace(&mut s.library_folders, &paths)));
                 self.as_mut().rust_mut().folder_paths = paths;

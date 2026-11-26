@@ -386,7 +386,6 @@ ApplicationWindow {
                     sortColumn: filters.sortColumn
                     sortDescending: filters.sortDescending
                     albumDirectional: filters.albumDirectional
-                    hasFolders: library.folders.length > 0
                     scanStatus: library.busy ? library.status : ""
                     currentTrackId: player.currentTrackId
                     hiddenColumns: layout.hiddenColumns
@@ -400,7 +399,9 @@ ApplicationWindow {
                     reorderable: filters.reorderable
                     onRemoveFromPlaylistRequested: rows => playlistsModel.removeTracks(rows)
                     onMoveRequested: (rows, to) => playlistsModel.moveTracks(rows, to)
-                    emptyHint: filters.emptyReason
+                    emptyHint: filters.emptyHint
+                    emptyLibrary: filters.emptyLibrary
+                    offerAddFolder: filters.offerAddFolder
                     onAlbumGridChosen: grid => layout.albumGrid = grid
                     onSortClicked: column => filters.sortBy(column)
                     onSortChosen: (column, descending) => filters.setSort(column, descending)

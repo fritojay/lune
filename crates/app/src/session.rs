@@ -38,6 +38,8 @@ pub enum Change {
     Browse,
     /// The user chose another audio output.
     OutputDevice,
+    /// [`has_folders`] changed.
+    Folders,
 }
 
 #[derive(Default)]
@@ -49,6 +51,7 @@ struct UiState {
     /// For the next new playlist; `None` until the playlists have loaded.
     unused_playlist_id: Option<ListId>,
     browse: Option<BrowseState>,
+    has_folders: bool,
     listeners: Vec<Rc<dyn Fn(Change)>>,
 }
 
@@ -166,6 +169,19 @@ pub fn set_browse(browse: BrowseState) {
     let changed = UI.with_borrow_mut(|ui| ui.browse.replace(browse.clone()) != Some(browse));
     if changed {
         notify(Change::Browse);
+    }
+}
+
+/// Whether the library has any folders, as the library thread last said.
+pub fn has_folders() -> bool {
+    UI.with_borrow(|ui| ui.has_folders)
+}
+
+pub fn set_has_folders(has_folders: bool) {
+    let changed =
+        UI.with_borrow_mut(|ui| std::mem::replace(&mut ui.has_folders, has_folders) != has_folders);
+    if changed {
+        notify(Change::Folders);
     }
 }
 

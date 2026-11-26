@@ -43,43 +43,88 @@ fn only_a_shown_playlist_in_its_own_order_without_a_search_is_reorderable() {
     }
 }
 
-#[test]
-fn an_empty_main_pane_says_why_when_the_user_can_act_on_it() {
-    let playlist = Source::Playlist {
+fn sources() -> Vec<Source> {
+    let mut sources: Vec<Source> = Grouping::ALL.into_iter().map(Source::Library).collect();
+    sources.push(Source::Playlist { id: None });
+    sources.push(Source::Playlist {
         id: Some("4".parse().unwrap()),
-    };
-    let none = Source::Playlist { id: None };
-    let played = Source::Library(Grouping::RecentlyPlayed);
-    for grouping in Grouping::ALL {
-        let library = Source::Library(grouping);
-        for (source, searching, tracks, library_empty, said) in [
-            (library, false, 3, false, false),
-            (library, true, 3, false, false),
-            (playlist, false, 1, false, false),
-            (library, false, 0, true, false),
-            (library, false, 0, false, true),
-            (library, true, 0, false, true),
-            (library, true, 0, true, true),
-            (playlist, true, 0, false, true),
-            (playlist, false, 0, false, true),
-            (playlist, false, 0, true, true),
-            (none, false, 0, false, true),
-        ] {
-            let reason = empty_reason(source, searching, tracks, library_empty);
-            assert_eq!(
-                !reason.is_empty(),
-                said,
-                "{source:?} {searching} {tracks} {library_empty}: {reason:?}"
-            );
+    });
+    sources
+}
+
+#[test]
+fn an_empty_main_pane_says_why_or_shows_the_empty_library() {
+    let bools = [false, true];
+    for source in sources() {
+        for loading in bools {
+            for searching in bools {
+                for tracks in [0, 1, 3] {
+                    for library_empty in bools {
+                        for has_folders in bools {
+                            let state = PaneState {
+                                loading,
+                                source,
+                                searching,
+                                tracks,
+                                library_empty,
+                                has_folders,
+                            };
+                            let pane = empty_pane(&state);
+                            let library = matches!(source, Source::Library(_));
+                            let expected = if loading || tracks > 0 {
+                                EmptyPane::Tracks
+                            } else if library && !searching && library_empty {
+                                EmptyPane::Library { has_folders }
+                            } else {
+                                EmptyPane::Hint(pane.hint())
+                            };
+                            assert_eq!(pane, expected, "{state:?}");
+                            assert_eq!(
+                                pane.hint().is_empty(),
+                                !matches!(pane, EmptyPane::Hint(_)),
+                                "{state:?}"
+                            );
+                            assert_eq!(
+                                pane.library_heading().is_empty(),
+                                !matches!(pane, EmptyPane::Library { .. }),
+                                "{state:?}"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
-    let reasons = [
-        empty_reason(playlist, false, 0, false),
-        empty_reason(none, false, 0, false),
-        empty_reason(playlist, true, 0, false),
-        empty_reason(played, false, 0, false),
+}
+
+#[test]
+fn each_reason_for_an_empty_pane_reads_differently() {
+    let empty = |source, searching| {
+        empty_pane(&PaneState {
+            loading: false,
+            source,
+            searching,
+            tracks: 0,
+            library_empty: false,
+            has_folders: true,
+        })
+    };
+    let panes = [
+        empty(
+            Source::Playlist {
+                id: Some("4".parse().unwrap()),
+            },
+            false,
+        ),
+        empty(Source::Playlist { id: None }, false),
+        empty(Source::Library(Grouping::Album), true),
+        empty(Source::Library(Grouping::Album), false),
+        empty(Source::Library(Grouping::RecentlyPlayed), false),
+        EmptyPane::Library { has_folders: true },
+        EmptyPane::Library { has_folders: false },
     ];
-    for (i, reason) in reasons.iter().enumerate() {
-        assert!(!reasons[..i].contains(reason), "{reason:?}");
+    let texts = panes.map(|pane| format!("{}{}", pane.hint(), pane.library_heading()));
+    for (i, text) in texts.iter().enumerate() {
+        assert!(!text.is_empty() && !texts[..i].contains(text), "{text:?}");
     }
 }

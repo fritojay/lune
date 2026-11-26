@@ -59,9 +59,13 @@ pub mod qobject {
         /// A playlist in its own order, with no search, so its tracks can be
         /// moved.
         #[qproperty(bool, reorderable, READ, NOTIFY)]
-        /// Shown in place of an empty main pane; empty when there's nothing
-        /// to say.
-        #[qproperty(QString, empty_reason, cxx_name = "emptyReason", READ, NOTIFY)]
+        /// Why the main pane shows no tracks, or empty; see [`EmptyPane`].
+        #[qproperty(QString, empty_hint, cxx_name = "emptyHint", READ, NOTIFY)]
+        /// The heading of the empty library's screen, or empty when it isn't
+        /// shown.
+        #[qproperty(QString, empty_library, cxx_name = "emptyLibrary", READ, NOTIFY)]
+        /// The empty library's screen offers to add a folder: there are none.
+        #[qproperty(bool, offer_add_folder, cxx_name = "offerAddFolder", READ, NOTIFY)]
         type FilterModel = super::FilterModelRust;
     }
 
@@ -160,7 +164,9 @@ pub struct FilterModelRust {
     source_kind: QString,
     flat: bool,
     reorderable: bool,
-    empty_reason: QString,
+    empty_hint: QString,
+    empty_library: QString,
+    offer_add_folder: bool,
     /// What the properties show. Until the first `reload`, the last run's.
     state: BrowseState,
     rows: Vec<Filter>,
@@ -186,7 +192,9 @@ impl Default for FilterModelRust {
             source_kind: QString::from(sources_model::kind(state.source)),
             flat: false,
             reorderable: false,
-            empty_reason: QString::default(),
+            empty_hint: QString::default(),
+            empty_library: QString::default(),
+            offer_add_folder: false,
             state,
             rows: Vec::new(),
             last_playlist: None,
@@ -236,6 +244,7 @@ impl cxx_qt::Initialize for qobject::FilterModel {
             Change::Catalog => model.reload(),
             Change::Played => model.played(),
             Change::Playlists => model.playlists_changed(),
+            Change::Folders => model.show_empty_pane(),
             Change::View { .. }
             | Change::Missing
             | Change::Queue
@@ -251,7 +260,8 @@ impl qobject::FilterModel {
     fn reload(mut self: Pin<&mut Self>) {
         let first = self.loading;
         self.as_mut().recompute(first);
-        self.set_loading(false);
+        self.as_mut().set_loading(false);
+        self.show_empty_pane();
     }
 
     fn apply_search(mut self: Pin<&mut Self>, generation: u64, matches: HashSet<i64>) {
@@ -468,20 +478,41 @@ impl qobject::FilterModel {
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
         let flat = view.flat;
         let reorderable = reorderable(&self.state, &self.search);
-        let searching = !matches!(self.search, TrackFilter::All);
-        let library_empty = session::catalog().is_none_or(|catalog| catalog.is_empty());
-        let reason = empty_reason(self.state.source, searching, view.len(), library_empty);
         session::set_view(view, reset);
-        set!(
-            self,
-            empty_reason,
-            empty_reason_changed,
-            QString::from(reason)
-        );
+        self.as_mut().show_empty_pane();
         set!(self, flat, flat_changed, flat);
         set!(self, reorderable, reorderable_changed, reorderable);
         set!(self, title, title_changed, QString::from(&title));
         set!(self, track_count, track_count_changed, count);
+    }
+
+    fn show_empty_pane(mut self: Pin<&mut Self>) {
+        let pane = empty_pane(&PaneState {
+            loading: self.loading,
+            source: self.state.source,
+            searching: !matches!(self.search, TrackFilter::All),
+            tracks: session::view().len(),
+            library_empty: session::catalog().is_none_or(|catalog| catalog.is_empty()),
+            has_folders: session::has_folders(),
+        });
+        set!(
+            self,
+            empty_hint,
+            empty_hint_changed,
+            QString::from(pane.hint())
+        );
+        set!(
+            self,
+            empty_library,
+            empty_library_changed,
+            QString::from(pane.library_heading())
+        );
+        set!(
+            self,
+            offer_add_folder,
+            offer_add_folder_changed,
+            pane == EmptyPane::Library { has_folders: false }
+        );
     }
 
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
@@ -503,29 +534,64 @@ fn playlist_name(id: ListId) -> String {
     playlist.map(|p| p.name.clone()).unwrap_or_default()
 }
 
-/// Why the main pane shows no tracks, when the user can do something about
-/// it. An empty library has its own screen.
-fn empty_reason(
+/// What the main pane shows instead of tracks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmptyPane {
+    /// Its tracks, or nothing while the library loads.
+    Tracks,
+    /// Why it has none, when the user can do something about it.
+    Hint(&'static str),
+    /// The library has no tracks: there are no folders, or their scan
+    /// hasn't found music yet.
+    Library { has_folders: bool },
+}
+
+impl EmptyPane {
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Hint(hint) => hint,
+            Self::Tracks | Self::Library { .. } => "",
+        }
+    }
+
+    fn library_heading(self) -> &'static str {
+        match self {
+            Self::Library { has_folders: true } => "No music found yet",
+            Self::Library { has_folders: false } => "Your library is empty",
+            Self::Tracks | Self::Hint(_) => "",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PaneState {
+    loading: bool,
     source: Source,
     searching: bool,
     tracks: usize,
     library_empty: bool,
-) -> &'static str {
-    match (tracks, source, searching) {
-        (1.., _, _) => "",
-        (_, _, true) => "No tracks match the search.",
-        (_, Source::Playlist { id: None }, _) => {
-            "No playlists yet. Click New Playlist to make one."
-        }
-        (_, Source::Playlist { id: Some(_) }, _) => {
+    has_folders: bool,
+}
+
+fn empty_pane(pane: &PaneState) -> EmptyPane {
+    let hint = match (pane.source, pane.searching) {
+        _ if pane.loading || pane.tracks > 0 => return EmptyPane::Tracks,
+        (_, true) => "No tracks match the search.",
+        (Source::Playlist { id: None }, _) => "No playlists yet. Click New Playlist to make one.",
+        (Source::Playlist { id: Some(_) }, _) => {
             "This playlist is empty. Right-click tracks and choose Add to Playlist to add them here."
         }
-        (_, Source::Library(_), false) if library_empty => "",
-        (_, Source::Library(Grouping::RecentlyPlayed), false) => {
+        (Source::Library(_), false) if pane.library_empty => {
+            return EmptyPane::Library {
+                has_folders: pane.has_folders,
+            };
+        }
+        (Source::Library(Grouping::RecentlyPlayed), false) => {
             "Nothing played yet. Albums you play are listed here, latest first."
         }
-        (_, Source::Library(_), false) => "No tracks here.",
-    }
+        (Source::Library(_), false) => "No tracks here.",
+    };
+    EmptyPane::Hint(hint)
 }
 
 /// Whether the main pane's tracks can be moved: a playlist in its own order,

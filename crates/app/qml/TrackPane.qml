@@ -20,7 +20,6 @@ ColumnLayout {
     required property string sortColumn
     required property bool sortDescending
     required property bool albumDirectional
-    required property bool hasFolders
     required property string scanStatus
     required property real currentTrackId
     required property var hiddenColumns
@@ -32,9 +31,10 @@ ColumnLayout {
     required property bool flat
     required property bool playlistShown
     required property bool reorderable
-    // Shown in place of an empty track list.
+    // Shown in place of an empty track list; FilterModel's.
     required property string emptyHint
-    readonly property bool hinted: !loading && trackCount === 0 && emptyHint !== ""
+    required property string emptyLibrary
+    required property bool offerAddFolder
     // The tracks' cells: under the headings in the list, inside the open
     // album's panel in the grid.
     readonly property real rowWidth: grid ? albumRows.panelWidth - tracksLeft - tracksRight
@@ -242,23 +242,22 @@ ColumnLayout {
               + (trackPane.scanStatus ? " · " + trackPane.scanStatus : "")
     }
 
-    // An empty library: adding a folder is the first thing to do, or with
-    // folders, the scan (in the line above) hasn't found music yet.
+    // An empty library. With folders, the scan's progress is in the line above.
     Item {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: !trackPane.loading && !trackPane.hinted && trackPane.albumCount === 0
+        visible: trackPane.emptyLibrary !== ""
         Column {
             anchors.centerIn: parent
             spacing: 12
             Label {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: trackPane.hasFolders ? qsTr("No music found yet") : qsTr("Your library is empty")
+                text: trackPane.emptyLibrary
                 font.pointSize: Theme.headingPointSize
             }
             Button {
                 anchors.horizontalCenter: parent.horizontalCenter
-                visible: !trackPane.hasFolders
+                visible: trackPane.offerAddFolder
                 text: qsTr("Add a Music Folder…")
                 highlighted: true
                 onClicked: trackPane.addFolderRequested()
@@ -269,7 +268,7 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: trackPane.hinted
+        visible: trackPane.emptyHint !== ""
         padding: 16
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
