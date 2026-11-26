@@ -64,13 +64,13 @@ impl Source {
         if path.file_stem().is_some_and(|s| s == "panic-on-open") {
             panic!("test hook: simulated decoder panic");
         }
-        let decode_err = |source| EngineError::Decode {
+        let decode_err = |cause| EngineError::Decode {
             path: path.to_path_buf(),
-            cause: source,
+            cause,
         };
-        let file = File::open(path).map_err(|source| EngineError::Open {
+        let file = File::open(path).map_err(|cause| EngineError::Open {
             path: path.to_path_buf(),
-            cause: source,
+            cause,
         })?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
         let mut hint = Hint::new();
@@ -208,10 +208,10 @@ impl Source {
                 Err(SymError::IoError(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
                     return Ok(None);
                 }
-                Err(source) => {
+                Err(cause) => {
                     return Err(EngineError::Decode {
                         path: self.path.clone(),
-                        cause: source,
+                        cause,
                     });
                 }
             };
@@ -224,10 +224,10 @@ impl Source {
                     tracing::warn!(err, path = %self.path.display(), "skipping corrupt packet");
                     continue;
                 }
-                Err(source) => {
+                Err(cause) => {
                     return Err(EngineError::Decode {
                         path: self.path.clone(),
-                        cause: source,
+                        cause,
                     });
                 }
             };
@@ -287,9 +287,9 @@ impl Source {
                     track_id: Some(self.track_id),
                 },
             )
-            .map_err(|source| EngineError::Decode {
+            .map_err(|cause| EngineError::Decode {
                 path: self.path.clone(),
-                cause: source,
+                cause,
             })?;
         self.decoder.reset();
         // Frames between where the demuxer landed and where we want to be,
