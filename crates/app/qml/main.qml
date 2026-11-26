@@ -343,7 +343,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     enabled: playlistsModel.loaded
                     text: qsTr("New Playlist…")
-                    onClicked: window.newPlaylist()
+                    onClicked: window.newPlaylist([], true)
                 }
                 onAlbumRequested: filters.showAlbum(player.currentTrackId)
             }
@@ -375,6 +375,8 @@ ApplicationWindow {
                     columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
                     albumGrid: layout.albumGrid
                     controller: player
+                    playlists: playlistsModel
+                    onNewPlaylistRequested: trackIds => window.newPlaylist(trackIds, false)
                     flat: filters.flat
                     playlistShown: filterPane.listsPlaylists
                     reorderable: filters.reorderable
@@ -432,7 +434,9 @@ ApplicationWindow {
                 totalDuration: queueModel.totalDuration
                 shuffle: player.shuffle
                 controller: player
-                        onShuffleToggled: shuffle => player.setShuffle(shuffle)
+                playlists: playlistsModel
+                onNewPlaylistRequested: trackIds => window.newPlaylist(trackIds, false)
+                onShuffleToggled: shuffle => player.setShuffle(shuffle)
                 onClearRequested: player.clearQueue()
                 onPlayRequested: row => player.play("queue", row)
                 onRemoveRequested: rows => player.removeQueueRows(rows)
@@ -452,13 +456,18 @@ ApplicationWindow {
         PlaylistNameDialog {}
     }
 
-    // Asks for a name, then shows the new, empty playlist.
-    function newPlaylist() {
+    // Asks for a name, then makes a playlist of `trackIds`, and with `show`
+    // shows it.
+    function newPlaylist(trackIds: list<real>, show: bool) {
         const dialog = playlistNameDialog.createObject(window.contentItem, {
             title: qsTr("New Playlist"),
             name: playlistsModel.suggestedName(qsTr("New Playlist"))
         })
-        dialog.chosen.connect(name => filters.showPlaylist(playlistsModel.create(name, [])))
+        dialog.chosen.connect(name => {
+            const id = playlistsModel.create(name, trackIds)
+            if (show)
+                filters.showPlaylist(id)
+        })
         dialog.open()
     }
 

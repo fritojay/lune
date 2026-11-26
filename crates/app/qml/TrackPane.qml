@@ -27,6 +27,7 @@ ColumnLayout {
     required property var columnWidths
     required property bool albumGrid
     required property PlayerController controller
+    required property PlaylistsModel playlists
     // A track list, not albums with covers: a column sort or a playlist.
     required property bool flat
     required property bool playlistShown
@@ -62,6 +63,7 @@ ColumnLayout {
     signal moveRequested(list<int> rows, int to)
     signal addFolderRequested()
     signal albumGridChosen(bool grid)
+    signal newPlaylistRequested(list<real> trackIds)
 
     // The first grid row in view and the columns it had, so the album that
     // starts it stays in view when the grid is relaid.
@@ -150,7 +152,9 @@ ColumnLayout {
     TrackMenu {
         id: trackMenu
         controller: trackPane.controller
+        playlists: trackPane.playlists
         source: "view"
+        onNewPlaylistRequested: trackIds => trackPane.newPlaylistRequested(trackIds)
         onPlayRequested: start => trackPane.playRequested(start)
         onAlbumRequested: trackId => trackPane.albumRequested(trackId)
 

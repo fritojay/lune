@@ -11,6 +11,7 @@ Menu {
     // The list the rows are in: "view" (the main pane) or "queue", as
     // Selection::new in player.rs reads it.
     required property string source
+    required property PlaylistsModel playlists
     // Ascending.
     property list<int> rows
     property real trackId: -1
@@ -18,23 +19,8 @@ Menu {
 
     signal playRequested(int row)
     signal albumRequested(real trackId)
-
-    // Asks for a name, then makes a playlist of the tracks the menu was for,
-    // as they were when it opened.
-    function newPlaylist() {
-        const trackIds = trackMenu.trackIds
-        const dialog = nameDialog.createObject(trackMenu.parent, {
-            title: qsTr("New Playlist"),
-            name: playlists.suggestedName(qsTr("New Playlist"))
-        })
-        dialog.chosen.connect(name => playlists.create(name, trackIds))
-        dialog.open()
-    }
-
-    Component {
-        id: nameDialog
-        PlaylistNameDialog {}
-    }
+    // For a new playlist of the tracks the menu was for, as they were when it opened.
+    signal newPlaylistRequested(list<real> trackIds)
 
     function show(rows: list<int>) {
         if (rows.length === 0)
@@ -62,8 +48,8 @@ Menu {
         title: qsTr("Add to Playlist")
         MenuItem {
             text: qsTr("New Playlist…")
-            enabled: playlists.loaded
-            onTriggered: trackMenu.newPlaylist()
+            enabled: trackMenu.playlists.loaded
+            onTriggered: trackMenu.newPlaylistRequested(trackMenu.trackIds)
         }
         MenuSeparator {
             visible: playlistItems.count > 0
@@ -71,9 +57,7 @@ Menu {
         }
         Instantiator {
             id: playlistItems
-            model: PlaylistsModel {
-                id: playlists
-            }
+            model: trackMenu.playlists
             delegate: MenuItem {
                 required property string playlistId
                 required property string menuText

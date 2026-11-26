@@ -12,6 +12,7 @@ ColumnLayout {
     required property string totalDuration
     required property bool shuffle
     required property PlayerController controller
+    required property PlaylistsModel playlists
 
     signal shuffleToggled(bool shuffle)
     signal clearRequested()
@@ -20,6 +21,7 @@ ColumnLayout {
     // `rows` keep their order and go before the row now at `to`.
     signal moveRequested(list<int> rows, int to)
     signal albumRequested(real trackId)
+    signal newPlaylistRequested(list<real> trackIds)
 
     function showCurrent() {
         queueList.positionViewAtIndex(currentRow, ListView.Contain)
@@ -46,7 +48,9 @@ ColumnLayout {
     TrackMenu {
         id: queueMenu
         controller: queuePane.controller
+        playlists: queuePane.playlists
         source: "queue"
+        onNewPlaylistRequested: trackIds => queuePane.newPlaylistRequested(trackIds)
         onPlayRequested: row => queuePane.playRequested(row)
         onAlbumRequested: trackId => queuePane.albumRequested(trackId)
         MenuSeparator {}
