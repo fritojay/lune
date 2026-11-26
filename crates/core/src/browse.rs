@@ -4,7 +4,7 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::SystemTime;
 
 use serde::de::DeserializeOwned;
@@ -282,6 +282,35 @@ impl Key<'_> {
     }
 }
 
+/// Which tracks a view or filter pane counts.
+#[derive(Debug, Clone, Default)]
+pub enum TrackFilter {
+    #[default]
+    All,
+    /// Shared, since the filter pane and the view use the same search results.
+    Ids(Arc<HashSet<i64>>),
+    /// [`FilterValue::All`] passes every track.
+    Field(Field, FilterValue),
+    And(Vec<TrackFilter>),
+}
+
+impl TrackFilter {
+    pub fn and(self, other: Self) -> Self {
+        Self::And(vec![self, other])
+    }
+
+    fn passes(&self, catalog: &Catalog, i: usize) -> bool {
+        match self {
+            Self::All => true,
+            Self::Ids(ids) => ids.contains(&catalog.tracks[i].id),
+            Self::Field(field, value) => value
+                .key()
+                .is_none_or(|wanted| field.keys(catalog, i).any(|key| key == wanted)),
+            Self::And(filters) => filters.iter().all(|filter| filter.passes(catalog, i)),
+        }
+    }
+}
+
 /// One entry of the filter pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filter {
@@ -511,30 +540,26 @@ impl Catalog {
     }
 
     /// The filter pane for `grouping`: `All` first, then every value that has
-    /// tracks. With `matches` (search results), only tracks in it count.
-    pub fn filters(&self, grouping: Grouping, matches: Option<&HashSet<i64>>) -> Vec<Filter> {
-        self.filters_in(self.order(grouping), grouping.field(), matches)
+    /// tracks. Only tracks that pass `filter` count.
+    pub fn filters(&self, grouping: Grouping, filter: &TrackFilter) -> Vec<Filter> {
+        self.filters_in(self.order(grouping), grouping.field(), filter)
     }
 
     /// [`Catalog::filters`] to go with [`Catalog::newest_first`]: albums in
     /// the order it shows them, and years newest first. `All` stays first and
     /// Unknown last.
-    pub fn filters_newest_first(
-        &self,
-        grouping: Grouping,
-        matches: Option<&HashSet<i64>>,
-    ) -> Vec<Filter> {
+    pub fn filters_newest_first(&self, grouping: Grouping, filter: &TrackFilter) -> Vec<Filter> {
         let field = grouping.field();
         let def = field.def();
         // Only values in grouping order take their order from the tracks;
         // other values would only take their labels from a different first
         // track.
         let mut filters = if def.values == ValueOrder::ByGrouping {
-            let view = self.view(grouping, &FilterValue::All, matches);
+            let view = self.view(grouping, filter);
             let order = self.newest_first(view, grouping).tracks.into_iter();
-            self.filters_in(order, field, matches)
+            self.filters_in(order, field, filter)
         } else {
-            self.filters(grouping, matches)
+            self.filters(grouping, filter)
         };
         if def.reversible
             && let Some(values) = filters.get_mut(1..)
@@ -552,17 +577,17 @@ impl Catalog {
         &self,
         order: impl Iterator<Item = usize>,
         field: Field,
-        matches: Option<&HashSet<i64>>,
+        filter: &TrackFilter,
     ) -> Vec<Filter> {
         let def = field.def();
         let mut all = 0;
         // Each value with the position of its first track.
         let mut values: HashMap<Key<'_>, (usize, Filter)> = HashMap::new();
         for (position, i) in order.enumerate() {
-            let track = &self.tracks[i];
-            if matches.is_some_and(|m| !m.contains(&track.id)) {
+            if !filter.passes(self, i) {
                 continue;
             }
+            let track = &self.tracks[i];
             all += 1;
             for key in field.keys(self, i) {
                 values
@@ -598,25 +623,14 @@ impl Catalog {
         filters
     }
 
-    /// The tracks `value` selects in `grouping`, grouped by album. With
-    /// `matches` (search results), only tracks in it are included.
-    pub fn view(
-        &self,
-        grouping: Grouping,
-        value: &FilterValue,
-        matches: Option<&HashSet<i64>>,
-    ) -> View {
-        let field = grouping.field();
-        let wanted = value.key();
+    /// The tracks that pass `filter`, in `grouping`'s order, grouped by album.
+    pub fn view(&self, grouping: Grouping, filter: &TrackFilter) -> View {
         let mut view = View::default();
         for i in self.order(grouping) {
+            if !filter.passes(self, i) {
+                continue;
+            }
             let track = &self.tracks[i];
-            if matches.is_some_and(|m| !m.contains(&track.id)) {
-                continue;
-            }
-            if wanted.is_some_and(|wanted| !field.keys(self, i).any(|key| key == wanted)) {
-                continue;
-            }
             let at = view.tracks.len();
             let same_album = view
                 .tracks

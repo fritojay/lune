@@ -9,11 +9,14 @@
 
 use std::collections::HashSet;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use lune_core::{BrowseState, Filter, FilterValue, Grouping, Library, Sort, SortColumn};
+use lune_core::{
+    BrowseState, Filter, FilterValue, Grouping, Library, Sort, SortColumn, TrackFilter,
+};
 
 use crate::format;
 use crate::list_model::{self, Role, text};
@@ -193,8 +196,8 @@ pub struct FilterModelRust {
     album_directional: bool,
     album_descending: bool,
     rows: Vec<Filter>,
-    /// Track ids matching the search; `None` without a search.
-    matches: Option<HashSet<i64>>,
+    /// Tracks matching the search; `All` without a search.
+    search: TrackFilter,
     search_generation: u64,
     searches: Option<Sender<(u64, String)>>,
 }
@@ -216,7 +219,7 @@ impl Default for FilterModelRust {
             album_directional: saved.grouping.has_album_direction(),
             album_descending: saved.album_descending,
             rows: Vec::new(),
-            matches: None,
+            search: TrackFilter::All,
             search_generation: 0,
             searches: None,
         }
@@ -285,7 +288,7 @@ impl qobject::FilterModel {
             return;
         }
         let selected = self.selected().cloned();
-        self.as_mut().rust_mut().matches = Some(matches);
+        self.as_mut().rust_mut().search = TrackFilter::Ids(Arc::new(matches));
         self.recompute(selected, true);
     }
 
@@ -404,7 +407,7 @@ impl qobject::FilterModel {
     fn drop_search(mut self: Pin<&mut Self>) -> bool {
         let mut this = self.as_mut().rust_mut();
         this.search_generation += 1;
-        this.matches.take().is_some()
+        !matches!(std::mem::take(&mut this.search), TrackFilter::All)
     }
 
     fn grouping_kind(&self) -> Grouping {
@@ -426,9 +429,9 @@ impl qobject::FilterModel {
             return;
         };
         let rows = if self.album_descending {
-            catalog.filters_newest_first(self.grouping_kind(), self.matches.as_ref())
+            catalog.filters_newest_first(self.grouping_kind(), &self.search)
         } else {
-            catalog.filters(self.grouping_kind(), self.matches.as_ref())
+            catalog.filters(self.grouping_kind(), &self.search)
         };
         let row = keep
             .and_then(|value| rows.iter().position(|f| f.value == value))
@@ -455,7 +458,8 @@ impl qobject::FilterModel {
             ),
         };
         let grouping = self.grouping_kind();
-        let view = catalog.view(grouping, &value, self.matches.as_ref());
+        let selected = TrackFilter::Field(grouping.field(), value.clone());
+        let view = catalog.view(grouping, &self.search.clone().and(selected));
         let view = match self.sort() {
             Some(sort) => catalog.sorted(view, sort),
             None if self.album_descending => catalog.newest_first(view, grouping),

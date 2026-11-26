@@ -1,11 +1,11 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use proptest::prelude::*;
 use proptest::sample::select;
 
-use crate::browse::{FilterValue, Grouping, Sort, SortColumn};
+use crate::browse::{FilterValue, Grouping, Sort, SortColumn, TrackFilter};
 use crate::normalize;
 use crate::query::ListTrack;
 use crate::tags::TrackMeta;
@@ -298,9 +298,10 @@ pub fn arb_tracks() -> impl Strategy<Value = Vec<ListTrack>> {
     })
 }
 
-/// Search results over [`arb_tracks`]' ids, or none.
-pub fn arb_matches() -> impl Strategy<Value = Option<HashSet<i64>>> {
+/// Search results over [`arb_tracks`]' ids, or no search.
+pub fn arb_search() -> impl Strategy<Value = TrackFilter> {
     prop::option::of(prop::collection::hash_set(1..20i64, 0..20))
+        .prop_map(|ids| ids.map_or(TrackFilter::All, |ids| TrackFilter::Ids(Arc::new(ids))))
 }
 
 /// A file name that isn't valid UTF-8: a stray byte on Unix, an unpaired

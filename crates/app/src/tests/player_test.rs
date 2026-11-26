@@ -15,7 +15,7 @@ fn view_tracks_takes_a_range_of_the_view_in_order() {
         list_track(3, 2, None),
         list_track(4, 2, None),
     ]);
-    let view = catalog.view(Grouping::AlbumArtist, &lune_core::FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &lune_core::TrackFilter::All);
     assert_eq!(
         ids(&view_tracks(&catalog, &view, 0, usize::MAX)),
         [1, 2, 3, 4]
@@ -31,7 +31,7 @@ fn view_tracks_takes_a_range_of_the_view_in_order() {
 #[test]
 fn view_tracks_clamps_to_the_view() {
     let catalog = Catalog::new(vec![list_track(1, 1, None), list_track(2, 1, None)]);
-    let view = catalog.view(Grouping::AlbumArtist, &lune_core::FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &lune_core::TrackFilter::All);
     assert_eq!(ids(&view_tracks(&catalog, &view, 1, 10)), [2]);
     assert!(view_tracks(&catalog, &view, 5, 1).is_empty());
     assert!(view_tracks(&catalog, &view, 0, 0).is_empty());

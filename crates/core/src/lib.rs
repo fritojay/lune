@@ -21,7 +21,9 @@ mod test_util;
 mod watch;
 mod window_state;
 
-pub use browse::{Catalog, Field, Filter, FilterValue, Grouping, Sort, SortColumn, View};
+pub use browse::{
+    Catalog, Field, Filter, FilterValue, Grouping, Sort, SortColumn, TrackFilter, View,
+};
 pub use error::{CoreError, Result};
 pub use library::Library;
 pub use paths::{

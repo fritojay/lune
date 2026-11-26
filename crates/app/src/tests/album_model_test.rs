@@ -1,4 +1,4 @@
-use lune_core::{FilterValue, Grouping, Sort, SortColumn};
+use lune_core::{Grouping, Sort, SortColumn, TrackFilter};
 
 use super::*;
 use crate::test_util::{list_track as track, qml_values};
@@ -13,7 +13,7 @@ fn cover_rows_lists_every_album_showing_each_cover() {
         track(4, 3, Some(7)),
         track(5, 4, Some(8)),
     ]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     let rows = cover_rows(&catalog, &view, &[0, 1, 2, 3]);
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[&7], [0, 2]);
@@ -27,7 +27,7 @@ fn cover_rows_numbers_only_the_albums_shown() {
         track(2, 2, Some(8)),
         track(3, 3, Some(9)),
     ]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     let rows = cover_rows(&catalog, &view, &[2]);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[&9], [0]);
@@ -46,7 +46,7 @@ fn every_album_is_shown_unless_one_album_is_asked_for() {
         track(2, 2, None),
         track(3, 2, None),
     ]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     assert_eq!(shown_rows(Some(&catalog), &view, false, -1), [0, 1]);
 }
 
@@ -57,21 +57,21 @@ fn an_album_id_shows_only_that_albums_rows() {
         track(2, 2, None),
         track(3, 2, None),
     ]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     assert_eq!(shown_rows(Some(&catalog), &view, true, 2), [1]);
 }
 
 #[test]
 fn no_album_id_shows_nothing_rather_than_every_album() {
     let catalog = Catalog::new(vec![track(1, 1, None), track(2, 2, None)]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     assert!(shown_rows(Some(&catalog), &view, true, -1).is_empty());
 }
 
 #[test]
 fn an_album_not_in_the_view_or_without_a_catalog_shows_nothing() {
     let catalog = Catalog::new(vec![track(1, 1, None)]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     assert!(shown_rows(Some(&catalog), &view, true, 9).is_empty());
     assert!(shown_rows(None, &view, true, 1).is_empty());
 }
@@ -79,7 +79,7 @@ fn an_album_not_in_the_view_or_without_a_catalog_shows_nothing() {
 #[test]
 fn a_sorted_view_shows_no_covers() {
     let catalog = Catalog::new(vec![track(1, 1, Some(7)), track(2, 2, Some(8))]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     let sort = Sort {
         column: SortColumn::Title,
         descending: false,
@@ -91,7 +91,7 @@ fn a_sorted_view_shows_no_covers() {
 #[test]
 fn first_track_is_none_past_the_last_album_or_without_a_catalog() {
     let catalog = Catalog::new(vec![track(1, 1, None), track(2, 2, None)]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     assert_eq!(first_track(Some(&catalog), &view, 1).map(|t| t.id), Some(2));
     assert!(first_track(Some(&catalog), &view, 2).is_none());
     assert!(first_track(None, &view, 0).is_none());

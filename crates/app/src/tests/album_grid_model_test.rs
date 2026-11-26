@@ -1,4 +1,4 @@
-use lune_core::{FilterValue, Grouping};
+use lune_core::{Grouping, TrackFilter};
 
 use proptest::prelude::*;
 
@@ -19,7 +19,7 @@ fn a_cover_is_listed_once_per_grid_row_showing_it() {
         track(3, 3, Some(8)),
         track(4, 4, Some(7)),
     ]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     let rows = grid_cover_rows(&catalog, &view, 2);
     assert_eq!(rows[&7], [0, 1]);
     assert_eq!(rows[&8], [1]);

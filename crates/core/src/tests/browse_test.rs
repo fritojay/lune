@@ -4,7 +4,7 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 
 use super::*;
-use crate::test_util::{arb_grouping, arb_matches, arb_sort_column, arb_tracks};
+use crate::test_util::{arb_grouping, arb_search, arb_sort_column, arb_tracks};
 
 /// Tracks must be passed in catalog (album artist) order, like `track_list`.
 fn track(id: i64, album_artist: &str, album_id: i64, album: &str, year: Option<i32>) -> ListTrack {
@@ -60,6 +60,10 @@ fn ids(catalog: &Catalog, view: &View) -> Vec<i64> {
         .collect()
 }
 
+fn ids_filter<const N: usize>(ids: [i64; N]) -> TrackFilter {
+    TrackFilter::Ids(Arc::new(HashSet::from(ids)))
+}
+
 fn labels(filters: &[Filter]) -> Vec<(&str, usize)> {
     filters
         .iter()
@@ -71,18 +75,18 @@ fn labels(filters: &[Filter]) -> Vec<(&str, usize)> {
 fn an_empty_catalog_has_only_the_all_filter_and_empty_views() {
     let catalog = Catalog::new(Vec::new());
     for grouping in Grouping::ALL {
-        let filters = catalog.filters(grouping, None);
+        let filters = catalog.filters(grouping, &TrackFilter::All);
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].value, FilterValue::All);
         assert_eq!(filters[0].tracks, 0);
-        assert!(catalog.view(grouping, &FilterValue::All, None).is_empty());
+        assert!(catalog.view(grouping, &TrackFilter::All).is_empty());
     }
 }
 
 #[test]
 fn album_artist_filters_list_each_album_artist_once_in_key_order() {
     let catalog = library();
-    let filters = catalog.filters(Grouping::AlbumArtist, None);
+    let filters = catalog.filters(Grouping::AlbumArtist, &TrackFilter::All);
     assert_eq!(
         labels(&filters),
         [("", 8), ("Portishead", 2), ("Radiohead", 3), ("Various", 3)]
@@ -95,8 +99,10 @@ fn selecting_an_album_artist_lists_all_their_albums_grouped_in_album_order() {
     let catalog = library();
     let view = catalog.view(
         Grouping::AlbumArtist,
-        &FilterValue::Text("radiohead".to_owned()),
-        None,
+        &TrackFilter::Field(
+            Field::AlbumArtist,
+            FilterValue::Text("radiohead".to_owned()),
+        ),
     );
     assert_eq!(ids(&catalog, &view), [3, 4, 5]);
     assert_eq!(view.albums, [0..2, 2..3]);
@@ -105,7 +111,7 @@ fn selecting_an_album_artist_lists_all_their_albums_grouped_in_album_order() {
 #[test]
 fn artist_filters_use_the_track_artist_and_merge_case_variants() {
     let catalog = library();
-    let filters = catalog.filters(Grouping::Artist, None);
+    let filters = catalog.filters(Grouping::Artist, &TrackFilter::All);
     // Track 8 has no artist tag: it is listed under an empty (unknown) label.
     assert_eq!(
         labels(&filters),
@@ -119,8 +125,7 @@ fn artist_filters_use_the_track_artist_and_merge_case_variants() {
     );
     let view = catalog.view(
         Grouping::Artist,
-        &FilterValue::Text("portishead".to_owned()),
-        None,
+        &TrackFilter::Field(Field::Artist, FilterValue::Text("portishead".to_owned())),
     );
     // A track on someone else's album is grouped under that album.
     assert_eq!(ids(&catalog, &view), [1, 2, 7]);
@@ -136,7 +141,7 @@ fn genre_filters_use_the_track_genre_and_merge_case_variants() {
         with_genre(track(4, "Various", 30, "Mix", None), None),
         with_genre(track(5, "Various", 30, "Mix", None), Some("Trip Hop")),
     ]);
-    let filters = catalog.filters(Grouping::Genre, None);
+    let filters = catalog.filters(Grouping::Genre, &TrackFilter::All);
     // Track 4 has no genre tag: it is listed under an empty (unknown) label.
     assert_eq!(
         labels(&filters),
@@ -146,8 +151,7 @@ fn genre_filters_use_the_track_genre_and_merge_case_variants() {
 
     let view = catalog.view(
         Grouping::Genre,
-        &FilterValue::Text("trip hop".to_owned()),
-        None,
+        &TrackFilter::Field(Field::Genre, FilterValue::Text("trip hop".to_owned())),
     );
     // Only the matching tracks of each album are selected.
     assert_eq!(ids(&catalog, &view), [1, 5]);
@@ -157,7 +161,7 @@ fn genre_filters_use_the_track_genre_and_merge_case_variants() {
 #[test]
 fn album_filters_are_in_album_artist_then_year_order_with_the_album_artist_as_detail() {
     let catalog = library();
-    let filters = catalog.filters(Grouping::Album, None);
+    let filters = catalog.filters(Grouping::Album, &TrackFilter::All);
     let albums: Vec<(&str, Option<&str>)> = filters[1..]
         .iter()
         .map(|f| (f.label.as_str(), f.detail.as_deref()))
@@ -171,7 +175,10 @@ fn album_filters_are_in_album_artist_then_year_order_with_the_album_artist_as_de
             ("Mix", Some("Various")),
         ]
     );
-    let view = catalog.view(Grouping::Album, &FilterValue::Album(21), None);
+    let view = catalog.view(
+        Grouping::Album,
+        &TrackFilter::Field(Field::Album, FilterValue::Album(21)),
+    );
     assert_eq!(ids(&catalog, &view), [5]);
 }
 
@@ -179,7 +186,7 @@ fn album_filters_are_in_album_artist_then_year_order_with_the_album_artist_as_de
 fn year_filters_ascend_with_unknown_last() {
     let catalog = library();
     let values: Vec<FilterValue> = catalog
-        .filters(Grouping::Year, None)
+        .filters(Grouping::Year, &TrackFilter::All)
         .into_iter()
         .map(|f| f.value)
         .collect();
@@ -204,14 +211,20 @@ fn the_year_view_orders_albums_by_max_year_and_keeps_album_track_order() {
         track(4, "C", 30, "Undated", None),
         track(5, "D", 40, "Same Year", Some(1990)),
     ]);
-    let view = catalog.view(Grouping::Year, &FilterValue::All, None);
+    let view = catalog.view(Grouping::Year, &TrackFilter::All);
     // 1990 (B, then D by album artist), 2010, then Unknown.
     assert_eq!(ids(&catalog, &view), [3, 5, 1, 2, 4]);
     assert_eq!(view.albums, [0..1, 1..2, 2..4, 4..5]);
 
-    let view = catalog.view(Grouping::Year, &FilterValue::Year(1990), None);
+    let view = catalog.view(
+        Grouping::Year,
+        &TrackFilter::Field(Field::Year, FilterValue::Year(1990)),
+    );
     assert_eq!(ids(&catalog, &view), [3, 5]);
-    let view = catalog.view(Grouping::Year, &FilterValue::UnknownYear, None);
+    let view = catalog.view(
+        Grouping::Year,
+        &TrackFilter::Field(Field::Year, FilterValue::UnknownYear),
+    );
     assert_eq!(ids(&catalog, &view), [4]);
 }
 
@@ -226,7 +239,7 @@ fn newest_first_puts_each_album_artists_newest_album_first_and_unknown_last() {
         track(6, "B", 20, "Old", Some(1980)),
         track(7, "B", 21, "New", Some(2020)),
     ]);
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     let view = catalog.newest_first(view, Grouping::AlbumArtist);
     // Artists stay A to Z, and same-year albums keep title order.
     assert_eq!(ids(&catalog, &view), [2, 3, 1, 4, 7, 5, 6]);
@@ -242,7 +255,7 @@ fn newest_first_puts_the_newest_year_first_in_the_year_view() {
         track(4, "C", 30, "Undated", None),
         track(5, "D", 40, "Same Year", Some(1990)),
     ]);
-    let view = catalog.view(Grouping::Year, &FilterValue::All, None);
+    let view = catalog.view(Grouping::Year, &TrackFilter::All);
     let view = catalog.newest_first(view, Grouping::Year);
     // 2010, 1990 (B, then D by album artist), then Unknown.
     assert_eq!(ids(&catalog, &view), [1, 2, 3, 5, 4]);
@@ -259,7 +272,7 @@ fn album_filters_newest_first_follow_the_newest_first_view() {
         track(5, "B", 21, "New", Some(2020)),
     ]);
     let labels: Vec<String> = catalog
-        .filters_newest_first(Grouping::Album, None)
+        .filters_newest_first(Grouping::Album, &TrackFilter::All)
         .into_iter()
         .skip(1)
         .map(|f| f.label)
@@ -305,7 +318,7 @@ fn release_day() -> Catalog {
 #[test]
 fn recently_added_puts_the_album_with_the_newest_track_first_and_skips_undated_ones() {
     let catalog = release_day();
-    let filters = catalog.filters(Grouping::RecentlyAdded, None);
+    let filters = catalog.filters(Grouping::RecentlyAdded, &TrackFilter::All);
     assert_eq!(
         album_values(&filters),
         [FilterValue::Album(10), FilterValue::Album(20)]
@@ -314,7 +327,7 @@ fn recently_added_puts_the_album_with_the_newest_track_first_and_skips_undated_o
     assert_eq!(labels(&filters[1..]), [("Album", 4), ("Older", 1)]);
     assert_eq!(filters[1].detail.as_deref(), Some("A"));
 
-    let view = catalog.view(Grouping::RecentlyAdded, &FilterValue::All, None);
+    let view = catalog.view(Grouping::RecentlyAdded, &TrackFilter::All);
     // The whole album in album track order, not in the order it arrived.
     assert_eq!(ids(&catalog, &view), [1, 2, 3, 4, 5]);
     assert_eq!(view.albums, [0..4, 4..5]);
@@ -327,7 +340,7 @@ fn before_release_day_the_singles_date_their_album() {
         track(2, "A", 10, "Album", None),
         added(track(3, "B", 20, "Older", None), 200),
     ]);
-    let filters = catalog.filters(Grouping::RecentlyAdded, None);
+    let filters = catalog.filters(Grouping::RecentlyAdded, &TrackFilter::All);
     assert_eq!(
         album_values(&filters),
         [FilterValue::Album(20), FilterValue::Album(10)]
@@ -342,7 +355,7 @@ fn albums_added_at_the_same_moment_stay_whole_in_catalog_order() {
         added(track(3, "B", 20, "Two", None), 100),
         added(track(4, "B", 20, "Two", None), 100),
     ]);
-    let view = catalog.view(Grouping::RecentlyAdded, &FilterValue::All, None);
+    let view = catalog.view(Grouping::RecentlyAdded, &TrackFilter::All);
     assert_eq!(ids(&catalog, &view), [1, 2, 3, 4]);
     assert_eq!(view.albums, [0..2, 2..4]);
 }
@@ -350,7 +363,10 @@ fn albums_added_at_the_same_moment_stay_whole_in_catalog_order() {
 #[test]
 fn selecting_a_recently_added_album_lists_only_its_tracks() {
     let catalog = release_day();
-    let view = catalog.view(Grouping::RecentlyAdded, &FilterValue::Album(20), None);
+    let view = catalog.view(
+        Grouping::RecentlyAdded,
+        &TrackFilter::Field(Field::Album, FilterValue::Album(20)),
+    );
     assert_eq!(ids(&catalog, &view), [5]);
 }
 
@@ -363,10 +379,10 @@ fn recently_played_lists_only_played_albums_by_their_latest_play() {
         played(track(4, "C", 30, "Three", None), 50),
         played(track(5, "C", 30, "Three", None), 400),
     ]);
-    let view = catalog.view(Grouping::RecentlyPlayed, &FilterValue::All, None);
+    let view = catalog.view(Grouping::RecentlyPlayed, &TrackFilter::All);
     assert_eq!(ids(&catalog, &view), [4, 5, 1, 2]);
     assert_eq!(
-        album_values(&catalog.filters(Grouping::RecentlyPlayed, None)),
+        album_values(&catalog.filters(Grouping::RecentlyPlayed, &TrackFilter::All)),
         [FilterValue::Album(30), FilterValue::Album(10)]
     );
 }
@@ -380,12 +396,12 @@ fn a_recorded_play_moves_its_album_to_the_top_of_recently_played() {
     let at = SystemTime::now();
     catalog.record_play(2, at);
     assert_eq!(catalog.by_id(2).unwrap().played_ns, Some(unix_ns(at)));
-    let view = catalog.view(Grouping::RecentlyPlayed, &FilterValue::All, None);
+    let view = catalog.view(Grouping::RecentlyPlayed, &TrackFilter::All);
     assert_eq!(ids(&catalog, &view), [2, 1]);
     // Recently Added is unaffected.
     assert!(
         catalog
-            .view(Grouping::RecentlyAdded, &FilterValue::All, None)
+            .view(Grouping::RecentlyAdded, &TrackFilter::All)
             .is_empty()
     );
 }
@@ -394,41 +410,37 @@ fn a_recorded_play_moves_its_album_to_the_top_of_recently_played() {
 fn a_play_of_an_unknown_track_changes_nothing() {
     let mut catalog = Catalog::new(vec![played(track(1, "A", 10, "One", None), 100)]);
     catalog.record_play(99, SystemTime::now());
-    let view = catalog.view(Grouping::RecentlyPlayed, &FilterValue::All, None);
+    let view = catalog.view(Grouping::RecentlyPlayed, &TrackFilter::All);
     assert_eq!(ids(&catalog, &view), [1]);
 }
 
 #[test]
 fn search_matches_narrow_the_recency_groupings() {
     let catalog = release_day();
-    let matches = HashSet::from([2, 5]);
-    let filters = catalog.filters(Grouping::RecentlyAdded, Some(&matches));
+    let matches = ids_filter([2, 5]);
+    let filters = catalog.filters(Grouping::RecentlyAdded, &matches);
     assert_eq!(labels(&filters[1..]), [("Album", 1), ("Older", 1)]);
-    let view = catalog.view(Grouping::RecentlyAdded, &FilterValue::All, Some(&matches));
+    let view = catalog.view(Grouping::RecentlyAdded, &matches);
     assert_eq!(ids(&catalog, &view), [2, 5]);
 }
 
 #[test]
 fn search_matches_narrow_both_the_filters_and_the_view() {
     let catalog = library();
-    let matches: HashSet<i64> = [3, 5, 7].into();
-    let filters = catalog.filters(Grouping::AlbumArtist, Some(&matches));
+    let matches = ids_filter([3, 5, 7]);
+    let filters = catalog.filters(Grouping::AlbumArtist, &matches);
     assert_eq!(
         labels(&filters),
         [("", 3), ("Radiohead", 2), ("Various", 1)]
     );
 
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, Some(&matches));
+    let view = catalog.view(Grouping::AlbumArtist, &matches);
     assert_eq!(ids(&catalog, &view), [3, 5, 7]);
     assert_eq!(view.albums, [0..1, 1..2, 2..3]);
 
-    let none = HashSet::new();
-    assert_eq!(catalog.filters(Grouping::Artist, Some(&none)).len(), 1);
-    assert!(
-        catalog
-            .view(Grouping::Artist, &FilterValue::All, Some(&none))
-            .is_empty()
-    );
+    let none = ids_filter([]);
+    assert_eq!(catalog.filters(Grouping::Artist, &none).len(), 1);
+    assert!(catalog.view(Grouping::Artist, &none).is_empty());
 }
 
 #[test]
@@ -436,8 +448,7 @@ fn a_value_that_no_longer_exists_selects_nothing() {
     let catalog = library();
     let view = catalog.view(
         Grouping::AlbumArtist,
-        &FilterValue::Text("gone".to_owned()),
-        None,
+        &TrackFilter::Field(Field::AlbumArtist, FilterValue::Text("gone".to_owned())),
     );
     assert!(view.is_empty());
     assert!(view.albums.is_empty());
@@ -454,7 +465,7 @@ fn tracks_are_found_by_id() {
 #[test]
 fn an_album_view_has_no_sort() {
     let catalog = library();
-    let view = catalog.view(Grouping::AlbumArtist, &FilterValue::All, None);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
     assert_eq!(view.sort, None);
 }
 
@@ -599,15 +610,21 @@ fn sort_key(track: &ListTrack, column: SortColumn) -> Option<(u64, u64, String)>
     }
 }
 
-fn picked_view(
+/// One of the values the filter pane for `grouping` lists under `filter`.
+fn picked_value(
     catalog: &Catalog,
     grouping: Grouping,
     pick: Index,
-    matches: Option<&HashSet<i64>>,
-) -> View {
-    let filters = catalog.filters(grouping, matches);
-    let value = &filters[pick.index(filters.len())].value;
-    catalog.view(grouping, value, matches)
+    filter: &TrackFilter,
+) -> TrackFilter {
+    let filters = catalog.filters(grouping, filter);
+    let value = filters[pick.index(filters.len())].value.clone();
+    TrackFilter::Field(grouping.field(), value)
+}
+
+fn picked_view(catalog: &Catalog, grouping: Grouping, pick: Index, search: &TrackFilter) -> View {
+    let value = picked_value(catalog, grouping, pick, search);
+    catalog.view(grouping, &search.clone().and(value))
 }
 
 #[test]
@@ -642,14 +659,19 @@ proptest! {
     fn the_filter_counts_add_up_to_all_and_each_is_the_size_of_its_view_of_whole_album_runs(
         tracks in arb_tracks(),
         grouping in arb_grouping(),
-        matches in arb_matches(),
+        search in arb_search(),
+        other in arb_grouping(),
+        other_pick in any::<Index>(),
     ) {
         let catalog = Catalog::new(tracks);
-        let filters = catalog.filters(grouping, matches.as_ref());
+        let other_value = picked_value(&catalog, other, other_pick, &TrackFilter::All);
+        let shown = search.and(other_value);
+        let filters = catalog.filters(grouping, &shown);
         let values: usize = filters[1..].iter().map(|f| f.tracks).sum();
         prop_assert_eq!(values, filters[0].tracks);
         for filter in filters {
-            let view = catalog.view(grouping, &filter.value, matches.as_ref());
+            let value = TrackFilter::Field(grouping.field(), filter.value);
+            let view = catalog.view(grouping, &shown.clone().and(value));
             prop_assert_eq!(view.len(), filter.tracks);
             prop_assert_eq!(view.sort, None);
             let mut end = 0;
@@ -667,6 +689,44 @@ proptest! {
     }
 
     #[test]
+    fn and_selects_the_tracks_both_filters_select_in_view_order(
+        tracks in arb_tracks(),
+        grouping in arb_grouping(),
+        search in arb_search(),
+        other in arb_grouping(),
+        pick in any::<Index>(),
+    ) {
+        let catalog = Catalog::new(tracks);
+        let value = picked_value(&catalog, other, pick, &TrackFilter::All);
+        let both = catalog.view(grouping, &search.clone().and(value.clone()));
+        let in_value: HashSet<usize> = catalog.view(grouping, &value).tracks.into_iter().collect();
+        let mut expected = catalog.view(grouping, &search).tracks;
+        expected.retain(|i| in_value.contains(i));
+        prop_assert_eq!(both.tracks, expected);
+    }
+
+    #[test]
+    fn filters_that_pass_every_track_list_and_select_what_all_does(
+        tracks in arb_tracks(),
+        grouping in arb_grouping(),
+        field in prop::sample::select(&Field::ALL[..]),
+    ) {
+        let catalog = Catalog::new(tracks);
+        let every_id = (0..catalog.len()).map(|i| catalog.track(i).unwrap().id).collect();
+        let filters = catalog.filters(grouping, &TrackFilter::All);
+        let view = catalog.view(grouping, &TrackFilter::All);
+        for filter in [
+            TrackFilter::Ids(Arc::new(every_id)),
+            TrackFilter::Field(field, FilterValue::All),
+            TrackFilter::And(Vec::new()),
+            TrackFilter::All.and(TrackFilter::All),
+        ] {
+            prop_assert_eq!(&catalog.filters(grouping, &filter), &filters);
+            prop_assert_eq!(&catalog.view(grouping, &filter), &view);
+        }
+    }
+
+    #[test]
     fn a_tracks_album_value_lists_its_album_and_only_it(
         tracks in arb_tracks(),
         pick in any::<Index>(),
@@ -676,12 +736,12 @@ proptest! {
         let track = catalog.track(pick.index(catalog.len())).unwrap();
         let value = catalog.album_of(track.id).unwrap();
         for filters in [
-            catalog.filters(Grouping::Album, None),
-            catalog.filters_newest_first(Grouping::Album, None),
+            catalog.filters(Grouping::Album, &TrackFilter::All),
+            catalog.filters_newest_first(Grouping::Album, &TrackFilter::All),
         ] {
             prop_assert_eq!(filters.iter().filter(|f| f.value == value).count(), 1);
         }
-        let view = catalog.view(Grouping::Album, &value, None);
+        let view = catalog.view(Grouping::Album, &TrackFilter::Field(Field::Album, value));
         let ids: Vec<i64> = view.tracks.iter().map(|&i| catalog.track(i).unwrap().id).collect();
         prop_assert!(ids.contains(&track.id));
         prop_assert!(view.tracks.iter().all(|&i| catalog.track(i).unwrap().album_id == track.album_id));
@@ -692,12 +752,12 @@ proptest! {
         tracks in arb_tracks(),
         grouping in arb_grouping(),
         pick in any::<Index>(),
-        matches in arb_matches(),
+        search in arb_search(),
         column in arb_sort_column(),
         descending: bool,
     ) {
         let catalog = Catalog::new(tracks);
-        let view = picked_view(&catalog, grouping, pick, matches.as_ref());
+        let view = picked_view(&catalog, grouping, pick, &search);
         let key = |i: usize| sort_key(catalog.track(i).unwrap(), column);
         let mut expected = view.tracks.clone();
         expected.sort_by(|&a, &b| {
@@ -716,10 +776,10 @@ proptest! {
         tracks in arb_tracks(),
         grouping in arb_grouping(),
         pick in any::<Index>(),
-        matches in arb_matches(),
+        search in arb_search(),
     ) {
         let catalog = Catalog::new(tracks);
-        let view = picked_view(&catalog, grouping, pick, matches.as_ref());
+        let view = picked_view(&catalog, grouping, pick, &search);
         let newest = catalog.newest_first(view.clone(), grouping);
         if matches!(grouping, Grouping::RecentlyAdded | Grouping::RecentlyPlayed) {
             prop_assert_eq!(newest, view);
@@ -749,11 +809,11 @@ proptest! {
     fn filters_newest_first_list_the_same_values_in_the_newest_first_order(
         tracks in arb_tracks(),
         grouping in arb_grouping(),
-        matches in arb_matches(),
+        search in arb_search(),
     ) {
         let catalog = Catalog::new(tracks);
-        let filters = catalog.filters(grouping, matches.as_ref());
-        let newest = catalog.filters_newest_first(grouping, matches.as_ref());
+        let filters = catalog.filters(grouping, &search);
+        let newest = catalog.filters_newest_first(grouping, &search);
         prop_assert_eq!(&newest[0], &filters[0]);
         let mut same = newest.clone();
         same.sort_by(|a, b| a.value.cmp(&b.value));
@@ -773,7 +833,7 @@ proptest! {
                 prop_assert_eq!(values, years);
             }
             Grouping::Album | Grouping::RecentlyAdded | Grouping::RecentlyPlayed => {
-                let view = catalog.view(grouping, &FilterValue::All, matches.as_ref());
+                let view = catalog.view(grouping, &search);
                 let mut albums: Vec<FilterValue> = Vec::new();
                 for &i in &catalog.newest_first(view, grouping).tracks {
                     let album = FilterValue::Album(catalog.track(i).unwrap().album_id);
