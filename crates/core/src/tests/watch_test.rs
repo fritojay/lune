@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::sync::mpsc;
 
+use proptest::prelude::*;
+
 use super::*;
 use crate::test_util::TempDir;
 
@@ -264,4 +266,27 @@ fn a_missing_folder_is_reported_and_the_rest_are_watched() {
     .unwrap();
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].0, missing);
+}
+
+proptest! {
+    #[test]
+    fn collapsing_keeps_the_outermost_directories_sorted_and_covering_every_one(
+        dirs in prop::collection::vec(
+            prop::sample::select(&["/m", "/m/a", "/m/a/b", "/m/ab", "/n", "/n/x"][..]),
+            0..8,
+        ),
+    ) {
+        let dirs: Vec<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
+        let kept = collapse_nested(dirs.clone());
+        prop_assert!(kept.is_sorted());
+        for (i, a) in kept.iter().enumerate() {
+            for b in &kept[i + 1..] {
+                prop_assert!(!b.starts_with(a), "{a:?} and {b:?}");
+            }
+        }
+        for dir in &dirs {
+            prop_assert!(kept.iter().any(|k| dir.starts_with(k)), "{dir:?}");
+        }
+        prop_assert!(kept.iter().all(|k| dirs.contains(k)));
+    }
 }

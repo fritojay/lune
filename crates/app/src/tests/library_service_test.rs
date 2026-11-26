@@ -480,17 +480,6 @@ fn the_nearest_existing_directory_inside_a_folder_is_rescanned() {
 }
 
 #[test]
-fn nested_directories_collapse_into_one_scan() {
-    let dirs = collapse(vec![
-        PathBuf::from("/m/a/b"),
-        PathBuf::from("/m/a"),
-        PathBuf::from("/m/ab"),
-        PathBuf::from("/m/a"),
-    ]);
-    assert_eq!(dirs, [PathBuf::from("/m/a"), PathBuf::from("/m/ab")]);
-}
-
-#[test]
 fn startup_deletes_thumbnails_of_covers_no_longer_in_the_library() {
     let dir = TempDir::new();
     let stale = format!("cache/thumbnails/{}-320.jpg", "a".repeat(64));

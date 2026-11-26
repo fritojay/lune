@@ -188,6 +188,12 @@ pub(crate) fn dirs_to_rescan<'a>(
         };
         dirs.push(dir.to_path_buf());
     }
+    collapse_nested(dirs)
+}
+
+/// `dirs` sorted, without the ones inside another (or repeated), so scanning
+/// what's left covers them all once.
+pub fn collapse_nested(mut dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     // Sorted, a directory comes before everything inside it.
     dirs.sort();
     let mut collapsed: Vec<PathBuf> = Vec::new();

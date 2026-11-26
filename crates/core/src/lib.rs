@@ -41,5 +41,5 @@ pub use settings::{
     DEFAULT_SCROLL_SPEED, SCROLL_SPEEDS, Settings, add_folder, clamp_scroll_speed, remove_folder,
 };
 pub use tags::{EmbeddedArt, TrackMeta, is_audio_path, read_track_meta};
-pub use watch::FolderWatcher;
+pub use watch::{FolderWatcher, collapse_nested};
 pub use window_state::{BrowseState, WindowState};

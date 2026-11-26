@@ -346,7 +346,7 @@ impl Worker {
     /// Scans `dirs` (each limited to a configured folder). Returns whether
     /// the library changed.
     fn scan(&mut self, dirs: Vec<PathBuf>, mode: ScanMode) -> bool {
-        let dirs = collapse(
+        let dirs = lune_core::collapse_nested(
             dirs.into_iter()
                 .filter_map(|dir| existing_ancestor(&dir, &self.folders))
                 .collect(),
@@ -465,18 +465,6 @@ fn rescan_wait(due: SystemTime, now: SystemTime) -> Option<Duration> {
         Ok(left) if !left.is_zero() => Some(left.min(MAX_WAIT)),
         _ => None,
     }
-}
-
-/// Sorts and drops directories inside another one in the list.
-fn collapse(mut dirs: Vec<PathBuf>) -> Vec<PathBuf> {
-    dirs.sort();
-    let mut kept: Vec<PathBuf> = Vec::new();
-    for dir in dirs {
-        if !kept.last().is_some_and(|k| dir.starts_with(k)) {
-            kept.push(dir);
-        }
-    }
-    kept
 }
 
 #[cfg(test)]
