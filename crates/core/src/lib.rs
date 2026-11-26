@@ -23,7 +23,7 @@ mod window_state;
 
 pub use browse::{
     Browsed, Catalog, Field, Filter, FilterValue, Grouping, MenuChoice, Sort, SortColumn,
-    TrackFilter, View, after_heading_click, menu_choice, sort_state,
+    TrackFilter, View, after_heading_click, file_type, menu_choice, sort_state,
 };
 pub use error::{CoreError, Result};
 pub use library::Library;

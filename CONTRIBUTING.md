@@ -68,7 +68,7 @@ symphonia (no system FFmpeg), cpal, rubato, rtrb, lofty, rusqlite (`bundled`, FT
 A field the filter pane can group by (`Field` in `crates/core/src/browse.rs`):
 
 1. Add the variant to `Field`, `Field::ALL`, and `field_count` in `browse_test.rs`, and give it an entry in `Field::def`: where its key comes from, its label, and its placeholder when the tag is missing. A text field only needs `key`, `label`, and `missing` on top of `FieldDef::TEXT`.
-2. Add a `Grouping` variant that lists it (to `Grouping::ALL`, `Grouping::def`, and `grouping_count`), and its button in `crates/app/qml/Groupings.qml`.
+2. Add a `Grouping` variant that lists it (to `Grouping::ALL`, `Grouping::def`, and `grouping_count`), and its title in `titles` in `crates/app/qml/GroupingBar.qml`. The grouping bar lists `Grouping::ALL` through `SourcesModel`, so it gets a button without other changes.
 3. If the data isn't on `ListTrack` yet: add it to `ListTrack` and `LIST_TRACK_COLUMNS` in `query.rs`, write a migration in `db.rs`, read it in `tags.rs`, and bump `READER_VERSION`.
 
 The proptests in `browse_test.rs` run over `Grouping::ALL`, so the new grouping is tested without new tests.

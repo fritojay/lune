@@ -39,6 +39,9 @@ pub mod qobject {
 
     unsafe extern "RustQt" {
         #[qinvokable]
+        fn choose(self: Pin<&mut SourcesModel>, row: i32);
+
+        #[qinvokable]
         #[cxx_override]
         fn data(self: &SourcesModel, index: &QModelIndex, role: i32) -> QVariant;
 
@@ -65,11 +68,11 @@ struct Source {
 }
 
 /// `kind` and `sourceId` are what QML passes back when a source is chosen.
-/// `sourceId` is the grouping's `Grouping::name`.
+/// `sourceId` is the grouping's `Grouping::name`, which also keys its title
+/// in GroupingBar.qml.
 const ROLES: &[Role<Source>] = &[
     ("kind", |_| text("grouping")),
     ("sourceId", |s| text(s.grouping.name())),
-    ("title", |s| text(s.grouping.title())),
     ("current", |s| QVariant::from(&s.current)),
 ];
 
@@ -82,6 +85,15 @@ fn sources(current: Grouping) -> Vec<Source> {
             grouping,
             current: grouping == current,
         })
+        .collect()
+}
+
+/// The rows whose `current` differs between `old` and `new`.
+fn changed_rows(old: &[Source], new: &[Source]) -> Vec<i32> {
+    (0..)
+        .zip(old.iter().zip(new))
+        .filter(|(_, (old, new))| old != new)
+        .map(|(row, _)| row)
         .collect()
 }
 
@@ -108,13 +120,24 @@ impl cxx_qt::Initialize for qobject::SourcesModel {
 }
 
 impl qobject::SourcesModel {
-    fn browsed(mut self: Pin<&mut Self>) {
-        let sources = sources(session::browse().grouping);
-        let changed: Vec<i32> = (0..)
-            .zip(sources.iter().zip(&self.sources))
-            .filter(|(_, (new, old))| new != old)
-            .map(|(row, _)| row)
-            .collect();
+    fn browsed(self: Pin<&mut Self>) {
+        self.show(session::browse().grouping);
+    }
+
+    /// Marks the chosen row current at once: the `Change::Browse` that the
+    /// choice causes arrives queued, and until then the bar would still
+    /// show the old source.
+    fn choose(self: Pin<&mut Self>, row: i32) {
+        let Some(source) = usize::try_from(row).ok().and_then(|r| self.sources.get(r)) else {
+            return;
+        };
+        let grouping = source.grouping;
+        self.show(grouping);
+    }
+
+    fn show(mut self: Pin<&mut Self>, current: Grouping) {
+        let sources = sources(current);
+        let changed = changed_rows(&self.sources, &sources);
         if changed.is_empty() {
             return;
         }

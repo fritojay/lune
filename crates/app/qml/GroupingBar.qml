@@ -9,26 +9,41 @@ RowLayout {
     // `kind` and `sourceId` as SourcesModel lists them.
     signal sourceChosen(string kind, string sourceId)
 
+    // By Grouping::name. A test in sources_model_test.rs checks it against Rust.
+    readonly property var titles: ({
+        "album_artist": qsTr("Album Artists"),
+        "artist": qsTr("Artists"),
+        "album": qsTr("Albums"),
+        "year": qsTr("Years"),
+        "genre": qsTr("Genres"),
+        "file_type": qsTr("File Types"),
+        "recently_added": qsTr("Recently Added"),
+        "recently_played": qsTr("Recently Played"),
+    })
+
     spacing: 2
 
     Repeater {
-        model: SourcesModel {}
+        model: SourcesModel {
+            id: sources
+        }
         // Not ToolButton: the macOS native style can't be restyled.
         AbstractButton {
             id: tab
+            required property int index
             required property string kind
             required property string sourceId
-            required property string title
             required property bool current
             implicitHeight: 34
             leftPadding: 12
             rightPadding: 12
             hoverEnabled: true
-            text: title
+            text: groupingBar.titles[sourceId]
             font.bold: current
             checkable: true
             checked: current
             onClicked: {
+                sources.choose(index)
                 checked = Qt.binding(() => tab.current)
                 groupingBar.sourceChosen(kind, sourceId)
             }

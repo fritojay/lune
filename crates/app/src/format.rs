@@ -38,10 +38,6 @@ pub fn album(title: &str) -> String {
     or(title, Field::Album.missing())
 }
 
-pub fn file_type(codec: &str) -> String {
-    codec.to_uppercase()
-}
-
 /// Empty when unknown.
 pub fn bit_rate(kbps: Option<u32>) -> String {
     kbps.map_or_else(String::new, |kbps| format!("{kbps} kbps"))

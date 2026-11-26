@@ -37,6 +37,11 @@ fn with_genre(mut t: ListTrack, genre: Option<&str>) -> ListTrack {
     t
 }
 
+fn with_codec(mut t: ListTrack, codec: &str) -> ListTrack {
+    t.codec = codec.to_owned();
+    t
+}
+
 fn library() -> Catalog {
     Catalog::new(vec![
         track(1, "Portishead", 10, "Dummy", Some(1994)),
@@ -156,6 +161,24 @@ fn genre_filters_use_the_track_genre_and_merge_case_variants() {
     // Only the matching tracks of each album are selected.
     assert_eq!(ids(&catalog, &view), [1, 5]);
     assert_eq!(view.albums, [0..1, 1..2]);
+}
+
+#[test]
+fn file_type_filters_list_each_codec_as_the_file_type_column_shows_it() {
+    let catalog = Catalog::new(vec![
+        with_codec(track(1, "A", 10, "One", None), "flac"),
+        track(2, "A", 10, "One", None),
+        with_codec(track(3, "B", 20, "Two", None), "flac"),
+    ]);
+    let filters = catalog.filters(Grouping::FileType, &TrackFilter::All);
+    assert_eq!(labels(&filters), [("", 3), ("FLAC", 2), ("MP3", 1)]);
+    assert_eq!(file_type("flac"), "FLAC");
+
+    let view = catalog.view(
+        Grouping::FileType,
+        &TrackFilter::Field(Field::FileType, FilterValue::Text("flac".to_owned())),
+    );
+    assert_eq!(ids(&catalog, &view), [1, 3]);
 }
 
 #[test]
@@ -599,13 +622,6 @@ fn a_groupings_name_is_the_one_it_is_saved_under() {
 }
 
 #[test]
-fn each_grouping_has_its_own_title() {
-    let titles: HashSet<&str> = Grouping::ALL.map(Grouping::title).into();
-    assert_eq!(titles.len(), Grouping::ALL.len());
-    assert!(!titles.contains(""));
-}
-
-#[test]
 fn an_unknown_grouping_name_is_no_grouping() {
     assert_eq!(Grouping::from_name(""), None);
     assert_eq!(Grouping::from_name("AlbumArtist"), None);
@@ -642,6 +658,15 @@ fn picked_value(
     let filters = catalog.filters(grouping, filter);
     let value = filters[pick.index(filters.len())].value.clone();
     TrackFilter::Field(grouping.field(), value)
+}
+
+/// A value of `field`'s kind that no track from [`arb_tracks`] has.
+fn gone_value(field: Field) -> FilterValue {
+    match field.def().key {
+        KeyKind::Text(_) | KeyKind::Stored(_) => FilterValue::Text("gone".to_owned()),
+        KeyKind::Album => FilterValue::Album(-1),
+        KeyKind::AlbumYear => FilterValue::Year(1),
+    }
 }
 
 fn picked_view(catalog: &Catalog, grouping: Grouping, pick: Index, search: &TrackFilter) -> View {
@@ -1046,7 +1071,7 @@ proptest! {
     }
 
     #[test]
-    fn browsing_selects_the_saved_value_or_all_and_views_it_filtered_then_ordered(
+    fn browsing_selects_the_saved_value_or_all_and_shows_its_tracks_in_the_states_order(
         tracks in arb_tracks(),
         grouping in arb_grouping(),
         pick in any::<Index>(),
@@ -1057,7 +1082,7 @@ proptest! {
     ) {
         let catalog = Catalog::new(tracks);
         let selected = if gone {
-            FilterValue::Album(-1)
+            gone_value(grouping.field())
         } else {
             let filters = catalog.filters(grouping, &TrackFilter::All);
             filters[pick.index(filters.len())].value.clone()
@@ -1070,20 +1095,33 @@ proptest! {
             catalog.filters(grouping, &search)
         };
         prop_assert_eq!(&browsed.filters, &filters);
-        let shown = &filters[browsed.selected_row].value;
-        match filters.iter().position(|f| f.value == state.selected) {
-            Some(row) => prop_assert_eq!(browsed.selected_row, row),
-            None => prop_assert_eq!(shown, &FilterValue::All),
+        let listed = filters.iter().position(|f| f.value == state.selected);
+        prop_assert!(!gone || listed.is_none());
+        prop_assert_eq!(browsed.selected_row, listed.unwrap_or(0));
+
+        let shown = &filters[browsed.selected_row];
+        let passing = search.clone().and(TrackFilter::Field(grouping.field(), shown.value.clone()));
+        let view = &browsed.view;
+        prop_assert_eq!(view.len(), shown.tracks);
+        prop_assert_eq!(view.tracks.iter().collect::<HashSet<_>>().len(), view.len());
+        prop_assert!(view.tracks.iter().all(|&i| passing.passes(&catalog, i)));
+        prop_assert_eq!(view.sort, sort);
+        match sort {
+            Some(sort) => prop_assert_eq!(&catalog.sorted(view.clone(), sort), view),
+            None if album_descending => {
+                prop_assert_eq!(&catalog.newest_first(view.clone(), grouping), view);
+            }
+            None => {
+                let position: HashMap<usize, usize> =
+                    catalog.order(grouping).enumerate().map(|(at, i)| (i, at)).collect();
+                prop_assert!(view.tracks.is_sorted_by_key(|i| position[i]));
+            }
         }
-        let value = TrackFilter::Field(grouping.field(), shown.clone());
-        let view = catalog.view(grouping, &search.clone().and(value));
-        let view = match sort {
-            Some(sort) => catalog.sorted(view, sort),
-            None if album_descending => catalog.newest_first(view, grouping),
-            None => view,
-        };
-        prop_assert_eq!(&browsed.view, &view);
-        let corrected = BrowseState { selected: shown.clone(), ..state };
-        prop_assert_eq!(catalog.browsed_view(&corrected, &search), view);
+
+        let corrected = BrowseState { selected: shown.value.clone(), ..state.clone() };
+        prop_assert_eq!(&catalog.browsed_view(&corrected, &search), view);
+        if listed.is_none() {
+            prop_assert_eq!(&catalog.browse(&corrected, &search), &browsed);
+        }
     }
 }

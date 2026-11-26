@@ -19,7 +19,7 @@ use cxx_qt_lib::{
     QHash, QHashPair_i32_QByteArray, QList, QMap, QMapPair_QString_QVariant, QModelIndex, QString,
     QStringList, QVariant,
 };
-use lune_core::{Catalog, ListTrack, SortColumn, View};
+use lune_core::{Catalog, ListTrack, SortColumn, View, file_type};
 
 use crate::list_model::{self, text};
 use crate::property::set;
@@ -282,7 +282,7 @@ fn column_text(column: SortColumn, track: &ListTrack, catalog: &Catalog) -> Stri
         SortColumn::Title => track.title.clone(),
         SortColumn::Artist => track_artist(track),
         SortColumn::Duration => format::duration(track.duration_ms),
-        SortColumn::FileType => format::file_type(&track.codec),
+        SortColumn::FileType => file_type(&track.codec),
         SortColumn::BitRate => format::bit_rate(track.bitrate_kbps),
     }
 }

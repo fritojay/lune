@@ -60,11 +60,6 @@ impl Grouping {
         self.def().field
     }
 
-    /// Its name in the grouping bar.
-    pub fn title(self) -> &'static str {
-        self.def().title
-    }
-
     /// Whether its album order lists years in a direction the user picks,
     /// which [`Catalog::newest_first`] reverses. Groupings ordered by date
     /// are always newest first.
@@ -76,28 +71,28 @@ impl Grouping {
     }
 
     fn def(self) -> GroupingDef {
-        let (order, field, title) = match self {
-            Self::AlbumArtist => (Order::Catalog, Field::AlbumArtist, "Album Artists"),
-            Self::Artist => (Order::Catalog, Field::Artist, "Artists"),
-            Self::Album => (Order::Catalog, Field::Album, "Albums"),
-            Self::Year => (Order::Year, Field::Year, "Years"),
-            Self::Genre => (Order::Catalog, Field::Genre, "Genres"),
-            Self::FileType => (Order::Catalog, Field::FileType, "File Types"),
-            Self::RecentlyAdded => (Order::Added, Field::Album, "Recently Added"),
-            Self::RecentlyPlayed => (Order::Played, Field::Album, "Recently Played"),
+        let (order, field) = match self {
+            Self::AlbumArtist => (Order::Catalog, Field::AlbumArtist),
+            Self::Artist => (Order::Catalog, Field::Artist),
+            Self::Album => (Order::Catalog, Field::Album),
+            Self::Year => (Order::Year, Field::Year),
+            Self::Genre => (Order::Catalog, Field::Genre),
+            Self::FileType => (Order::Catalog, Field::FileType),
+            Self::RecentlyAdded => (Order::Added, Field::Album),
+            Self::RecentlyPlayed => (Order::Played, Field::Album),
         };
-        GroupingDef {
-            order,
-            field,
-            title,
-        }
+        GroupingDef { order, field }
     }
 }
 
 struct GroupingDef {
     order: Order,
     field: Field,
-    title: &'static str,
+}
+
+/// How a codec name is shown, in the filter pane and the File Type column.
+pub fn file_type(codec: &str) -> String {
+    codec.to_uppercase()
 }
 
 /// What a grouping's values are.
@@ -162,7 +157,7 @@ impl Field {
             },
             Self::FileType => FieldDef {
                 key: KeyKind::Text(|t| &t.codec),
-                label: |t| t.codec.to_uppercase(),
+                label: |t| file_type(&t.codec),
                 missing: "Unknown",
                 ..FieldDef::TEXT
             },
