@@ -160,6 +160,20 @@ fn without_a_settings_file_a_library_built_elsewhere_is_kept() {
 }
 
 #[test]
+fn a_library_that_cannot_be_opened_names_its_file() {
+    let dir = TempDir::new();
+    let db = Harness::db(&dir);
+    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+    dir.write("data/library.sqlite3", b"not a database, just some text");
+    let harness = Harness::start(dir);
+    let message = harness.wait_for(|u| match u {
+        Update::Error(message) => Some(message),
+        _ => None,
+    });
+    assert!(message.contains(&db.display().to_string()), "{message}");
+}
+
+#[test]
 fn an_empty_new_library_loads_empty() {
     let h = Harness::start(TempDir::new());
     assert_eq!(h.loaded_size(), 0);

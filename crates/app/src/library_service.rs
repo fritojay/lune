@@ -199,7 +199,10 @@ impl Worker {
                 self.publish_missing();
             }
             Err(err) => {
-                self.error(format!("Could not open the library: {err}"));
+                self.error(format!(
+                    "Could not open the library at {}: {err}. To start a new library, quit Lune and move that file away.",
+                    self.db_path.display()
+                ));
                 (self.notify)(Update::Loaded(
                     Catalog::new(Vec::new()),
                     Queue::default(),
