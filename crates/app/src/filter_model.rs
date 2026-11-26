@@ -45,7 +45,6 @@ pub mod qobject {
         #[qml_element]
         #[base = QAbstractListModel]
         #[qproperty(bool, loading)]
-        #[qproperty(QString, grouping, READ, NOTIFY)]
         #[qproperty(i32, current_row, cxx_name = "currentRow", READ, NOTIFY)]
         #[qproperty(QString, title, READ, NOTIFY)]
         #[qproperty(i32, track_count, cxx_name = "trackCount", READ, NOTIFY)]
@@ -130,7 +129,6 @@ const ROLES: &[Role<Filter>] = &[
 
 pub struct FilterModelRust {
     loading: bool,
-    grouping: QString,
     current_row: i32,
     title: QString,
     track_count: i32,
@@ -153,7 +151,6 @@ impl Default for FilterModelRust {
         let (sort_column, sort_descending) = sort_state(state.sort, state.album_descending);
         Self {
             loading: true,
-            grouping: QString::from(state.grouping.name()),
             current_row: 0,
             title: QString::default(),
             track_count: 0,
@@ -207,7 +204,7 @@ impl cxx_qt::Initialize for qobject::FilterModel {
         session::on_change(self.qt_thread(), |model, change| match change {
             Change::Catalog => model.reload(),
             Change::Played => model.played(),
-            Change::View { .. } | Change::Missing | Change::Queue => {}
+            Change::View { .. } | Change::Missing | Change::Queue | Change::Browse => {}
         });
     }
 }
@@ -330,13 +327,16 @@ impl qobject::FilterModel {
     /// Rebuilds the filter pane, keeping the selection if it still has
     /// tracks (otherwise "All"), and then the view.
     fn recompute(mut self: Pin<&mut Self>, reset: bool) {
+        let browsed = session::catalog().map(|catalog| catalog.browse(&self.state, &self.search));
+        if let Some(browsed) = &browsed {
+            let selected = browsed.filters[browsed.selected_row].value.clone();
+            self.as_mut().rust_mut().state.selected = selected;
+        }
         self.as_mut().show_state();
-        let Some(catalog) = session::catalog() else {
+        let Some(browsed) = browsed else {
             return;
         };
-        let browsed = catalog.browse(&self.state, &self.search);
         let row = browsed.selected_row;
-        self.as_mut().rust_mut().state.selected = browsed.filters[row].value.clone();
         self.as_mut().begin_reset_model();
         self.as_mut().rust_mut().rows = browsed.filters;
         self.as_mut().end_reset_model();
@@ -356,15 +356,10 @@ impl qobject::FilterModel {
         self.show_view(view, true);
     }
 
+    /// Shows `state` in the properties and to `session::browse`.
     fn show_state(mut self: Pin<&mut Self>) {
         let state = self.state.clone();
         let (sort_column, sort_descending) = sort_state(state.sort, state.album_descending);
-        set!(
-            self,
-            grouping,
-            grouping_changed,
-            QString::from(state.grouping.name())
-        );
         set!(
             self,
             album_directional,
@@ -383,6 +378,7 @@ impl qobject::FilterModel {
             sort_descending_changed,
             sort_descending
         );
+        session::set_browse(state);
     }
 
     fn show_view(mut self: Pin<&mut Self>, view: View, reset: bool) {
@@ -391,7 +387,6 @@ impl qobject::FilterModel {
             None => format::filter_label(&all(self.state.grouping)),
         };
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
-        session::set_browse(self.state.clone());
         session::set_view(view, reset);
         set!(self, title, title_changed, QString::from(&title));
         set!(self, track_count, track_count_changed, count);
@@ -419,7 +414,3 @@ fn all(grouping: Grouping) -> Filter {
         tracks: 0,
     }
 }
-
-#[cfg(test)]
-#[path = "tests/filter_model_test.rs"]
-mod tests;

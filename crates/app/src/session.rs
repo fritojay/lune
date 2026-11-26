@@ -32,6 +32,8 @@ pub enum Change {
     Queue,
     /// Playback of a track started.
     Played,
+    /// [`browse`] changed.
+    Browse,
 }
 
 #[derive(Default)]
@@ -102,7 +104,10 @@ pub fn browse() -> BrowseState {
 }
 
 pub fn set_browse(browse: BrowseState) {
-    UI.with_borrow_mut(|ui| ui.browse = Some(browse));
+    let changed = UI.with_borrow_mut(|ui| ui.browse.replace(browse.clone()) != Some(browse));
+    if changed {
+        notify(Change::Browse);
+    }
 }
 
 /// Playback of track `track_id` started: Recently Played changes now, and

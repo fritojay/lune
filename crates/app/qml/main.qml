@@ -283,8 +283,10 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.leftMargin: 6
             Layout.topMargin: 4
-            grouping: filters.grouping
-            onGroupingChosen: grouping => filters.setGrouping(grouping)
+            onSourceChosen: (kind, sourceId) => {
+                if (kind === "grouping")
+                    filters.setGrouping(sourceId)
+            }
         }
 
         Rectangle {

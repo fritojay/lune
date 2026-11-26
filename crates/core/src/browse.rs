@@ -57,29 +57,47 @@ impl Grouping {
     }
 
     pub fn field(self) -> Field {
-        self.def().1
+        self.def().field
+    }
+
+    /// Its name in the grouping bar.
+    pub fn title(self) -> &'static str {
+        self.def().title
     }
 
     /// Whether its album order lists years in a direction the user picks,
     /// which [`Catalog::newest_first`] reverses. Groupings ordered by date
     /// are always newest first.
     pub fn has_album_direction(self) -> bool {
-        matches!(self.def().0.def().direction, Direction::UserPicks { .. })
+        matches!(
+            self.def().order.def().direction,
+            Direction::UserPicks { .. }
+        )
     }
 
-    /// The order its values are listed in, and what they are.
-    fn def(self) -> (Order, Field) {
-        match self {
-            Self::AlbumArtist => (Order::Catalog, Field::AlbumArtist),
-            Self::Artist => (Order::Catalog, Field::Artist),
-            Self::Album => (Order::Catalog, Field::Album),
-            Self::Year => (Order::Year, Field::Year),
-            Self::Genre => (Order::Catalog, Field::Genre),
-            Self::FileType => (Order::Catalog, Field::FileType),
-            Self::RecentlyAdded => (Order::Added, Field::Album),
-            Self::RecentlyPlayed => (Order::Played, Field::Album),
+    fn def(self) -> GroupingDef {
+        let (order, field, title) = match self {
+            Self::AlbumArtist => (Order::Catalog, Field::AlbumArtist, "Album Artists"),
+            Self::Artist => (Order::Catalog, Field::Artist, "Artists"),
+            Self::Album => (Order::Catalog, Field::Album, "Albums"),
+            Self::Year => (Order::Year, Field::Year, "Years"),
+            Self::Genre => (Order::Catalog, Field::Genre, "Genres"),
+            Self::FileType => (Order::Catalog, Field::FileType, "File Types"),
+            Self::RecentlyAdded => (Order::Added, Field::Album, "Recently Added"),
+            Self::RecentlyPlayed => (Order::Played, Field::Album, "Recently Played"),
+        };
+        GroupingDef {
+            order,
+            field,
+            title,
         }
     }
+}
+
+struct GroupingDef {
+    order: Order,
+    field: Field,
+    title: &'static str,
 }
 
 /// What a grouping's values are.
@@ -800,7 +818,7 @@ impl Catalog {
             (year.is_none(), Reverse(year))
         };
         let mut albums = view.albums.clone();
-        match grouping.def().0.def().direction {
+        match grouping.def().order.def().direction {
             // Stable, so the order within each year is kept.
             Direction::UserPicks { within } => {
                 albums.sort_by_key(|album| (within(first(album)), year(album)));
@@ -850,7 +868,7 @@ impl Catalog {
     }
 
     fn order(&self, grouping: Grouping) -> Box<dyn Iterator<Item = usize> + '_> {
-        match &self.orders[grouping.def().0 as usize] {
+        match &self.orders[grouping.def().order as usize] {
             None => Box::new(0..self.tracks.len()),
             Some(order) => Box::new(order.iter().copied()),
         }

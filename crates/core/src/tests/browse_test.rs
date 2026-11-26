@@ -599,6 +599,13 @@ fn a_groupings_name_is_the_one_it_is_saved_under() {
 }
 
 #[test]
+fn each_grouping_has_its_own_title() {
+    let titles: HashSet<&str> = Grouping::ALL.map(Grouping::title).into();
+    assert_eq!(titles.len(), Grouping::ALL.len());
+    assert!(!titles.contains(""));
+}
+
+#[test]
 fn an_unknown_grouping_name_is_no_grouping() {
     assert_eq!(Grouping::from_name(""), None);
     assert_eq!(Grouping::from_name("AlbumArtist"), None);

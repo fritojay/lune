@@ -6,29 +6,31 @@ import com.lune.player
 
 RowLayout {
     id: groupingBar
-    required property string grouping
-    signal groupingChosen(string grouping)
+    // `kind` and `sourceId` as SourcesModel lists them.
+    signal sourceChosen(string kind, string sourceId)
 
     spacing: 2
 
     Repeater {
-        model: Groupings.all
+        model: SourcesModel {}
         // Not ToolButton: the macOS native style can't be restyled.
         AbstractButton {
             id: tab
-            required property var modelData
-            readonly property bool chosen: groupingBar.grouping === modelData.id
+            required property string kind
+            required property string sourceId
+            required property string title
+            required property bool current
             implicitHeight: 34
             leftPadding: 12
             rightPadding: 12
             hoverEnabled: true
-            text: modelData.title
-            font.bold: chosen
+            text: title
+            font.bold: current
             checkable: true
-            checked: chosen
+            checked: current
             onClicked: {
-                checked = Qt.binding(() => tab.chosen)
-                groupingBar.groupingChosen(modelData.id)
+                checked = Qt.binding(() => tab.current)
+                groupingBar.sourceChosen(kind, sourceId)
             }
             Keys.onReturnPressed: click()
             Keys.onEnterPressed: click()
@@ -50,7 +52,7 @@ RowLayout {
                     text: tab.text
                     font: tab.font
                     color: tab.palette.buttonText
-                    opacity: tab.chosen || tab.hovered ? 1 : 0.7
+                    opacity: tab.current || tab.hovered ? 1 : 0.7
                 }
             }
             background: Rectangle {
@@ -65,7 +67,7 @@ RowLayout {
                     width: parent.width - 16
                     height: 2
                     radius: 1
-                    visible: tab.chosen
+                    visible: tab.current
                     color: tab.palette.highlight
                 }
             }

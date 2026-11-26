@@ -17,6 +17,8 @@ fn each_setter_sends_its_change() {
     set_view(View::default(), true);
     set_missing(Vec::new());
     queue_edited();
+    set_browse(BrowseState::default());
+    set_browse(BrowseState::default());
     assert_eq!(
         *changes.borrow(),
         [
@@ -25,6 +27,7 @@ fn each_setter_sends_its_change() {
             Change::View { reset: true },
             Change::Missing,
             Change::Queue,
+            Change::Browse,
         ]
     );
 }
