@@ -89,14 +89,18 @@ impl Converter {
                 self.out_channels,
             )?);
         }
-        let index = self.next_output_index();
+        Ok(self.next_output_index())
+    }
+
+    /// Notes that a track starts at `index`, as [`Converter::prepare`] gave
+    /// it, so [`Converter::finish_at`] can cut there.
+    pub fn track_starts_at(&mut self, index: u64) {
         if let Some(stream) = self.stream.as_mut() {
             if stream.starts.len() >= MAX_STARTS {
                 stream.starts.remove(0);
             }
             stream.starts.push((index, stream.input_frames));
         }
-        Ok(index)
     }
 
     /// Used when a buffered next track is dropped: the end of the track before

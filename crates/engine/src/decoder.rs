@@ -370,6 +370,7 @@ impl Decoder {
                 };
                 if !current.started {
                     current.started = true;
+                    self.converter.track_starts_at(index);
                     let consumed = self.shared.consumed.load(Ordering::Acquire);
                     let mut timeline = lock(&self.timeline);
                     if let Some(playing) = timeline.playing(consumed) {

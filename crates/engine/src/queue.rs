@@ -63,6 +63,7 @@ impl VecQueue {
     }
 
     /// Call `Player::queue_changed` afterwards.
+    #[cfg(test)]
     pub fn set(&self, entries: Vec<QueueEntry>) {
         *self.lock() = entries;
     }

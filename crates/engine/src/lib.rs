@@ -35,7 +35,7 @@ pub(crate) mod alloc_counter {
     pub struct Counting;
 
     // SAFETY: forwards every call to `System` unchanged; only counts.
-    #[allow(unsafe_code)]
+    #[expect(unsafe_code, reason = "a GlobalAlloc impl is unsafe by definition")]
     unsafe impl GlobalAlloc for Counting {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
             COUNT.with(|c| c.set(c.get() + 1));
