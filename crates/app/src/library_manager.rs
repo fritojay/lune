@@ -57,9 +57,10 @@ pub mod qobject {
         #[cxx_name = "addFolder"]
         fn add_folder(self: Pin<&mut LibraryManager>, folder: &QUrl);
 
+        /// `path` is a folder's `path` as `folders` shows it.
         #[qinvokable]
         #[cxx_name = "removeFolder"]
-        fn remove_folder(self: Pin<&mut LibraryManager>, row: i32);
+        fn remove_folder(self: Pin<&mut LibraryManager>, path: &QString);
 
         #[qinvokable]
         fn rescan(self: Pin<&mut LibraryManager>);
@@ -182,12 +183,8 @@ impl qobject::LibraryManager {
         }
     }
 
-    fn remove_folder(self: Pin<&mut Self>, row: i32) {
-        let folder = usize::try_from(row)
-            .ok()
-            .and_then(|row| self.folder_paths.get(row))
-            .cloned();
-        if let Some(folder) = folder {
+    fn remove_folder(self: Pin<&mut Self>, path: &QString) {
+        if let Some(folder) = shown_folder(&self.folder_paths, &path.to_string()).cloned() {
             self.send(Job::RemoveFolder(folder));
         }
     }
@@ -218,11 +215,27 @@ fn replace(list: &mut Vec<PathBuf>, new: &[PathBuf]) -> bool {
     true
 }
 
+fn shown_path(path: &Path) -> String {
+    path.display().to_string()
+}
+
+/// The folder shown as `shown`. A path, not a row, because the list can
+/// change while a confirmation is open. None if the lossy display of
+/// non-UTF-8 names makes two folders look the same.
+fn shown_folder<'a>(folders: &'a [PathBuf], shown: &str) -> Option<&'a PathBuf> {
+    let mut matches = folders.iter().filter(|path| shown_path(path) == shown);
+    let found = matches.next();
+    if matches.next().is_some() {
+        return None;
+    }
+    found
+}
+
 fn folder_entry(folder: &Folder) -> QVariant {
     let mut entry = QMap::<QMapPair_QString_QVariant>::default();
     entry.insert(
         QString::from("path"),
-        QVariant::from(&QString::from(&folder.path.display().to_string())),
+        QVariant::from(&QString::from(&shown_path(&folder.path))),
     );
     if let Some(ns) = folder.last_scanned_ns {
         entry.insert(

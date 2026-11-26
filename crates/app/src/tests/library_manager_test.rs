@@ -51,3 +51,29 @@ fn replacing_a_folder_list_reports_whether_it_changed() {
     assert!(replace(&mut list, &[]));
     assert!(list.is_empty());
 }
+
+#[test]
+fn a_folder_is_found_by_its_shown_path_wherever_it_moved_in_the_list() {
+    let before = [PathBuf::from("/m/a"), PathBuf::from("/b")];
+    let after = [PathBuf::from("/b"), PathBuf::from("/m")];
+    for folders in [&before[..], &after[..]] {
+        assert_eq!(shown_folder(folders, "/b"), Some(&PathBuf::from("/b")));
+    }
+    assert_eq!(shown_folder(&after, "/m/a"), None);
+    assert_eq!(shown_folder(&[], "/b"), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn folders_that_show_the_same_are_not_removed_by_name() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let folders = [
+        PathBuf::from(OsStr::from_bytes(b"/m/\xff")),
+        PathBuf::from(OsStr::from_bytes(b"/m/\xfe")),
+    ];
+    let shown = shown_path(&folders[0]);
+    assert_eq!(shown, shown_path(&folders[1]));
+    assert_eq!(shown_folder(&folders, &shown), None);
+    assert_eq!(shown_folder(&folders[..1], &shown), Some(&folders[0]));
+}

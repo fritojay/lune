@@ -11,7 +11,7 @@ Dialog {
     required property string status
 
     signal addFolderRequested()
-    signal removeFolderRequested(int index)
+    signal removeFolderRequested(string path)
     signal rescanRequested()
 
     title: qsTr("Preferences")
@@ -25,7 +25,6 @@ Dialog {
         id: confirmRemove
         Dialog {
             id: confirm
-            required property int row
             required property string path
             parent: Overlay.overlay
             anchors.centerIn: parent
@@ -34,7 +33,7 @@ Dialog {
             title: qsTr("Remove Folder")
             standardButtons: Dialog.Ok | Dialog.Cancel
             Component.onCompleted: standardButton(Dialog.Ok).text = qsTr("Remove")
-            onAccepted: preferences.removeFolderRequested(row)
+            onAccepted: preferences.removeFolderRequested(path)
             onClosed: destroy()
             Label {
                 width: parent.width
@@ -85,7 +84,6 @@ Dialog {
 
                 delegate: ItemDelegate {
                     id: folderRow
-                    required property int index
                     required property var modelData
                     width: ListView.view.width
                     contentItem: RowLayout {
@@ -105,7 +103,6 @@ Dialog {
                             text: qsTr("Remove")
                             flat: true
                             onClicked: confirmRemove.createObject(preferences.parent, {
-                                row: folderRow.index,
                                 path: folderRow.modelData.path
                             }).open()
                         }

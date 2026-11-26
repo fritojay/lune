@@ -258,7 +258,7 @@ ApplicationWindow {
         busy: library.busy
         status: library.status
         onAddFolderRequested: folderDialog.open()
-        onRemoveFolderRequested: index => library.removeFolder(index)
+        onRemoveFolderRequested: path => library.removeFolder(path)
         onRescanRequested: library.rescan()
     }
 
