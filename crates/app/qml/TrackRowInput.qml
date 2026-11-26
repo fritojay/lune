@@ -43,11 +43,11 @@ Item {
     }
 
     Rectangle {
-        readonly property bool below: input.dropRow === input.row + 1 && input.row === input.lastRow
+        readonly property string line: input.selection.dropLine(input.row, input.lastRow, input.dropRow)
         width: parent.width
         height: 2
-        y: below ? parent.height - 1 : -1
-        visible: input.dropRow === input.row || below
+        y: line === "below" ? parent.height - 1 : -1
+        visible: line !== ""
         color: input.palette.highlight
     }
 

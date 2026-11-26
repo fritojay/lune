@@ -71,10 +71,39 @@ proptest! {
                 Op::Range(start, count) => rows.select_range(start, count),
                 Op::Clear => rows.clear(),
             }
-            prop_assert_eq!(rows.rows().collect::<BTreeSet<_>>(), expected, "{:?}", op);
+            prop_assert_eq!(rows.rows().collect::<BTreeSet<_>>(), expected.clone(), "{:?}", op);
             prop_assert_eq!(rows.len(), rows.rows().count());
             for row in 0..14 {
                 prop_assert_eq!(rows.contains(row), rows.rows().any(|r| r == row));
+                let dragged: Vec<usize> = if expected.contains(&row) {
+                    expected.iter().copied().collect()
+                } else {
+                    vec![row]
+                };
+                prop_assert_eq!(rows.dragged(row), dragged);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_drop_shows_above_the_row_it_lands_before_or_below_the_last_for_the_end() {
+    let rows = [None, Some(0), Some(1), Some(2), Some(3), Some(4)];
+    for last_row in rows {
+        for drop_row in rows {
+            for row in 0..4 {
+                let expected = if drop_row == Some(row) {
+                    DropLine::Above
+                } else if last_row == Some(row) && drop_row == Some(row + 1) {
+                    DropLine::Below
+                } else {
+                    DropLine::None
+                };
+                assert_eq!(
+                    drop_line(row, last_row, drop_row),
+                    expected,
+                    "{row} {last_row:?} {drop_row:?}"
+                );
             }
         }
     }

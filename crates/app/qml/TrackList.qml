@@ -24,10 +24,9 @@ ListView {
     // `rows` keep their order and go before the row now at `to`.
     signal moveRequested(list<int> rows, int to)
 
-    // A drag of `row` carries the selection if it holds `row`, else that row.
     function endDrag(selection: TrackSelection, row: int) {
         if (dropRow >= 0)
-            moveRequested(selection.contains(row) ? selection.rows() : [row], dropRow)
+            moveRequested(selection.dragged(row), dropRow)
         dropRow = -1
     }
 

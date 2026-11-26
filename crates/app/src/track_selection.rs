@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::pin::Pin;
 
 use cxx_qt::CxxQtType;
-use cxx_qt_lib::QList;
+use cxx_qt_lib::{QList, QString};
 
 use crate::property::set;
 
@@ -19,6 +19,8 @@ pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qlist.h");
         type QList_i32 = cxx_qt_lib::QList<i32>;
+        include!("cxx-qt-lib/qstring.h");
+        type QString = cxx_qt_lib::QString;
     }
 
     extern "RustQt" {
@@ -53,6 +55,18 @@ pub mod qobject {
         /// In ascending order.
         #[qinvokable]
         fn rows(self: &TrackSelection) -> QList_i32;
+
+        /// What a drag of `row` moves, in ascending order: the selection if
+        /// it holds `row`, else that row alone.
+        #[qinvokable]
+        fn dragged(self: &TrackSelection, row: i32) -> QList_i32;
+
+        /// Where row `row` of a list whose last row is `last_row` shows the
+        /// line for a drop before row `drop_row` (-1 for none): "above",
+        /// "below", or "".
+        #[qinvokable]
+        #[cxx_name = "dropLine"]
+        fn drop_line(self: &TrackSelection, row: i32, last_row: i32, drop_row: i32) -> QString;
     }
 }
 
@@ -109,6 +123,31 @@ impl Rows {
     pub fn len(&self) -> usize {
         self.selected.len()
     }
+
+    pub fn dragged(&self, row: usize) -> Vec<usize> {
+        if self.contains(row) {
+            self.rows().collect()
+        } else {
+            vec![row]
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropLine {
+    None,
+    Above,
+    /// Only the last row, for a drop after it: no row is there to show it
+    /// above.
+    Below,
+}
+
+pub fn drop_line(row: usize, last_row: Option<usize>, drop_row: Option<usize>) -> DropLine {
+    match drop_row {
+        Some(drop) if drop == row => DropLine::Above,
+        Some(drop) if Some(row) == last_row && drop == row + 1 => DropLine::Below,
+        _ => DropLine::None,
+    }
 }
 
 #[derive(Default)]
@@ -120,6 +159,14 @@ pub struct TrackSelectionRust {
 
 fn index(i: i32) -> Option<usize> {
     usize::try_from(i).ok()
+}
+
+fn qml_rows(rows: impl IntoIterator<Item = usize>) -> QList<i32> {
+    let mut list = QList::<i32>::default();
+    for row in rows {
+        list.append(i32::try_from(row).unwrap_or(i32::MAX));
+    }
+    list
 }
 
 impl qobject::TrackSelection {
@@ -162,11 +209,22 @@ impl qobject::TrackSelection {
     }
 
     fn rows(&self) -> QList<i32> {
-        let mut list = QList::<i32>::default();
-        for row in self.rows.rows() {
-            list.append(i32::try_from(row).unwrap_or(i32::MAX));
-        }
-        list
+        qml_rows(self.rows.rows())
+    }
+
+    fn dragged(&self, row: i32) -> QList<i32> {
+        index(row).map_or_else(QList::default, |row| qml_rows(self.rows.dragged(row)))
+    }
+
+    fn drop_line(&self, row: i32, last_row: i32, drop_row: i32) -> QString {
+        let line = index(row).map_or(DropLine::None, |row| {
+            drop_line(row, index(last_row), index(drop_row))
+        });
+        QString::from(match line {
+            DropLine::None => "",
+            DropLine::Above => "above",
+            DropLine::Below => "below",
+        })
     }
 }
 
