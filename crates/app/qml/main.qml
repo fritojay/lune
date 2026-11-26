@@ -157,14 +157,6 @@ ApplicationWindow {
 
     onFrameSwapped: bench.firstFrame()
 
-    // Also reconnects a lost audio output, so it runs while stopped too.
-    Timer {
-        interval: player.playing ? 100 : 250
-        running: true
-        repeat: true
-        onTriggered: player.poll()
-    }
-
     Shortcut {
         id: playPauseKey
         sequence: "Space"

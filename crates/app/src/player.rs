@@ -10,6 +10,7 @@
 use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use cxx_qt::{CxxQtType, Threading};
@@ -21,7 +22,7 @@ use crate::media_controls::{self, MediaCommand, MediaControls, NowPlaying, Playb
 use crate::preferences::with_store;
 use crate::property::set;
 use crate::session::{self, Change, Save};
-use crate::{covers, format};
+use crate::{covers, format, ticker};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -141,10 +142,6 @@ pub mod qobject {
         #[qinvokable]
         fn clock(self: &PlayerController, seconds: f64) -> QString;
 
-        /// Reads the engine's status; call a few times a second.
-        #[qinvokable]
-        fn poll(self: Pin<&mut PlayerController>);
-
     }
 
     impl cxx_qt::Threading for PlayerController {}
@@ -176,6 +173,8 @@ pub struct PlayerControllerRust {
     /// What the OS was last told, to send only changes.
     media_now: NowPlaying,
     media_state: Option<PlaybackState>,
+    /// Polled more often while playing, so the position moves smoothly.
+    poll_fast: Arc<AtomicBool>,
 }
 
 impl Default for PlayerControllerRust {
@@ -202,6 +201,7 @@ impl Default for PlayerControllerRust {
             media: None,
             media_now: NowPlaying::default(),
             media_state: None,
+            poll_fast: Arc::default(),
         }
     }
 }
@@ -209,6 +209,18 @@ impl Default for PlayerControllerRust {
 impl cxx_qt::Initialize for qobject::PlayerController {
     fn initialize(mut self: Pin<&mut Self>) {
         self.as_mut().open_output(None);
+        let fast = Arc::clone(&self.poll_fast);
+        let interval = move || {
+            if fast.load(Ordering::Relaxed) {
+                POLL_PLAYING
+            } else {
+                POLL_STOPPED
+            }
+        };
+        // Also reconnects a lost output, so it runs while stopped too.
+        if let Err(err) = ticker::every(self.qt_thread(), interval, Self::poll) {
+            session::report_error(&format!("Playback can't be followed: {err}"));
+        }
         covers::on_ready(self.qt_thread(), Self::cover_ready);
         // Created on the Qt (main) thread, as macOS requires.
         let qt_thread = self.qt_thread();
@@ -600,12 +612,9 @@ impl qobject::PlayerController {
             }
             self.as_mut().update_now_playing();
         }
-        set!(
-            self,
-            playing,
-            playing_changed,
-            status.state == PlaybackState::Playing
-        );
+        let playing = status.state == PlaybackState::Playing;
+        set!(self, playing, playing_changed, playing);
+        self.poll_fast.store(playing, Ordering::Relaxed);
         let position = {
             let mut queue = session::lock_queue();
             match status.entry {
@@ -816,6 +825,9 @@ impl qobject::PlayerController {
         }
     }
 }
+
+const POLL_PLAYING: Duration = Duration::from_millis(100);
+const POLL_STOPPED: Duration = Duration::from_millis(250);
 
 const REOPEN_EVERY: Duration = Duration::from_secs(2);
 /// Longest wait between tries while no output opens, e.g. on a machine
