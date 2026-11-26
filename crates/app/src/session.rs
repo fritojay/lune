@@ -14,7 +14,8 @@ use std::time::SystemTime;
 
 use cxx_qt::{CxxQtThread, Threading};
 use lune_core::{
-    BrowseState, Catalog, Library, MissingTrack, Queue, QueueItem, SlotId, View, WindowState,
+    BrowseState, Catalog, Library, MissingTrack, Playlist, Queue, QueueItem, SlotId, View,
+    WindowState,
 };
 use lune_engine::{EntryId, PlayQueue, QueueEntry};
 
@@ -28,6 +29,7 @@ pub enum Change {
         reset: bool,
     },
     Missing,
+    Playlists,
     /// Its contents, order, or shuffle. The current item is `PlayerController.queueIndex`.
     Queue,
     /// Playback of a track started.
@@ -41,6 +43,7 @@ struct UiState {
     catalog: Option<Rc<Catalog>>,
     view: Rc<View>,
     missing: Rc<Vec<MissingTrack>>,
+    playlists: Rc<Vec<Playlist>>,
     browse: Option<BrowseState>,
     listeners: Vec<Rc<dyn Fn(Change)>>,
 }
@@ -68,6 +71,15 @@ pub fn missing() -> Rc<Vec<MissingTrack>> {
 pub fn set_missing(tracks: Vec<MissingTrack>) {
     UI.with_borrow_mut(|ui| ui.missing = Rc::new(tracks));
     notify(Change::Missing);
+}
+
+pub fn playlists() -> Rc<Vec<Playlist>> {
+    UI.with_borrow(|ui| Rc::clone(&ui.playlists))
+}
+
+pub fn set_playlists(playlists: Vec<Playlist>) {
+    UI.with_borrow_mut(|ui| ui.playlists = Rc::new(playlists));
+    notify(Change::Playlists);
 }
 
 /// The main pane's track list: what a double-click puts in the queue.

@@ -1,14 +1,41 @@
 //! Ordered lists of track ids, stored by list id. The same track can appear
 //! more than once. Items aren't tied to `tracks`, so rescans never change them.
 
+use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use rusqlite::{Connection, Transaction, named_params};
+use serde::{Deserialize, Serialize};
 
 use crate::Result;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ListId(i64);
+/// Shown and parsed as its number, which is how QML names a playlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ListId(i64);
+
+impl fmt::Display for ListId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for ListId {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        s.parse().map(Self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Playlist {
+    pub id: ListId,
+    pub name: String,
+    /// In order, and kept when a track leaves the library.
+    pub track_ids: Vec<i64>,
+}
 
 impl ListId {
     /// Created by migration v12.
@@ -31,6 +58,34 @@ pub(crate) fn load_items(conn: &Connection, id: ListId) -> Result<Vec<(i64, Opti
         ))
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Every playlist, oldest first.
+pub(crate) fn load_playlists(conn: &Connection) -> Result<Vec<Playlist>> {
+    let mut stmt = conn.prepare(
+        "SELECT l.id, l.name, i.track_id
+         FROM lists l LEFT JOIN list_items i ON i.list_id = l.id
+         WHERE l.kind = 'playlist'
+         ORDER BY l.created_ns, l.id, i.position",
+    )?;
+    let mut rows = stmt.query([])?;
+    let mut playlists: Vec<Playlist> = Vec::new();
+    while let Some(row) = rows.next()? {
+        let id = ListId(row.get("id")?);
+        if playlists.last().is_none_or(|last| last.id != id) {
+            playlists.push(Playlist {
+                id,
+                name: row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+                track_ids: Vec::new(),
+            });
+        }
+        if let (Some(playlist), Some(track_id)) =
+            (playlists.last_mut(), row.get::<_, Option<i64>>("track_id")?)
+        {
+            playlist.track_ids.push(track_id);
+        }
+    }
+    Ok(playlists)
 }
 
 /// Replaces the items of list `id`. Item `i` is saved at position `i`, which

@@ -12,6 +12,7 @@ use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QVariant};
 use lune_core::Grouping;
+use lune_core::Source as Shown;
 
 use crate::list_model::{self, Role, text};
 use crate::session::{self, Change};
@@ -78,12 +79,12 @@ const ROLES: &[Role<Source>] = &[
 
 const CURRENT_ROLE: i32 = list_model::role_id(ROLES, "current");
 
-fn sources(current: Grouping) -> Vec<Source> {
+fn sources(current: Shown) -> Vec<Source> {
     Grouping::ALL
         .into_iter()
         .map(|grouping| Source {
             grouping,
-            current: grouping == current,
+            current: Shown::Library(grouping) == current,
         })
         .collect()
 }
@@ -104,7 +105,7 @@ pub struct SourcesModelRust {
 impl Default for SourcesModelRust {
     fn default() -> Self {
         Self {
-            sources: sources(session::browse().grouping),
+            sources: sources(session::browse().source),
         }
     }
 }
@@ -121,7 +122,7 @@ impl cxx_qt::Initialize for qobject::SourcesModel {
 
 impl qobject::SourcesModel {
     fn browsed(self: Pin<&mut Self>) {
-        self.show(session::browse().grouping);
+        self.show(session::browse().source);
     }
 
     /// Marks the chosen row current at once: the `Change::Browse` that the
@@ -132,10 +133,10 @@ impl qobject::SourcesModel {
             return;
         };
         let grouping = source.grouping;
-        self.show(grouping);
+        self.show(Shown::Library(grouping));
     }
 
-    fn show(mut self: Pin<&mut Self>, current: Grouping) {
+    fn show(mut self: Pin<&mut Self>, current: Shown) {
         let sources = sources(current);
         let changed = changed_rows(&self.sources, &sources);
         if changed.is_empty() {

@@ -2,16 +2,22 @@ use super::*;
 
 #[test]
 fn every_grouping_is_listed_once_in_order_with_only_the_shown_one_current() {
-    for shown in Grouping::ALL {
+    let playlist = Shown::Playlist("7".parse().unwrap());
+    for shown in Grouping::ALL
+        .map(Shown::Library)
+        .into_iter()
+        .chain([playlist])
+    {
         let sources = sources(shown);
         let groupings: Vec<Grouping> = sources.iter().map(|s| s.grouping).collect();
         assert_eq!(groupings, Grouping::ALL);
-        let current: Vec<Grouping> = sources
+        let current: Vec<Shown> = sources
             .iter()
             .filter(|s| s.current)
-            .map(|s| s.grouping)
+            .map(|s| Shown::Library(s.grouping))
             .collect();
-        assert_eq!(current, [shown]);
+        let expected: &[Shown] = if shown == playlist { &[] } else { &[shown] };
+        assert_eq!(current, expected, "{shown:?}");
     }
 }
 
@@ -26,7 +32,7 @@ fn a_new_current_source_changes_only_the_old_and_new_rows() {
             };
             expected.sort_unstable();
             assert_eq!(
-                changed_rows(&sources(from), &sources(to)),
+                changed_rows(&sources(Shown::Library(from)), &sources(Shown::Library(to))),
                 expected,
                 "{from:?} {to:?}"
             );

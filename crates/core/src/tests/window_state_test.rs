@@ -2,7 +2,7 @@ use proptest::prelude::*;
 
 use super::*;
 use crate::SortColumn;
-use crate::test_util::{TempDir, arb_filter_value, arb_grouping, arb_sort, arb_sort_column};
+use crate::test_util::{TempDir, arb_filter_value, arb_sort, arb_sort_column, arb_source};
 
 fn custom() -> WindowState {
     WindowState {
@@ -15,7 +15,7 @@ fn custom() -> WindowState {
         hidden_columns: [SortColumn::FileType, SortColumn::BitRate].into(),
         album_grid: true,
         browse: BrowseState {
-            grouping: Grouping::Artist,
+            source: Source::Library(Grouping::Artist),
             selected: FilterValue::Text("radiohead".into()),
             sort: Some(Sort {
                 column: SortColumn::Duration,
@@ -158,7 +158,7 @@ fn selections_saved_with_a_variant_per_field_are_read() {
 }
 
 #[test]
-fn a_hand_written_browse_section_is_read() {
+fn a_browse_section_saved_before_playlists_is_read() {
     let dir = TempDir::new();
     let path = dir.write(
         "window.toml",
@@ -167,7 +167,7 @@ fn a_hand_written_browse_section_is_read() {
     assert_eq!(
         WindowState::load(&path).unwrap().browse,
         BrowseState {
-            grouping: Grouping::AlbumArtist,
+            source: Source::Library(Grouping::AlbumArtist),
             selected: FilterValue::Text("pj harvey".into()),
             sort: Some(Sort {
                 column: SortColumn::Title,
@@ -202,7 +202,7 @@ fn an_unreadable_browse_value_falls_back_to_its_default_and_keeps_the_rest() {
     let dir = TempDir::new();
     let kept = "grouping = \"year\"\nselected = { year = 1997 }\nalbum_descending = true\n";
     let saved = BrowseState {
-        grouping: Grouping::Year,
+        source: Source::Library(Grouping::Year),
         selected: FilterValue::Year(1997),
         sort: None,
         album_descending: true,
@@ -212,7 +212,20 @@ fn an_unreadable_browse_value_falls_back_to_its_default_and_keeps_the_rest() {
             "unknown-grouping.toml",
             "grouping = \"composer\"",
             BrowseState {
-                grouping: Grouping::default(),
+                source: Source::default(),
+                ..saved.clone()
+            },
+        ),
+        (
+            "unknown-source.toml",
+            "source = { smart_playlist = 3 }",
+            saved.clone(),
+        ),
+        (
+            "known-source.toml",
+            "source = { playlist = 3 }",
+            BrowseState {
+                source: Source::Playlist("3".parse().unwrap()),
                 ..saved.clone()
             },
         ),
@@ -277,13 +290,13 @@ fn arb_size() -> impl Strategy<Value = u32> {
 
 fn arb_window_state() -> impl Strategy<Value = WindowState> {
     let browse = (
-        arb_grouping(),
+        arb_source(),
         arb_filter_value(),
         proptest::option::of(arb_sort()),
         any::<bool>(),
     )
-        .prop_map(|(grouping, selected, sort, album_descending)| BrowseState {
-            grouping,
+        .prop_map(|(source, selected, sort, album_descending)| BrowseState {
+            source,
             selected,
             sort,
             album_descending,

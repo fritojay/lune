@@ -23,11 +23,12 @@ mod watch;
 mod window_state;
 
 pub use browse::{
-    Browsed, Catalog, Field, Filter, FilterValue, Grouping, MenuChoice, Sort, SortColumn,
+    Browsed, Catalog, Field, Filter, FilterValue, Grouping, MenuChoice, Sort, SortColumn, Source,
     TrackFilter, View, after_heading_click, file_type, menu_choice, sort_state,
 };
 pub use error::{CoreError, Result};
 pub use library::Library;
+pub use lists::{ListId, Playlist};
 pub use paths::{
     default_config_path, default_db_path, default_log_path, default_thumbnail_dir,
     window_state_path,

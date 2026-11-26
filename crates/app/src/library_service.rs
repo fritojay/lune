@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant, SystemTime};
 
-use lune_core::{Catalog, FolderWatcher, Library, MissingTrack, Queue, ScanMode, ScanProgress};
+use lune_core::{
+    Catalog, FolderWatcher, Library, MissingTrack, Playlist, Queue, ScanMode, ScanProgress,
+};
 
 /// How long changes must settle before a watched folder is rescanned.
 const WATCH_DELAY: Duration = Duration::from_secs(2);
@@ -40,8 +42,9 @@ pub enum Job {
 }
 
 pub enum Update {
-    /// The library and saved queue on startup; always the first update.
-    Loaded(Catalog, Queue),
+    /// The library, saved queue, and playlists on startup; always the first
+    /// update.
+    Loaded(Catalog, Queue, Vec<Playlist>),
     /// The library changed on disk or in the folder list.
     Library(Catalog),
     /// The tracks whose files are missing; sent with every `Loaded` and `Library`.
@@ -170,22 +173,28 @@ impl Worker {
         let opened = Library::open(&self.db_path).and_then(|library| {
             let catalog = Catalog::new(library.track_list()?);
             let queue = library.load_queue()?;
-            Ok((library, catalog, queue))
+            let playlists = library.playlists()?;
+            Ok((library, catalog, queue, playlists))
         });
         match opened {
-            Ok((library, catalog, queue)) => {
+            Ok((library, catalog, queue, playlists)) => {
                 tracing::info!(
                     tracks = catalog.len(),
                     queued = queue.len(),
+                    playlists = playlists.len(),
                     "library loaded"
                 );
                 self.library = Some(library);
-                (self.notify)(Update::Loaded(catalog, queue));
+                (self.notify)(Update::Loaded(catalog, queue, playlists));
                 self.publish_missing();
             }
             Err(err) => {
                 self.error(format!("Could not open the library: {err}"));
-                (self.notify)(Update::Loaded(Catalog::new(Vec::new()), Queue::default()));
+                (self.notify)(Update::Loaded(
+                    Catalog::new(Vec::new()),
+                    Queue::default(),
+                    Vec::new(),
+                ));
             }
         }
 

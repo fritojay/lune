@@ -1,4 +1,4 @@
-//! The search/filter object: the grouping, the filter pane's values, the
+//! The search/filter object: the source, the filter pane's values, the
 //! selected value, the search text, and the column sort. Each change
 //! recomputes the main pane's view (`session::set_view`).
 
@@ -15,8 +15,8 @@ use std::sync::mpsc::{self, Sender};
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use lune_core::{
-    BrowseState, Filter, FilterValue, Grouping, Library, MenuChoice, TrackFilter, View,
-    after_heading_click, menu_choice, sort_state,
+    BrowseState, Filter, FilterValue, Grouping, Library, ListId, MenuChoice, Source, TrackFilter,
+    View, after_heading_click, menu_choice, sort_state,
 };
 
 use crate::format;
@@ -50,7 +50,7 @@ pub mod qobject {
         #[qproperty(i32, track_count, cxx_name = "trackCount", READ, NOTIFY)]
         #[qproperty(QString, sort_column, cxx_name = "sortColumn", READ, NOTIFY)]
         #[qproperty(bool, sort_descending, cxx_name = "sortDescending", READ, NOTIFY)]
-        /// Whether album order has a direction to pick in this grouping.
+        /// Whether album order has a direction to pick in this source.
         #[qproperty(bool, album_directional, cxx_name = "albumDirectional", READ, NOTIFY)]
         type FilterModel = super::FilterModelRust;
     }
@@ -60,6 +60,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setGrouping"]
         fn set_grouping_from_qml(self: Pin<&mut FilterModel>, grouping: &QString);
+
+        /// Playlists go by their `ListId` as text.
+        #[qinvokable]
+        #[cxx_name = "showPlaylist"]
+        fn show_playlist(self: Pin<&mut FilterModel>, id: &QString);
 
         #[qinvokable]
         fn select(self: Pin<&mut FilterModel>, row: i32);
@@ -156,7 +161,7 @@ impl Default for FilterModelRust {
             track_count: 0,
             sort_column: QString::from(sort_column),
             sort_descending,
-            album_directional: state.grouping.has_album_direction(),
+            album_directional: state.source.has_album_direction(),
             state,
             rows: Vec::new(),
             search: TrackFilter::All,
@@ -204,6 +209,7 @@ impl cxx_qt::Initialize for qobject::FilterModel {
         session::on_change(self.qt_thread(), |model, change| match change {
             Change::Catalog => model.reload(),
             Change::Played => model.played(),
+            Change::Playlists => model.playlists_changed(),
             Change::View { .. } | Change::Missing | Change::Queue | Change::Browse => {}
         });
     }
@@ -230,7 +236,15 @@ impl qobject::FilterModel {
         let Some(grouping) = Grouping::from_name(&grouping.to_string()) else {
             return;
         };
-        self.as_mut().show(grouping, FilterValue::All);
+        self.as_mut()
+            .show(Source::Library(grouping), FilterValue::All);
+    }
+
+    fn show_playlist(mut self: Pin<&mut Self>, id: &QString) {
+        let Ok(id) = id.to_string().parse::<ListId>() else {
+            return;
+        };
+        self.as_mut().show(Source::Playlist(id), FilterValue::All);
     }
 
     fn show_album(mut self: Pin<&mut Self>, track_id: i64) {
@@ -238,13 +252,13 @@ impl qobject::FilterModel {
             return;
         };
         self.as_mut().drop_search();
-        self.as_mut().show(Grouping::Album, album);
+        self.as_mut().show(Source::Library(Grouping::Album), album);
         self.search_cleared();
     }
 
-    fn show(mut self: Pin<&mut Self>, grouping: Grouping, selected: FilterValue) {
+    fn show(mut self: Pin<&mut Self>, source: Source, selected: FilterValue) {
         let mut this = self.as_mut().rust_mut();
-        this.state.grouping = grouping;
+        this.state.source = source;
         this.state.selected = selected;
         self.recompute(true);
     }
@@ -262,7 +276,13 @@ impl qobject::FilterModel {
     }
 
     fn played(self: Pin<&mut Self>) {
-        if self.state.grouping == Grouping::RecentlyPlayed {
+        if self.state.source == Source::Library(Grouping::RecentlyPlayed) {
+            self.recompute(false);
+        }
+    }
+
+    fn playlists_changed(self: Pin<&mut Self>) {
+        if matches!(self.state.source, Source::Playlist(_)) {
             self.recompute(false);
         }
     }
@@ -278,7 +298,7 @@ impl qobject::FilterModel {
         let choice = menu_choice(
             self.state.sort,
             self.state.album_descending,
-            self.state.grouping.has_album_direction(),
+            self.state.source.has_album_direction(),
             &column.to_string(),
             descending,
         );
@@ -327,7 +347,9 @@ impl qobject::FilterModel {
     /// Rebuilds the filter pane, keeping the selection if it still has
     /// tracks (otherwise "All"), and then the view.
     fn recompute(mut self: Pin<&mut Self>, reset: bool) {
-        let browsed = session::catalog().map(|catalog| catalog.browse(&self.state, &self.search));
+        let playlists = session::playlists();
+        let browsed =
+            session::catalog().map(|catalog| catalog.browse(&self.state, &playlists, &self.search));
         if let Some(browsed) = &browsed {
             let selected = browsed.filters[browsed.selected_row].value.clone();
             self.as_mut().rust_mut().state.selected = selected;
@@ -352,7 +374,7 @@ impl qobject::FilterModel {
         let Some(catalog) = session::catalog() else {
             return;
         };
-        let view = catalog.browsed_view(&self.state, &self.search);
+        let view = catalog.browsed_view(&self.state, &session::playlists(), &self.search);
         self.show_view(view, true);
     }
 
@@ -364,7 +386,7 @@ impl qobject::FilterModel {
             self,
             album_directional,
             album_directional_changed,
-            state.grouping.has_album_direction()
+            state.source.has_album_direction()
         );
         set!(
             self,
@@ -382,9 +404,10 @@ impl qobject::FilterModel {
     }
 
     fn show_view(mut self: Pin<&mut Self>, view: View, reset: bool) {
-        let title = match self.filter(self.current_row) {
-            Some(filter) => format::filter_label(filter),
-            None => format::filter_label(&all(self.state.grouping)),
+        let title = match (self.state.source, self.filter(self.current_row)) {
+            (Source::Playlist(id), _) => playlist_name(id),
+            (Source::Library(_), Some(filter)) => format::filter_label(filter),
+            (Source::Library(grouping), None) => format::filter_label(&all(grouping)),
         };
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
         session::set_view(view, reset);
@@ -403,6 +426,12 @@ impl qobject::FilterModel {
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
         list_model::role_names(ROLES)
     }
+}
+
+fn playlist_name(id: ListId) -> String {
+    let playlists = session::playlists();
+    let playlist = playlists.iter().find(|p| p.id == id);
+    playlist.map(|p| p.name.clone()).unwrap_or_default()
 }
 
 fn all(grouping: Grouping) -> Filter {

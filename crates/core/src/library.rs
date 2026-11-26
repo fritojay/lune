@@ -5,6 +5,7 @@ use std::time::SystemTime;
 use rusqlite::Connection;
 
 use crate::art;
+use crate::lists::{self, Playlist};
 use crate::query::{self, AlbumRow, LibraryStats, ListTrack, MissingTrack};
 use crate::queue::{self, Queue};
 use crate::scan::{self, ScanMode, ScanProgress, ScanReport};
@@ -115,6 +116,10 @@ impl Library {
 
     pub fn load_queue(&self) -> Result<Queue> {
         queue::load(&self.conn)
+    }
+
+    pub fn playlists(&self) -> Result<Vec<Playlist>> {
+        lists::load_playlists(&self.conn)
     }
 
     pub fn save_queue(&mut self, queue: &Queue) -> Result<()> {

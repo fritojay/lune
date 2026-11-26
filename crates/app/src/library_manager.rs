@@ -120,8 +120,9 @@ impl cxx_qt::Initialize for qobject::LibraryManager {
 impl qobject::LibraryManager {
     fn apply(mut self: Pin<&mut Self>, update: Update) {
         match update {
-            Update::Loaded(catalog, queue) => {
+            Update::Loaded(catalog, queue, playlists) => {
                 *session::lock_queue() = queue;
+                session::set_playlists(playlists);
                 session::set_catalog(catalog);
             }
             Update::Library(catalog) => {

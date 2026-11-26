@@ -84,7 +84,7 @@ impl Harness {
 
     fn loaded_size(&self) -> usize {
         self.wait_for(|u| match u {
-            Update::Loaded(catalog, _) => Some(catalog.len()),
+            Update::Loaded(catalog, _, _) => Some(catalog.len()),
             _ => None,
         })
     }
@@ -128,6 +128,22 @@ fn two_folders() -> TempDir {
     dir.wav("a/Artist/2.wav");
     dir.wav("b/1.wav");
     dir
+}
+
+#[test]
+fn the_saved_playlists_arrive_with_the_library() {
+    let dir = two_folders();
+    prescanned(&dir, &["a"]);
+    let saved = Library::open(&Harness::db(&dir))
+        .unwrap()
+        .playlists()
+        .unwrap();
+    let h = Harness::start(dir);
+    let loaded = h.wait_for(|u| match u {
+        Update::Loaded(_, _, playlists) => Some(playlists),
+        _ => None,
+    });
+    assert_eq!(loaded, saved);
 }
 
 #[test]

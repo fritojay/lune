@@ -4,7 +4,9 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 
 use super::*;
-use crate::test_util::{arb_grouping, arb_search, arb_sort, arb_sort_column, arb_tracks};
+use crate::test_util::{
+    arb_filter_value, arb_grouping, arb_list_id, arb_search, arb_sort, arb_sort_column, arb_tracks,
+};
 
 /// Tracks must be passed in catalog (album artist) order, like `track_list`.
 fn track(id: i64, album_artist: &str, album_id: i64, album: &str, year: Option<i32>) -> ListTrack {
@@ -1087,8 +1089,13 @@ proptest! {
             let filters = catalog.filters(grouping, &TrackFilter::All);
             filters[pick.index(filters.len())].value.clone()
         };
-        let state = BrowseState { grouping, selected, sort, album_descending };
-        let browsed = catalog.browse(&state, &search);
+        let state = BrowseState {
+            source: Source::Library(grouping),
+            selected,
+            sort,
+            album_descending,
+        };
+        let browsed = catalog.browse(&state, &[], &search);
         let filters = if album_descending {
             catalog.filters_newest_first(grouping, &search)
         } else {
@@ -1119,9 +1126,65 @@ proptest! {
         }
 
         let corrected = BrowseState { selected: shown.value.clone(), ..state.clone() };
-        prop_assert_eq!(&catalog.browsed_view(&corrected, &search), view);
+        prop_assert_eq!(&catalog.browsed_view(&corrected, &[], &search), view);
         if listed.is_none() {
-            prop_assert_eq!(&catalog.browse(&corrected, &search), &browsed);
+            prop_assert_eq!(&catalog.browse(&corrected, &[], &search), &browsed);
+        }
+    }
+
+    #[test]
+    fn a_playlist_shows_its_tracks_in_catalog_that_pass_the_search_in_order_with_repeats(
+        tracks in arb_tracks(),
+        track_ids in prop::collection::vec(-2..22i64, 0..30),
+        id in arb_list_id(),
+        listed in any::<bool>(),
+        selected in arb_filter_value(),
+        sort in prop::option::of(arb_sort()),
+        album_descending in any::<bool>(),
+        search in arb_search(),
+    ) {
+        let catalog = Catalog::new(tracks);
+        let playlist = Playlist { id, name: "Mix".to_owned(), track_ids: track_ids.clone() };
+        let playlists = if listed { vec![playlist] } else { Vec::new() };
+        let state = BrowseState { source: Source::Playlist(id), selected, sort, album_descending };
+        let browsed = catalog.browse(&state, &playlists, &search);
+
+        let expected: Vec<i64> = if listed { track_ids } else { Vec::new() }
+            .into_iter()
+            .filter(|id| catalog.by_id.get(id).is_some_and(|&i| search.passes(&catalog, i)))
+            .collect();
+        let ids = |view: &View| -> Vec<i64> {
+            view.tracks.iter().map(|&i| catalog.track(i).unwrap().id).collect()
+        };
+        prop_assert_eq!(browsed.filters.len(), 1);
+        prop_assert_eq!(&browsed.filters[0].value, &FilterValue::All);
+        prop_assert_eq!(browsed.filters[0].tracks, expected.len());
+        prop_assert_eq!(browsed.selected_row, 0);
+        prop_assert_eq!(browsed.view.sort, sort);
+        prop_assert_eq!(&catalog.browsed_view(&state, &playlists, &search), &browsed.view);
+        match sort {
+            Some(sort) => {
+                let mut shown = ids(&browsed.view);
+                let mut expected = expected.clone();
+                shown.sort_unstable();
+                expected.sort_unstable();
+                prop_assert_eq!(shown, expected);
+                let unsorted = BrowseState { sort: None, ..state.clone() };
+                let unsorted = catalog.browsed_view(&unsorted, &playlists, &search);
+                prop_assert_eq!(&catalog.sorted(unsorted, sort), &browsed.view);
+            }
+            None => {
+                prop_assert_eq!(ids(&browsed.view), expected);
+                let album = |at: usize| catalog.track(browsed.view.tracks[at]).unwrap().album_id;
+                let mut end = 0;
+                for run in &browsed.view.albums {
+                    prop_assert_eq!(run.start, end);
+                    prop_assert!(run.clone().all(|at| album(at) == album(run.start)));
+                    prop_assert!(end == 0 || album(end - 1) != album(run.start));
+                    end = run.end;
+                }
+                prop_assert_eq!(end, browsed.view.len());
+            }
         }
     }
 }

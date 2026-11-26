@@ -6,7 +6,8 @@ use proptest::prelude::*;
 use proptest::sample::select;
 use rusqlite::{Connection, named_params};
 
-use crate::browse::{FilterValue, Grouping, Sort, SortColumn, TrackFilter};
+use crate::browse::{FilterValue, Grouping, Sort, SortColumn, Source, TrackFilter};
+use crate::lists::ListId;
 use crate::normalize;
 use crate::query::ListTrack;
 use crate::tags::TrackMeta;
@@ -212,6 +213,17 @@ pub fn library_with_tracks(conn: &Connection, ids: &[i64]) {
 
 pub fn arb_grouping() -> impl Strategy<Value = Grouping> {
     select(&Grouping::ALL[..])
+}
+
+pub fn arb_list_id() -> impl Strategy<Value = ListId> {
+    any::<i64>().prop_map(|id| id.to_string().parse().unwrap())
+}
+
+pub fn arb_source() -> impl Strategy<Value = Source> {
+    prop_oneof![
+        arb_grouping().prop_map(Source::Library),
+        arb_list_id().prop_map(Source::Playlist),
+    ]
 }
 
 pub fn arb_sort_column() -> impl Strategy<Value = SortColumn> {

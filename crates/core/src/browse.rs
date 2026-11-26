@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use serde::de::IntoDeserializer;
 use serde::{Deserialize, Serialize};
 
+use crate::lists::{ListId, Playlist};
 use crate::normalize;
 use crate::query::ListTrack;
 use crate::scan::unix_ns;
@@ -82,6 +83,31 @@ impl Grouping {
             Self::RecentlyPlayed => (Order::Played, Field::Album),
         };
         GroupingDef { order, field }
+    }
+}
+
+/// Where the main pane's tracks come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    Library(Grouping),
+    /// Its filter pane lists only "All", and its album order is its own.
+    Playlist(ListId),
+}
+
+impl Default for Source {
+    fn default() -> Self {
+        Self::Library(Grouping::default())
+    }
+}
+
+impl Source {
+    /// [`Grouping::has_album_direction`]; a playlist has none.
+    pub fn has_album_direction(self) -> bool {
+        match self {
+            Self::Library(grouping) => grouping.has_album_direction(),
+            Self::Playlist(_) => false,
+        }
     }
 }
 
@@ -773,8 +799,22 @@ impl Catalog {
 
     /// The tracks that pass `filter`, in `grouping`'s order, grouped by album.
     pub fn view(&self, grouping: Grouping, filter: &TrackFilter) -> View {
+        self.view_in(self.order(grouping), filter)
+    }
+
+    /// The tracks of `track_ids` that pass `filter`, in that order and with
+    /// repeats, grouped into runs of one album. Ids not in the catalog are
+    /// left out.
+    pub fn playlist_view(&self, track_ids: &[i64], filter: &TrackFilter) -> View {
+        let order = track_ids
+            .iter()
+            .filter_map(|id| self.by_id.get(id).copied());
+        self.view_in(order, filter)
+    }
+
+    fn view_in(&self, order: impl Iterator<Item = usize>, filter: &TrackFilter) -> View {
         let mut view = View::default();
-        for i in self.order(grouping) {
+        for i in order {
             if !filter.passes(self, i) {
                 continue;
             }
@@ -830,19 +870,47 @@ impl Catalog {
     }
 
     /// The filter pane and main pane for `state`, counting only tracks that
-    /// pass `search`.
-    pub fn browse(&self, state: &BrowseState, search: &TrackFilter) -> Browsed {
+    /// pass `search`. A playlist not in `playlists` shows no tracks.
+    pub fn browse(
+        &self,
+        state: &BrowseState,
+        playlists: &[Playlist],
+        search: &TrackFilter,
+    ) -> Browsed {
+        let grouping = match state.source {
+            Source::Library(grouping) => grouping,
+            Source::Playlist(_) => {
+                let state = BrowseState {
+                    selected: FilterValue::All,
+                    ..*state
+                };
+                let view = self.browsed_view(&state, playlists, search);
+                let all = Filter {
+                    value: FilterValue::All,
+                    // Unused: `All` has no value to label.
+                    field: Grouping::default().field(),
+                    label: String::new(),
+                    detail: None,
+                    tracks: view.len(),
+                };
+                return Browsed {
+                    filters: vec![all],
+                    selected_row: 0,
+                    view,
+                };
+            }
+        };
         let filters = if state.album_descending {
-            self.filters_newest_first(state.grouping, search)
+            self.filters_newest_first(grouping, search)
         } else {
-            self.filters(state.grouping, search)
+            self.filters(grouping, search)
         };
         let selected_row = filters
             .iter()
             .position(|f| f.value == state.selected)
             .unwrap_or(0);
         let selected = filters[selected_row].value.clone();
-        let view = self.browsed_view(&BrowseState { selected, ..*state }, search);
+        let view = self.browsed_view(&BrowseState { selected, ..*state }, playlists, search);
         Browsed {
             filters,
             selected_row,
@@ -852,13 +920,29 @@ impl Catalog {
 
     /// [`Catalog::browse`]'s view, without the filter pane. Empty when
     /// `state.selected` no longer exists.
-    pub fn browsed_view(&self, state: &BrowseState, search: &TrackFilter) -> View {
-        let selected = TrackFilter::Field(state.grouping.field(), state.selected.clone());
-        let view = self.view(state.grouping, &search.clone().and(selected));
-        match state.sort {
-            Some(sort) => self.sorted(view, sort),
-            None if state.album_descending => self.newest_first(view, state.grouping),
-            None => view,
+    pub fn browsed_view(
+        &self,
+        state: &BrowseState,
+        playlists: &[Playlist],
+        search: &TrackFilter,
+    ) -> View {
+        let view = match state.source {
+            Source::Library(grouping) => {
+                let selected = TrackFilter::Field(grouping.field(), state.selected.clone());
+                self.view(grouping, &search.clone().and(selected))
+            }
+            Source::Playlist(id) => {
+                let track_ids = playlists.iter().find(|p| p.id == id);
+                let track_ids = track_ids.map_or(&[][..], |p| &p.track_ids);
+                self.playlist_view(track_ids, search)
+            }
+        };
+        match (state.sort, state.source) {
+            (Some(sort), _) => self.sorted(view, sort),
+            (None, Source::Library(grouping)) if state.album_descending => {
+                self.newest_first(view, grouping)
+            }
+            (None, _) => view,
         }
     }
 

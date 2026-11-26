@@ -8,7 +8,7 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{CoreError, FilterValue, Grouping, Result, Sort, SortColumn};
+use crate::{CoreError, FilterValue, Grouping, Result, Sort, SortColumn, Source};
 
 /// Smallest window a saved size can restore, so a bad value can't leave the
 /// window too small to find and resize.
@@ -35,20 +35,43 @@ pub struct WindowState {
     pub browse: BrowseState,
 }
 
-/// What the main pane shows: the grouping, the filter value selected in it,
+/// What the main pane shows: the source, the filter value selected in it,
 /// the column sort (`None` is album order), and the direction of album
 /// order's years, which a column sort leaves as it was.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(from = "SavedBrowse")]
 pub struct BrowseState {
-    #[serde(deserialize_with = "or_default")]
-    pub grouping: Grouping,
-    #[serde(deserialize_with = "or_default")]
+    pub source: Source,
     pub selected: FilterValue,
-    #[serde(deserialize_with = "or_default")]
     pub sort: Option<Sort>,
-    #[serde(deserialize_with = "or_default")]
     pub album_descending: bool,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct SavedBrowse {
+    #[serde(deserialize_with = "or_default")]
+    source: Option<Source>,
+    /// Saved instead of `source` before there were playlists.
+    #[serde(deserialize_with = "or_default")]
+    grouping: Grouping,
+    #[serde(deserialize_with = "or_default")]
+    selected: FilterValue,
+    #[serde(deserialize_with = "or_default")]
+    sort: Option<Sort>,
+    #[serde(deserialize_with = "or_default")]
+    album_descending: bool,
+}
+
+impl From<SavedBrowse> for BrowseState {
+    fn from(saved: SavedBrowse) -> Self {
+        Self {
+            source: saved.source.unwrap_or(Source::Library(saved.grouping)),
+            selected: saved.selected,
+            sort: saved.sort,
+            album_descending: saved.album_descending,
+        }
+    }
 }
 
 impl Default for WindowState {
@@ -147,7 +170,7 @@ fn browse_or_default<'de, D: Deserializer<'de>>(
     }))
 }
 
-/// A browse value this version can't read, such as a grouping from a newer
+/// A browse value this version can't read, such as a source from a newer
 /// one, falls back to its default without losing the others.
 fn or_default<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(
     deserializer: D,
