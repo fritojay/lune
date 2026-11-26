@@ -166,7 +166,7 @@ cargo run --release -p lune-cli --features synthetic -- gen-library /tmp/lune-be
 cargo run --release -p lune-app --bin lune -- --db /tmp/lune-bench.db --bench
 ```
 
-`--bench` scrolls the list for about 20 seconds (steady scrolling, fast flicks, then jumps like dragging the scroll bar), prints the time to the first frame and to the filled list, frame-time statistics per phase, and memory, then quits. Don't touch the window while it runs. A "dropped" frame is one longer than 1.5 refresh intervals.
+`--bench` scrolls the list for about 20 seconds (steady scrolling, fast flicks, then jumps like dragging the scroll bar), then the album grid for 5, prints the time to the first frame and to the filled list, frame-time statistics per phase, and memory, then quits. Don't touch the window while it runs. A "dropped" frame is one longer than 1.5 refresh intervals.
 
 ## Play music with the CLI
 

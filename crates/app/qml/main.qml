@@ -486,6 +486,8 @@ ApplicationWindow {
     BenchRun {
         id: benchRun
         list: trackPane.list
+        grid: trackPane.gridList
+        onGridRequested: layout.albumGrid = true
         onPhaseStarted: name => bench.beginPhase(name)
         onFrame: seconds => bench.frame(seconds)
         onFinished: {

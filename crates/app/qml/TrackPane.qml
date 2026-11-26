@@ -52,6 +52,7 @@ ColumnLayout {
     readonly property int tracksLeft: flat ? 0 : 2 * Theme.albumPadding + Theme.coverSize
     readonly property int tracksRight: flat ? 0 : Theme.albumPadding
     readonly property TrackList list: albumList
+    readonly property ListView gridList: albumRows
 
     signal sortClicked(string column)
     signal sortChosen(string column, bool descending)

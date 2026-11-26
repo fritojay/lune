@@ -1,9 +1,12 @@
 import QtQuick
 
-// --bench: steady scrolling, fast flicks, then jumps across the list.
+// --bench: steady scrolling, fast flicks, then jumps across the list, and
+// steady scrolling of the album grid.
 Item {
     id: benchRun
     required property ListView list
+    required property ListView grid
+    signal gridRequested()
     signal phaseStarted(string name)
     signal frame(real seconds)
     signal finished()
@@ -43,6 +46,16 @@ Item {
         ScriptAction { script: benchRun.phaseStarted("jump") }
         ScriptAction { script: jumps.start() }
         PauseAnimation { duration: 4000 }
+        ScriptAction { script: benchRun.gridRequested() }
+        PauseAnimation { duration: 1000 }
+        ScriptAction { script: benchRun.phaseStarted("grid") }
+        NumberAnimation {
+            target: benchRun.grid
+            property: "contentY"
+            from: 0
+            to: Math.min(30000, benchRun.grid.contentHeight - benchRun.grid.height)
+            duration: 5000
+        }
         ScriptAction {
             script: {
                 frames.stop()
