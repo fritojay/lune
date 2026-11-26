@@ -267,6 +267,8 @@ impl Worker {
         if !lune_core::remove_folder(&mut self.folders, folder) {
             return false;
         }
+        // Added back, it is scanned quickly, which doesn't count what it skips.
+        self.skipped.remove(folder);
         self.publish_folders();
         self.watch();
         self.prune()

@@ -749,4 +749,19 @@ fn what_a_full_scan_left_out_is_listed_with_its_folder_not_reported_as_an_error(
         left_out,
         "Not added: 1 linked file (links aren't followed)."
     );
+    // Added back, it has had no full scan since, so nothing is said yet.
+    h.service.send(Job::RemoveFolder(a.clone()));
+    h.wait_for(|u| match u {
+        Update::Folders(folders) => folders.iter().all(|f| f.path != a).then_some(()),
+        _ => None,
+    });
+    h.service.send(Job::AddFolder(a.clone()));
+    let left_out = h.wait_for(|u| match u {
+        Update::Folders(folders) => folders
+            .into_iter()
+            .find(|f| f.path == a)
+            .map(|f| f.left_out),
+        _ => None,
+    });
+    assert_eq!(left_out, None);
 }
