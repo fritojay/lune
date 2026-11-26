@@ -179,11 +179,11 @@ Pane {
                     onVolumeMoved: volume => nowPlayingBar.volumeMoved(volume)
                     onMuteToggled: nowPlayingBar.muteToggled()
                 }
-                KeyToolButton {
+                ToggleToolButton {
                     icon.source: "icons/queue.svg"
                     icon.color: palette.buttonText
-                    checked: nowPlayingBar.queueShown
-                    onClicked: nowPlayingBar.queueToggled(!checked)
+                    toggledOn: nowPlayingBar.queueShown
+                    onToggleRequested: on => nowPlayingBar.queueToggled(on)
                     ToolTip.visible: hovered
                     ToolTip.text: checked ? qsTr("Hide Queue") : qsTr("Show Queue")
                 }

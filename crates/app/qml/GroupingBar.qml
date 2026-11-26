@@ -41,9 +41,13 @@ RowLayout {
             hoverEnabled: true
             text: groupingBar.titles[sourceId]
             font.bold: current
+            // Checkable, so assistive tech announces the chosen tab.
+            checkable: true
             checked: current
             onClicked: {
                 sources.choose(index)
+                // A click toggles `checked`, which breaks its binding.
+                checked = Qt.binding(() => tab.current)
                 groupingBar.sourceChosen(kind, sourceId)
             }
             Keys.onReturnPressed: click()

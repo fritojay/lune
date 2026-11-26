@@ -88,11 +88,11 @@ ColumnLayout {
                 text: qsTr("%L1 tracks · %2").arg(queuePane.count).arg(queuePane.totalDuration)
             }
         }
-        KeyToolButton {
+        ToggleToolButton {
             icon.source: "icons/shuffle.svg"
             icon.color: checked ? palette.highlight : palette.buttonText
-            checked: queuePane.shuffle
-            onClicked: queuePane.shuffleToggled(!checked)
+            toggledOn: queuePane.shuffle
+            onToggleRequested: on => queuePane.shuffleToggled(on)
             ToolTip.visible: hovered
             ToolTip.text: checked ? qsTr("Shuffle is on") : qsTr("Shuffle is off")
         }

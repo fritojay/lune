@@ -19,7 +19,6 @@ RowLayout {
         icon.color: palette.buttonText
         // The first click shows the slider; clicking again while it shows mutes.
         onClicked: volumePopup.opened ? volumeControl.muteToggled() : volumePopup.open()
-        // Space is the play/pause shortcut, so Return is how the keyboard clicks.
 
         Popup {
             id: volumePopup

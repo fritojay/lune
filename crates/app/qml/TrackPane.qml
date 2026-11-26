@@ -196,7 +196,7 @@ ColumnLayout {
         }
     }
 
-    component ViewButton: KeyToolButton {
+    component ViewButton: ToggleToolButton {
         icon.color: checked ? palette.highlight : palette.buttonText
         ToolTip.visible: hovered
     }
@@ -216,14 +216,14 @@ ColumnLayout {
         }
         ViewButton {
             icon.source: "icons/list.svg"
-            checked: !trackPane.albumGrid
-            onClicked: trackPane.albumGridChosen(false)
+            toggledOn: !trackPane.albumGrid
+            onToggleRequested: trackPane.albumGridChosen(false)
             ToolTip.text: qsTr("Show albums as a list")
         }
         ViewButton {
             icon.source: "icons/grid.svg"
-            checked: trackPane.albumGrid
-            onClicked: trackPane.albumGridChosen(true)
+            toggledOn: trackPane.albumGrid
+            onToggleRequested: trackPane.albumGridChosen(true)
             ToolTip.text: qsTr("Show albums as a grid")
         }
     }
