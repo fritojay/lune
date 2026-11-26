@@ -12,7 +12,6 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Time;
 
-use crate::error::Chain;
 use crate::mp4_gapless::{self, Mp4Trim};
 use crate::units::{SUPPORTED_RATES, duration_to_frames, frames_to_duration};
 use crate::{EngineError, Result};
@@ -120,7 +119,7 @@ impl Source {
             match mp4_gapless::read_trim(path, rate) {
                 Ok(trim) => trim,
                 Err(err) => {
-                    tracing::warn!(err = %Chain(&err), path = %path.display(), "could not read MP4 gapless info");
+                    tracing::warn!(err = %err, path = %path.display(), "could not read MP4 gapless info");
                     None
                 }
             }

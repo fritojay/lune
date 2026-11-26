@@ -12,7 +12,6 @@ use std::time::Duration;
 use rtrb::Producer;
 
 use crate::convert::Converter;
-use crate::error::Chain;
 use crate::output::{OutputSpec, Waker};
 use crate::queue::{EntryId, PlayQueue, QueueEntry};
 use crate::render::{DiscardRange, Shared};
@@ -263,7 +262,7 @@ impl Decoder {
                 });
             }
             Err(err) => {
-                tracing::warn!(err = %Chain(&err), "seek failed; skipping to the next track");
+                tracing::warn!(err = %err, "seek failed; skipping to the next track");
                 let next = self.queue.next_after(entry.id);
                 self.start_entry(next, Duration::ZERO);
             }
@@ -306,7 +305,7 @@ impl Decoder {
             match Source::open(&e.path) {
                 Ok(source) => return Some((e, source)),
                 Err(err) => {
-                    tracing::warn!(err = %Chain(&err), "skipping unplayable track");
+                    tracing::warn!(err = %err, "skipping unplayable track");
                     entry = self.queue.previous_before(e.id);
                 }
             }
@@ -333,14 +332,14 @@ impl Decoder {
                     return;
                 }
                 Err(err) => {
-                    tracing::warn!(err = %Chain(&err), "skipping unplayable track");
+                    tracing::warn!(err = %err, "skipping unplayable track");
                     entry = self.queue.next_after(e.id);
                 }
             }
         }
         // End of the queue: flush the resampler tail and mark where playback ends.
         if let Err(err) = self.converter.finish(&mut self.out) {
-            tracing::warn!(err = %Chain(&err), "resampler flush failed");
+            tracing::warn!(err = %err, "resampler flush failed");
         }
         let pending = ((self.out.len() - self.out_pos) / self.spec.channels) as u64;
         lock(&self.timeline).end = Some(self.written + pending);
@@ -362,7 +361,7 @@ impl Decoder {
                 {
                     Ok(index) => index,
                     Err(err) => {
-                        tracing::error!(err = %Chain(&err), "cannot convert audio; skipping track");
+                        tracing::error!(err = %err, "cannot convert audio; skipping track");
                         self.advance();
                         return;
                     }
@@ -386,13 +385,13 @@ impl Decoder {
                     self.converter
                         .process(chunk.samples, current.entry.gain, &mut self.out)
                 {
-                    tracing::error!(err = %Chain(&err), "cannot convert audio; skipping track");
+                    tracing::error!(err = %err, "cannot convert audio; skipping track");
                     self.advance();
                 }
             }
             Ok(None) => self.advance(),
             Err(err) => {
-                tracing::warn!(err = %Chain(&err), "decode failed; skipping to the next track");
+                tracing::warn!(err = %err, "decode failed; skipping to the next track");
                 self.advance();
             }
         }
@@ -481,7 +480,7 @@ impl Decoder {
         if let Some(target) = from.checked_sub(self.converter_base)
             && let Err(err) = self.converter.finish_at(target, &mut self.out)
         {
-            tracing::warn!(err = %Chain(&err), "resampler flush failed");
+            tracing::warn!(err = %err, "resampler flush failed");
         }
         self.converter = Converter::new(self.spec.rate, self.spec.channels);
         self.converter_base = self.written + (self.out.len() / channels) as u64;

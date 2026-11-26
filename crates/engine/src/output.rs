@@ -17,7 +17,6 @@ use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ErrorKind, FromSample, SampleFormat, SizedSample};
 
-use crate::error::Chain;
 use crate::render::{Renderer, Shared};
 use crate::units::frames_to_duration;
 use crate::{EngineError, Result};
@@ -238,7 +237,7 @@ impl Sleeper {
             Ok(()) => self.asleep = true,
             Err(err) => {
                 self.cannot_pause = true;
-                tracing::info!(err = %Chain(&err), "audio output keeps running while idle");
+                tracing::info!(err = %err, "audio output keeps running while idle");
             }
         }
     }
@@ -254,12 +253,12 @@ impl Sleeper {
             }
             Err(err) if self.restart_failures + 1 < RESTART_ATTEMPTS => {
                 self.restart_failures += 1;
-                tracing::warn!(err = %Chain(&err), "could not restart the audio output; will retry");
+                tracing::warn!(err = %err, "could not restart the audio output; will retry");
             }
             Err(err) => {
                 self.failed = true;
                 shared.output_failed.store(true, Ordering::Release);
-                tracing::error!(err = %Chain(&err), "could not restart the audio output");
+                tracing::error!(err = %err, "could not restart the audio output");
             }
         }
     }
@@ -330,12 +329,12 @@ where
         // Runs on cpal's error path, not inside the data callback.
         match err.kind() {
             // A glitch; macOS reports one now and then under load.
-            ErrorKind::Xrun => tracing::debug!(err = %Chain(&err), "audio output glitch"),
+            ErrorKind::Xrun => tracing::debug!(err = %err, "audio output glitch"),
             kind if stream_failed(kind) => {
                 shared.output_failed.store(true, Ordering::Release);
-                tracing::error!(err = %Chain(&err), "audio output failed");
+                tracing::error!(err = %err, "audio output failed");
             }
-            _ => tracing::info!(err = %Chain(&err), "audio output notice"),
+            _ => tracing::info!(err = %err, "audio output notice"),
         }
     };
     device
@@ -413,19 +412,19 @@ fn run_capture(
             && keep > 0
             && let Err(err) = w.write(&block[..keep])
         {
-            tracing::error!(err = %Chain(&err), "capture write failed; capture stopped");
+            tracing::error!(err = %err, "capture write failed; capture stopped");
             // Finish what was written so the file stays valid.
             if let Some(w) = writer.take()
                 && let Err(err) = w.finish()
             {
-                tracing::error!(err = %Chain(&err), "could not finish capture file");
+                tracing::error!(err = %err, "could not finish capture file");
             }
         }
     }
     if let Some(w) = writer
         && let Err(err) = w.finish()
     {
-        tracing::error!(err = %Chain(&err), "could not finish capture file");
+        tracing::error!(err = %err, "could not finish capture file");
     }
 }
 

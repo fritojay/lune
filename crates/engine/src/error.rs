@@ -28,7 +28,7 @@ pub enum EngineError {
     #[error("the resampler panicked")]
     ResamplerPanic,
 
-    #[error("resampler error")]
+    #[error("resampler error: {0}")]
     Resample(#[source] BoxError),
 
     #[error("unsupported audio format: {rate} Hz, {channels} channels")]
@@ -37,7 +37,7 @@ pub enum EngineError {
     #[error("no audio output device is available")]
     NoOutputDevice,
 
-    #[error("audio output error: {context}")]
+    #[error("audio output error: {context}: {source}")]
     Output {
         context: &'static str,
         #[source]
@@ -68,20 +68,6 @@ impl EngineError {
             context,
             source: Box::new(err),
         }
-    }
-}
-
-pub(crate) struct Chain<'a>(pub &'a (dyn std::error::Error + 'static));
-
-impl std::fmt::Display for Chain<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)?;
-        let mut source = self.0.source();
-        while let Some(err) = source {
-            write!(f, ": {err}")?;
-            source = err.source();
-        }
-        Ok(())
     }
 }
 
