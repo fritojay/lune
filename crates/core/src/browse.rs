@@ -451,6 +451,19 @@ pub struct Filter {
     pub tracks: usize,
 }
 
+impl Filter {
+    /// Every value of `field`, counting `tracks`.
+    pub fn all(field: Field, tracks: usize) -> Self {
+        Self {
+            value: FilterValue::All,
+            field,
+            label: String::new(),
+            detail: None,
+            tracks,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SortColumn {
@@ -808,13 +821,7 @@ impl Catalog {
             ValueOrder::ByValue => values.sort_unstable_by(|a, b| a.1.value.cmp(&b.1.value)),
         }
         let mut filters = Vec::with_capacity(values.len() + 1);
-        filters.push(Filter {
-            value: FilterValue::All,
-            field,
-            label: String::new(),
-            detail: None,
-            tracks: all,
-        });
+        filters.push(Filter::all(field, all));
         filters.extend(values.into_iter().map(|(_, filter)| filter));
         filters
     }
@@ -932,14 +939,8 @@ impl Catalog {
                     ..*state
                 };
                 let view = self.browsed_view(&state, playlists, search);
-                let all = Filter {
-                    value: FilterValue::All,
-                    // Unused: `All` has no value to label.
-                    field: Grouping::default().field(),
-                    label: String::new(),
-                    detail: None,
-                    tracks: view.len(),
-                };
+                // The field is unused: `All` has no value to label.
+                let all = Filter::all(Grouping::default().field(), view.len());
                 return Browsed {
                     filters: vec![all],
                     selected_row: 0,

@@ -461,7 +461,9 @@ impl qobject::FilterModel {
         let title = match (self.state.source, self.filter(self.current_row)) {
             (Source::Playlist { id }, _) => id.map(playlist_name).unwrap_or_default(),
             (Source::Library(_), Some(filter)) => format::filter_label(filter),
-            (Source::Library(grouping), None) => format::filter_label(&all(grouping)),
+            (Source::Library(grouping), None) => {
+                format::filter_label(&Filter::all(grouping.field(), 0))
+            }
         };
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
         let flat = view.flat;
@@ -498,16 +500,6 @@ fn playlist_name(id: ListId) -> String {
     let playlists = session::playlists();
     let playlist = playlists.iter().find(|p| p.id == id);
     playlist.map(|p| p.name.clone()).unwrap_or_default()
-}
-
-fn all(grouping: Grouping) -> Filter {
-    Filter {
-        value: FilterValue::All,
-        field: grouping.field(),
-        label: String::new(),
-        detail: None,
-        tracks: 0,
-    }
 }
 
 /// Why the main pane shows no tracks, when the user can do something about
