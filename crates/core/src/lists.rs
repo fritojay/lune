@@ -8,7 +8,7 @@ use rusqlite::{Connection, Transaction, named_params};
 use crate::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ListId(pub i64);
+pub(crate) struct ListId(i64);
 
 impl ListId {
     /// Created by migration v12.
