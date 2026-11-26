@@ -15,7 +15,8 @@ use std::sync::mpsc::{self, Sender};
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
 use lune_core::{
-    BrowseState, Filter, FilterValue, Grouping, Library, Sort, SortColumn, TrackFilter,
+    BrowseState, Filter, FilterValue, Grouping, Library, MenuChoice, TrackFilter, View,
+    after_heading_click, menu_choice, sort_state,
 };
 
 use crate::format;
@@ -127,63 +128,6 @@ const ROLES: &[Role<Filter>] = &[
     }),
 ];
 
-/// The sort that `sortColumn` and `sortDescending` describe.
-fn sort_of(column: &str, descending: bool) -> Option<Sort> {
-    let column = SortColumn::from_name(column)?;
-    Some(Sort { column, descending })
-}
-
-/// `sortColumn` and `sortDescending` for `sort`, or for album order in
-/// direction `album_descending`.
-fn sort_state(sort: Option<Sort>, album_descending: bool) -> (&'static str, bool) {
-    sort.map_or(("", album_descending), |sort| {
-        (sort.column.name(), sort.descending)
-    })
-}
-
-/// The sort after a click on heading `clicked`, or `None` for a heading
-/// that doesn't exist.
-fn after_click(current: Option<Sort>, clicked: &str) -> Option<Option<Sort>> {
-    Some(Sort::after_click(current, SortColumn::from_name(clicked)?))
-}
-
-/// The sort picked from the menu, or `None` for a column that doesn't exist
-/// or the sort already in effect.
-fn chosen(current: Option<Sort>, column: &str, descending: bool) -> Option<Option<Sort>> {
-    let sort = if column.is_empty() {
-        None
-    } else {
-        Some(sort_of(column, descending)?)
-    };
-    (sort != current).then_some(sort)
-}
-
-/// What a pick from the sort menu changes.
-#[derive(Debug, PartialEq, Eq)]
-enum MenuChoice {
-    Sort(Option<Sort>),
-    /// Album order's direction, where descending puts the newest albums first.
-    AlbumDescending(bool),
-}
-
-/// What picking `column` and `descending` from the sort menu changes, or
-/// `None` for a column that doesn't exist or what's already in effect. ""
-/// is album order: from a column sort it comes back in the direction it
-/// had, and in album order it sets that direction if it is `directional`.
-fn menu_choice(
-    current: Option<Sort>,
-    album_descending: bool,
-    directional: bool,
-    column: &str,
-    descending: bool,
-) -> Option<MenuChoice> {
-    if !column.is_empty() || current.is_some() {
-        return chosen(current, column, descending).map(MenuChoice::Sort);
-    }
-    (directional && descending != album_descending)
-        .then_some(MenuChoice::AlbumDescending(descending))
-}
-
 pub struct FilterModelRust {
     loading: bool,
     grouping: QString,
@@ -194,7 +138,8 @@ pub struct FilterModelRust {
     /// The direction of `sortColumn`'s sort, or of album order without one.
     sort_descending: bool,
     album_directional: bool,
-    album_descending: bool,
+    /// What the properties show. Until the first `reload`, the last run's.
+    state: BrowseState,
     rows: Vec<Filter>,
     /// Tracks matching the search; `All` without a search.
     search: TrackFilter,
@@ -202,22 +147,20 @@ pub struct FilterModelRust {
     searches: Option<Sender<(u64, String)>>,
 }
 
-/// Starts from the last run's grouping and sort; the first `reload` restores
-/// its selection.
 impl Default for FilterModelRust {
     fn default() -> Self {
-        let saved = session::browse();
-        let (sort_column, sort_descending) = sort_state(saved.sort, saved.album_descending);
+        let state = session::browse();
+        let (sort_column, sort_descending) = sort_state(state.sort, state.album_descending);
         Self {
             loading: true,
-            grouping: QString::from(saved.grouping.name()),
+            grouping: QString::from(state.grouping.name()),
             current_row: 0,
             title: QString::default(),
             track_count: 0,
             sort_column: QString::from(sort_column),
             sort_descending,
-            album_directional: saved.grouping.has_album_direction(),
-            album_descending: saved.album_descending,
+            album_directional: state.grouping.has_album_direction(),
+            state,
             rows: Vec::new(),
             search: TrackFilter::All,
             search_generation: 0,
@@ -274,12 +217,7 @@ impl qobject::FilterModel {
     /// exists.
     fn reload(mut self: Pin<&mut Self>) {
         let first = self.loading;
-        let selected = if first {
-            Some(session::browse().selected)
-        } else {
-            self.selected().cloned()
-        };
-        self.as_mut().recompute(selected, first);
+        self.as_mut().recompute(first);
         self.set_loading(false);
     }
 
@@ -287,17 +225,15 @@ impl qobject::FilterModel {
         if generation != self.search_generation {
             return;
         }
-        let selected = self.selected().cloned();
         self.as_mut().rust_mut().search = TrackFilter::Ids(Arc::new(matches));
-        self.recompute(selected, true);
+        self.recompute(true);
     }
 
     fn set_grouping_from_qml(mut self: Pin<&mut Self>, grouping: &QString) {
         let Some(grouping) = Grouping::from_name(&grouping.to_string()) else {
             return;
         };
-        self.as_mut().set_grouping(grouping);
-        self.recompute(None, true);
+        self.as_mut().show(grouping, FilterValue::All);
     }
 
     fn show_album(mut self: Pin<&mut Self>, track_id: i64) {
@@ -305,83 +241,61 @@ impl qobject::FilterModel {
             return;
         };
         self.as_mut().drop_search();
-        self.as_mut().set_grouping(Grouping::Album);
-        self.as_mut().recompute(Some(album), true);
+        self.as_mut().show(Grouping::Album, album);
         self.search_cleared();
     }
 
-    fn set_grouping(mut self: Pin<&mut Self>, grouping: Grouping) {
-        set!(
-            self,
-            grouping,
-            grouping_changed,
-            QString::from(grouping.name())
-        );
-        set!(
-            self,
-            album_directional,
-            album_directional_changed,
-            grouping.has_album_direction()
-        );
+    fn show(mut self: Pin<&mut Self>, grouping: Grouping, selected: FilterValue) {
+        let mut this = self.as_mut().rust_mut();
+        this.state.grouping = grouping;
+        this.state.selected = selected;
+        self.recompute(true);
     }
 
     fn select(mut self: Pin<&mut Self>, row: i32) {
-        if row == self.current_row || self.filter(row).is_none() {
+        if row == self.current_row {
             return;
         }
+        let Some(value) = self.filter(row).map(|f| f.value.clone()) else {
+            return;
+        };
+        self.as_mut().rust_mut().state.selected = value;
         set!(self, current_row, current_row_changed, row);
-        self.update_view(true);
+        self.update_view();
     }
 
-    fn played(mut self: Pin<&mut Self>) {
-        if self.grouping_kind() == Grouping::RecentlyPlayed {
-            let selected = self.selected().cloned();
-            self.as_mut().recompute(selected, false);
+    fn played(self: Pin<&mut Self>) {
+        if self.state.grouping == Grouping::RecentlyPlayed {
+            self.recompute(false);
         }
     }
 
-    fn sort_by(self: Pin<&mut Self>, column: &QString) {
-        let sort = after_click(self.sort(), &column.to_string());
-        self.apply_sort(sort);
+    fn sort_by(mut self: Pin<&mut Self>, column: &QString) {
+        if let Some(sort) = after_heading_click(self.state.sort, &column.to_string()) {
+            self.as_mut().rust_mut().state.sort = sort;
+            self.update_view();
+        }
     }
 
     fn set_sort(mut self: Pin<&mut Self>, column: &QString, descending: bool) {
         let choice = menu_choice(
-            self.sort(),
-            self.album_descending,
-            self.album_directional,
+            self.state.sort,
+            self.state.album_descending,
+            self.state.grouping.has_album_direction(),
             &column.to_string(),
             descending,
         );
         match choice {
-            Some(MenuChoice::Sort(sort)) => self.apply_sort(Some(sort)),
+            Some(MenuChoice::Sort(sort)) => {
+                self.as_mut().rust_mut().state.sort = sort;
+                self.update_view();
+            }
             Some(MenuChoice::AlbumDescending(descending)) => {
-                self.as_mut().rust_mut().album_descending = descending;
-                set!(self, sort_descending, sort_descending_changed, descending);
-                let selected = self.selected().cloned();
-                self.recompute(selected, true);
+                self.as_mut().rust_mut().state.album_descending = descending;
+                self.recompute(true);
             }
             None => {}
         }
-    }
-
-    fn apply_sort(mut self: Pin<&mut Self>, sort: Option<Option<Sort>>) {
-        let Some(sort) = sort else {
-            return;
-        };
-        let (column, descending) = sort_state(sort, self.album_descending);
-        set!(
-            self,
-            sort_column,
-            sort_column_changed,
-            QString::from(column)
-        );
-        set!(self, sort_descending, sort_descending_changed, descending);
-        self.update_view(true);
-    }
-
-    fn sort(&self) -> Option<Sort> {
-        sort_of(&self.sort_column.to_string(), self.sort_descending)
     }
 
     /// A blank search is applied here rather than by the search thread, so
@@ -390,8 +304,7 @@ impl qobject::FilterModel {
         let text = text.to_string();
         if text.trim().is_empty() {
             if self.as_mut().drop_search() {
-                let selected = self.selected().cloned();
-                self.recompute(selected, true);
+                self.recompute(true);
             }
             return;
         }
@@ -410,68 +323,75 @@ impl qobject::FilterModel {
         !matches!(std::mem::take(&mut this.search), TrackFilter::All)
     }
 
-    fn grouping_kind(&self) -> Grouping {
-        Grouping::from_name(&self.grouping.to_string()).unwrap_or_default()
-    }
-
     fn filter(&self, row: i32) -> Option<&Filter> {
         usize::try_from(row).ok().and_then(|r| self.rows.get(r))
     }
 
-    fn selected(&self) -> Option<&FilterValue> {
-        self.filter(self.current_row).map(|f| &f.value)
-    }
-
-    /// Rebuilds the filter pane, keeping `keep` selected if it still has
+    /// Rebuilds the filter pane, keeping the selection if it still has
     /// tracks (otherwise "All"), and then the view.
-    fn recompute(mut self: Pin<&mut Self>, keep: Option<FilterValue>, reset: bool) {
+    fn recompute(mut self: Pin<&mut Self>, reset: bool) {
+        self.as_mut().show_state();
         let Some(catalog) = session::catalog() else {
             return;
         };
-        let rows = if self.album_descending {
-            catalog.filters_newest_first(self.grouping_kind(), &self.search)
-        } else {
-            catalog.filters(self.grouping_kind(), &self.search)
-        };
-        let row = keep
-            .and_then(|value| rows.iter().position(|f| f.value == value))
-            .unwrap_or(0);
+        let browsed = catalog.browse(&self.state, &self.search);
+        let row = browsed.selected_row;
+        self.as_mut().rust_mut().state.selected = browsed.filters[row].value.clone();
         self.as_mut().begin_reset_model();
-        self.as_mut().rust_mut().rows = rows;
+        self.as_mut().rust_mut().rows = browsed.filters;
         self.as_mut().end_reset_model();
         // Sent even when unchanged: the model reset can move the ListView's
         // current index, and this puts it back.
         self.as_mut().rust_mut().current_row = i32::try_from(row).unwrap_or(0);
         self.as_mut().current_row_changed();
-        self.update_view(reset);
+        self.show_view(browsed.view, reset);
     }
 
-    fn update_view(mut self: Pin<&mut Self>, reset: bool) {
+    fn update_view(mut self: Pin<&mut Self>) {
+        self.as_mut().show_state();
         let Some(catalog) = session::catalog() else {
             return;
         };
-        let (value, title) = match self.filter(self.current_row) {
-            Some(filter) => (filter.value.clone(), format::filter_label(filter)),
-            None => (
-                FilterValue::All,
-                format::filter_label(&all(self.grouping_kind())),
-            ),
-        };
-        let grouping = self.grouping_kind();
-        let selected = TrackFilter::Field(grouping.field(), value.clone());
-        let view = catalog.view(grouping, &self.search.clone().and(selected));
-        let view = match self.sort() {
-            Some(sort) => catalog.sorted(view, sort),
-            None if self.album_descending => catalog.newest_first(view, grouping),
-            None => view,
-        };
-        session::set_browse(BrowseState {
+        let view = catalog.browsed_view(&self.state, &self.search);
+        self.show_view(view, true);
+    }
+
+    fn show_state(mut self: Pin<&mut Self>) {
+        let state = self.state.clone();
+        let (sort_column, sort_descending) = sort_state(state.sort, state.album_descending);
+        set!(
+            self,
             grouping,
-            selected: value,
-            sort: self.sort(),
-            album_descending: self.album_descending,
-        });
+            grouping_changed,
+            QString::from(state.grouping.name())
+        );
+        set!(
+            self,
+            album_directional,
+            album_directional_changed,
+            state.grouping.has_album_direction()
+        );
+        set!(
+            self,
+            sort_column,
+            sort_column_changed,
+            QString::from(sort_column)
+        );
+        set!(
+            self,
+            sort_descending,
+            sort_descending_changed,
+            sort_descending
+        );
+    }
+
+    fn show_view(mut self: Pin<&mut Self>, view: View, reset: bool) {
+        let title = match self.filter(self.current_row) {
+            Some(filter) => format::filter_label(filter),
+            None => format::filter_label(&all(self.state.grouping)),
+        };
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
+        session::set_browse(self.state.clone());
         session::set_view(view, reset);
         set!(self, title, title_changed, QString::from(&title));
         set!(self, track_count, track_count_changed, count);

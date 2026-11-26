@@ -4,7 +4,7 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 
 use super::*;
-use crate::test_util::{arb_grouping, arb_search, arb_sort_column, arb_tracks};
+use crate::test_util::{arb_grouping, arb_search, arb_sort, arb_sort_column, arb_tracks};
 
 /// Tracks must be passed in catalog (album artist) order, like `track_list`.
 fn track(id: i64, album_artist: &str, album_id: i64, album: &str, year: Option<i32>) -> ListTrack {
@@ -669,6 +669,136 @@ fn clicking_a_heading_sorts_ascending_then_descending_then_restores_album_order(
     }
 }
 
+fn sort(column: SortColumn, descending: bool) -> Option<Sort> {
+    Some(Sort { column, descending })
+}
+
+#[test]
+fn each_heading_maps_to_its_column() {
+    assert_eq!(
+        sort_of("track_number", false),
+        sort(SortColumn::TrackNumber, false)
+    );
+    assert_eq!(sort_of("bit_rate", true), sort(SortColumn::BitRate, true));
+}
+
+#[test]
+fn album_order_and_unknown_columns_have_no_sort() {
+    assert_eq!(sort_of("", false), None);
+    assert_eq!(sort_of("bitrate", true), None);
+}
+
+fn every_sort() -> impl Iterator<Item = Option<Sort>> {
+    SortColumn::ALL
+        .into_iter()
+        .flat_map(|column| [false, true].map(|descending| sort(column, descending)))
+        .chain([None])
+}
+
+/// Every column name QML can send: real ones, album order, and junk.
+fn every_name() -> impl Iterator<Item = &'static str> {
+    SortColumn::ALL
+        .into_iter()
+        .map(SortColumn::name)
+        .chain(["", "nope", "-1"])
+}
+
+#[test]
+fn a_heading_click_on_a_known_column_follows_the_click_cycle() {
+    let title = after_heading_click(None, "title").unwrap();
+    assert_eq!(title, sort(SortColumn::Title, false));
+    let title = after_heading_click(title, "title").unwrap();
+    assert_eq!(title, sort(SortColumn::Title, true));
+    assert_eq!(after_heading_click(title, "title"), Some(None));
+    assert_eq!(
+        after_heading_click(title, "artist"),
+        Some(sort(SortColumn::Artist, false))
+    );
+
+    for current in every_sort() {
+        for name in every_name() {
+            let expected = SortColumn::from_name(name).map(|c| Sort::after_click(current, c));
+            assert_eq!(
+                after_heading_click(current, name),
+                expected,
+                "{current:?} {name:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_menu_reaches_what_was_picked_and_reports_only_changes() {
+    let album = |descending| Some(MenuChoice::AlbumDescending(descending));
+    let column = |sort| Some(MenuChoice::Sort(sort));
+    assert_eq!(menu_choice(None, false, true, "", true), album(true));
+    assert_eq!(menu_choice(None, false, true, "", false), None);
+    assert_eq!(menu_choice(None, false, false, "", true), None);
+    let title = sort(SortColumn::Title, true);
+    assert_eq!(menu_choice(title, false, true, "", true), column(None));
+    assert_eq!(
+        menu_choice(None, true, false, "artist", true),
+        column(sort(SortColumn::Artist, true))
+    );
+    assert_eq!(menu_choice(None, true, true, "nope", true), None);
+
+    for current in every_sort() {
+        for album_descending in [false, true] {
+            for directional in [false, true] {
+                for name in every_name() {
+                    for descending in [false, true] {
+                        let case = format!(
+                            "{current:?} {album_descending} {directional} {name:?} {descending}"
+                        );
+                        let choice =
+                            menu_choice(current, album_descending, directional, name, descending);
+                        let picked = match name {
+                            "" => None,
+                            name => match SortColumn::from_name(name) {
+                                Some(column) => Some(Sort { column, descending }),
+                                None => {
+                                    assert_eq!(choice, None, "{case}");
+                                    continue;
+                                }
+                            },
+                        };
+                        let picked_direction =
+                            if picked.is_none() && current.is_none() && directional {
+                                descending
+                            } else {
+                                album_descending
+                            };
+                        let after = match choice {
+                            Some(MenuChoice::Sort(sort)) => (sort, album_descending),
+                            Some(MenuChoice::AlbumDescending(d)) => (current, d),
+                            None => (current, album_descending),
+                        };
+                        assert_eq!(after, (picked, picked_direction), "{case}");
+                        assert_eq!(
+                            choice.is_some(),
+                            after != (current, album_descending),
+                            "{case}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_saved_sort_or_album_direction_maps_back_to_itself() {
+    for saved in every_sort() {
+        for album_descending in [false, true] {
+            let (column, descending) = sort_state(saved, album_descending);
+            assert_eq!(sort_of(column, descending), saved);
+            if saved.is_none() {
+                assert_eq!((column, descending), ("", album_descending));
+            }
+        }
+    }
+}
+
 proptest! {
     #[test]
     fn the_filter_counts_add_up_to_all_and_each_is_the_size_of_its_view_of_whole_album_runs(
@@ -906,5 +1036,47 @@ proptest! {
                 prop_assert!(catalog.order(grouping).eq(before.order(grouping)), "{:?}", grouping);
             }
         }
+    }
+
+    #[test]
+    fn browsing_selects_the_saved_value_or_all_and_views_it_filtered_then_ordered(
+        tracks in arb_tracks(),
+        grouping in arb_grouping(),
+        pick in any::<Index>(),
+        gone in any::<bool>(),
+        sort in prop::option::of(arb_sort()),
+        album_descending in any::<bool>(),
+        search in arb_search(),
+    ) {
+        let catalog = Catalog::new(tracks);
+        let selected = if gone {
+            FilterValue::Album(-1)
+        } else {
+            let filters = catalog.filters(grouping, &TrackFilter::All);
+            filters[pick.index(filters.len())].value.clone()
+        };
+        let state = BrowseState { grouping, selected, sort, album_descending };
+        let browsed = catalog.browse(&state, &search);
+        let filters = if album_descending {
+            catalog.filters_newest_first(grouping, &search)
+        } else {
+            catalog.filters(grouping, &search)
+        };
+        prop_assert_eq!(&browsed.filters, &filters);
+        let shown = &filters[browsed.selected_row].value;
+        match filters.iter().position(|f| f.value == state.selected) {
+            Some(row) => prop_assert_eq!(browsed.selected_row, row),
+            None => prop_assert_eq!(shown, &FilterValue::All),
+        }
+        let value = TrackFilter::Field(grouping.field(), shown.clone());
+        let view = catalog.view(grouping, &search.clone().and(value));
+        let view = match sort {
+            Some(sort) => catalog.sorted(view, sort),
+            None if album_descending => catalog.newest_first(view, grouping),
+            None => view,
+        };
+        prop_assert_eq!(&browsed.view, &view);
+        let corrected = BrowseState { selected: shown.clone(), ..state };
+        prop_assert_eq!(catalog.browsed_view(&corrected, &search), view);
     }
 }

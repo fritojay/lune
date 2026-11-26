@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::normalize;
 use crate::query::ListTrack;
 use crate::scan::unix_ns;
+use crate::window_state::BrowseState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -492,6 +493,64 @@ impl Sort {
     }
 }
 
+/// The sort that sort menu column `column` and `descending` describe. ""
+/// is album order.
+fn sort_of(column: &str, descending: bool) -> Option<Sort> {
+    let column = SortColumn::from_name(column)?;
+    Some(Sort { column, descending })
+}
+
+/// The sort menu's column and direction for `sort`, or for album order in
+/// direction `album_descending`.
+pub fn sort_state(sort: Option<Sort>, album_descending: bool) -> (&'static str, bool) {
+    sort.map_or(("", album_descending), |sort| {
+        (sort.column.name(), sort.descending)
+    })
+}
+
+/// The sort after a click on heading `clicked`, or `None` for a heading
+/// that doesn't exist.
+pub fn after_heading_click(current: Option<Sort>, clicked: &str) -> Option<Option<Sort>> {
+    Some(Sort::after_click(current, SortColumn::from_name(clicked)?))
+}
+
+/// The sort picked from the menu, or `None` for a column that doesn't exist
+/// or the sort already in effect.
+fn chosen(current: Option<Sort>, column: &str, descending: bool) -> Option<Option<Sort>> {
+    let sort = if column.is_empty() {
+        None
+    } else {
+        Some(sort_of(column, descending)?)
+    };
+    (sort != current).then_some(sort)
+}
+
+/// What a pick from the sort menu changes.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MenuChoice {
+    Sort(Option<Sort>),
+    /// Album order's direction, where descending puts the newest albums first.
+    AlbumDescending(bool),
+}
+
+/// What picking `column` and `descending` from the sort menu changes, or
+/// `None` for a column that doesn't exist or what's already in effect. ""
+/// is album order: from a column sort it comes back in the direction it
+/// had, and in album order it sets that direction if it is `directional`.
+pub fn menu_choice(
+    current: Option<Sort>,
+    album_descending: bool,
+    directional: bool,
+    column: &str,
+    descending: bool,
+) -> Option<MenuChoice> {
+    if !column.is_empty() || current.is_some() {
+        return chosen(current, column, descending).map(MenuChoice::Sort);
+    }
+    (directional && descending != album_descending)
+        .then_some(MenuChoice::AlbumDescending(descending))
+}
+
 /// The ordered track list a filter selects, as indices into the [`Catalog`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
@@ -511,6 +570,15 @@ impl View {
     pub fn is_empty(&self) -> bool {
         self.tracks.is_empty()
     }
+}
+
+/// What the panes show for a [`BrowseState`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Browsed {
+    pub filters: Vec<Filter>,
+    /// Of `filters`: the selected value, or `All` when it isn't listed.
+    pub selected_row: usize,
+    pub view: View,
 }
 
 #[derive(Clone)]
@@ -746,6 +814,39 @@ impl Catalog {
             newest.albums.push(at..newest.tracks.len());
         }
         newest
+    }
+
+    /// The filter pane and main pane for `state`, counting only tracks that
+    /// pass `search`.
+    pub fn browse(&self, state: &BrowseState, search: &TrackFilter) -> Browsed {
+        let filters = if state.album_descending {
+            self.filters_newest_first(state.grouping, search)
+        } else {
+            self.filters(state.grouping, search)
+        };
+        let selected_row = filters
+            .iter()
+            .position(|f| f.value == state.selected)
+            .unwrap_or(0);
+        let selected = filters[selected_row].value.clone();
+        let view = self.browsed_view(&BrowseState { selected, ..*state }, search);
+        Browsed {
+            filters,
+            selected_row,
+            view,
+        }
+    }
+
+    /// [`Catalog::browse`]'s view, without the filter pane. Empty when
+    /// `state.selected` no longer exists.
+    pub fn browsed_view(&self, state: &BrowseState, search: &TrackFilter) -> View {
+        let selected = TrackFilter::Field(state.grouping.field(), state.selected.clone());
+        let view = self.view(state.grouping, &search.clone().and(selected));
+        match state.sort {
+            Some(sort) => self.sorted(view, sort),
+            None if state.album_descending => self.newest_first(view, state.grouping),
+            None => view,
+        }
     }
 
     fn order(&self, grouping: Grouping) -> Box<dyn Iterator<Item = usize> + '_> {
