@@ -174,6 +174,18 @@ const MIGRATIONS: &[&str] = &[
     DROP TABLE unshuffled;
     DROP TABLE queue;
     "#,
+    // v13: only changes to what the search index holds rebuild a track's
+    // entry, not plays or missing marks. `refresh_albums` reindexes by
+    // setting `album_id`.
+    r#"
+    DROP TRIGGER tracks_fts_update;
+    CREATE TRIGGER tracks_fts_update AFTER UPDATE OF title, artist, album_id ON tracks BEGIN
+        DELETE FROM tracks_fts WHERE rowid = old.id;
+        INSERT INTO tracks_fts(rowid, title, artist, album_artist, album)
+        SELECT new.id, new.title, new.artist, a.album_artist, a.title
+        FROM albums a WHERE a.id = new.album_id;
+    END;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

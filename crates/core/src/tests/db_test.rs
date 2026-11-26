@@ -1,4 +1,6 @@
 use super::*;
+use crate::query;
+use crate::test_util::library_with_tracks;
 
 #[test]
 fn a_negative_schema_version_is_rejected() {
@@ -288,4 +290,32 @@ fn a_v11_database_keeps_its_queue_unshuffled_with_its_cursor_and_resume_position
     let ids: Vec<i64> = queue.items().iter().map(|item| item.track_id).collect();
     assert_eq!(ids, [1, 2, 2, 3]);
     assert_eq!(queue.current_index(), Some(1), "the first of the two 2s");
+}
+
+#[test]
+fn only_changes_to_what_search_holds_rebuild_a_tracks_search_entry() {
+    let conn = open_in_memory().unwrap();
+    library_with_tracks(&conn, &[1]);
+    for (set, reindexed) in [
+        ("played_ns = 5", false),
+        ("missing_ns = 5", false),
+        ("missing_ns = NULL", false),
+        ("added_ns = 5", false),
+        ("mtime_ns = -1", false),
+        ("title = 'Zebra'", true),
+        ("artist = 'Okapi'", true),
+        ("album_id = album_id", true),
+    ] {
+        let before = conn.total_changes();
+        conn.execute(&format!("UPDATE tracks SET {set} WHERE id = 1"), [])
+            .unwrap();
+        assert_eq!(conn.total_changes() - before > 1, reindexed, "{set}");
+    }
+    for word in ["zebra", "okapi"] {
+        assert_eq!(
+            query::search_ids(&conn, word).unwrap(),
+            [1].into(),
+            "{word}"
+        );
+    }
 }
