@@ -46,6 +46,33 @@ fn a_library_is_locked_until_its_holder_lets_go() {
     assert!(!db.exists(), "the lock never creates the DB");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_library_reached_through_links_is_the_same_library() {
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::new();
+    let real_dir = dir.path().join("data");
+    let db = real_dir.join("library.sqlite3");
+    let held = lock_library(&db).unwrap();
+    let linked_dir = dir.path().join("linked");
+    symlink(&real_dir, &linked_dir).unwrap();
+    let through_dir = linked_dir.join("library.sqlite3");
+    assert!(
+        matches!(lock_library(&through_dir), Err(CoreError::LibraryInUse(path)) if path == through_dir)
+    );
+    drop(held);
+    dir.touch("data/library.sqlite3");
+    let held = lock_library(&db).unwrap();
+    let linked_db = dir.path().join("link.sqlite3");
+    symlink(&db, &linked_db).unwrap();
+    assert!(matches!(
+        lock_library(&linked_db),
+        Err(CoreError::LibraryInUse(_))
+    ));
+    drop(held);
+    let _again = lock_library(&linked_db).unwrap();
+}
+
 #[test]
 fn a_data_folder_beside_the_exe_holds_everything() {
     let install = TempDir::new();

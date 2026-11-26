@@ -95,6 +95,22 @@ fn beside_db(db_path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// `db_path` with links resolved, so every path to one library finds one
+/// lock. The DB may not exist yet; its folder does.
+fn resolved(db_path: &Path) -> PathBuf {
+    if let Ok(path) = std::fs::canonicalize(db_path) {
+        return path;
+    }
+    let dir = db_path
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    match (std::fs::canonicalize(dir), db_path.file_name()) {
+        (Ok(dir), Some(name)) => dir.join(name),
+        _ => db_path.to_path_buf(),
+    }
+}
+
 /// Held while this process uses the library; dropped, it lets another in.
 /// Two apps on one library would each save their own playlists and queue
 /// over the other's. The OS releases it when the process ends, even in a
@@ -111,14 +127,18 @@ pub struct LibraryLock {
     reason = "creates the app's own lock file beside its DB, never a music file"
 )]
 pub fn lock_library(db_path: &Path) -> Result<LibraryLock> {
-    let path = beside_db(db_path, ".lock");
+    let dir = db_path.parent().filter(|dir| !dir.as_os_str().is_empty());
+    if let Some(dir) = dir {
+        std::fs::create_dir_all(dir).map_err(|source| CoreError::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+    }
+    let path = beside_db(&resolved(db_path), ".lock");
     let io_err = |source| CoreError::Io {
         path: path.clone(),
         source,
     };
-    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir).map_err(io_err)?;
-    }
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
