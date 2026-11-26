@@ -41,14 +41,9 @@ ColumnLayout {
                                             - 2 * Theme.cellInset
                                           : headingCells.width
     readonly property bool grid: albumGrid && !flat
-    property real openAlbumId: -1
-    // The album `openAlbumModel` holds. It outlasts `openAlbumId` while the
-    // closed album's panel shuts, so its tracks don't vanish first.
+    // The album `openAlbumModel` holds. It outlasts the grid's open album
+    // while that album's panel shuts, so its tracks don't vanish first.
     property real shownAlbumId: -1
-    onOpenAlbumIdChanged: {
-        if (openAlbumId >= 0)
-            shownAlbumId = openAlbumId
-    }
     readonly property int tracksLeft: flat ? 0 : 2 * Theme.albumPadding + Theme.coverSize
     readonly property int tracksRight: flat ? 0 : Theme.albumPadding
     readonly property TrackList list: albumList
@@ -86,40 +81,22 @@ ColumnLayout {
 
     function resetGrid(reset: bool) {
         if (reset) {
-            dropAlbum()
+            // The grid closed its album; no panel is left to shut.
+            shownAlbumId = -1
             albumRows.positionViewAtBeginning()
         } else {
             albumRows.positionViewAtIndex(gridModel.relaidRow(keptRow, keptColumns), ListView.Beginning)
         }
     }
 
-    function toggleAlbum(albumId: real) {
-        trackSelection.clear()
-        openAlbumId = openAlbumId === albumId ? -1 : albumId
-    }
+    onGridChanged: shownAlbumId = -1
 
-    function closeAlbum() {
-        trackSelection.clear()
-        openAlbumId = -1
-    }
-
-    // Closes the album without waiting for its panel to shut, for when the
-    // panel isn't shown to animate.
-    function dropAlbum() {
-        closeAlbum()
-        shownAlbumId = -1
-    }
-
-    onGridChanged: dropAlbum()
-
-    // A rescan took the open album out of the view. Only `openAlbumId` is
-    // cleared: changing the model's album from its own signal would reload
-    // it while it is still emitting, and it is empty anyway.
     Connections {
-        target: trackPane.openAlbumModel
-        function onRefreshed() {
-            if (trackPane.openAlbumId >= 0 && trackPane.openAlbumModel.albumCount === 0)
-                trackPane.closeAlbum()
+        target: trackPane.gridModel
+        function onOpenAlbumIdChanged() {
+            trackSelection.clear()
+            if (trackPane.gridModel.openAlbumId >= 0)
+                trackPane.shownAlbumId = trackPane.gridModel.openAlbumId
         }
     }
 
@@ -386,7 +363,7 @@ ColumnLayout {
             id: gridRow
             required property var albums
             required property int index
-            readonly property int openTile: albums.findIndex(a => a.albumId === trackPane.openAlbumId)
+            required property int openTile
             width: ListView.view.width
 
             Row {
@@ -394,6 +371,7 @@ ColumnLayout {
                     model: gridRow.albums
                     AlbumTile {
                         required property var modelData
+                        required property int index
                         width: albumRows.cellWidth
                         height: albumRows.tileHeight
                         albumTitle: modelData.albumTitle
@@ -403,9 +381,9 @@ ColumnLayout {
                         firstIndex: modelData.firstIndex
                         trackCount: modelData.trackCount
                         trackIds: modelData.trackIds
-                        open: albumId === trackPane.openAlbumId
+                        open: index === gridRow.openTile
                         currentTrackId: trackPane.currentTrackId
-                        onOpened: albumId => trackPane.toggleAlbum(albumId)
+                        onOpened: albumId => trackPane.gridModel.toggleAlbum(albumId)
                         onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
                         onMenuRequested: (start, tracks) => {
                             trackSelection.selectRange(start, tracks)
@@ -427,14 +405,14 @@ ColumnLayout {
                 // model already holds the other album, so a slow close would
                 // show its tracks here.
                 Behavior on height {
-                    enabled: panel.open || trackPane.openAlbumId < 0
+                    enabled: panel.open || trackPane.gridModel.openAlbumId < 0
                     NumberAnimation {
                         duration: 180
                         easing.type: Easing.OutCubic
                         onFinished: {
                             if (panel.open)
                                 albumRows.positionViewAtIndex(gridRow.index, ListView.Contain)
-                            else if (trackPane.openAlbumId < 0)
+                            else if (trackPane.gridModel.openAlbumId < 0)
                                 trackPane.shownAlbumId = -1
                         }
                     }
@@ -481,7 +459,7 @@ ColumnLayout {
                         anchors.right: parent.right
                         anchors.margins: 4
                         icon.source: "icons/clear.svg"
-                        onClicked: trackPane.closeAlbum()
+                        onClicked: trackPane.gridModel.closeAlbum()
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("Close the album")
                     }

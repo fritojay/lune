@@ -10,6 +10,7 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::rc::Rc;
 
+use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{
     QHash, QHashPair_i32_QByteArray, QList, QMap, QMapPair_QString_QVariant, QModelIndex, QString,
@@ -44,6 +45,9 @@ pub mod qobject {
         /// Off while the grid is hidden, so it holds no albums and skips
         /// reloading on every view change.
         #[qproperty(bool, active, READ, WRITE = set_active, NOTIFY)]
+        /// The album whose tracks show between two rows, or -1. It closes
+        /// when the grid is reset or the album leaves the view.
+        #[qproperty(i64, open_album_id, cxx_name = "openAlbumId", READ, NOTIFY)]
         type AlbumGridModel = super::AlbumGridModelRust;
     }
 
@@ -60,6 +64,15 @@ pub mod qobject {
 
         /// The row that now holds the first album of row `row` of a grid
         /// that was `columns` wide.
+        /// Opens album `album_id`, or closes it if it is open.
+        #[qinvokable]
+        #[cxx_name = "toggleAlbum"]
+        fn toggle_album(self: Pin<&mut AlbumGridModel>, album_id: i64);
+
+        #[qinvokable]
+        #[cxx_name = "closeAlbum"]
+        fn close_album(self: Pin<&mut AlbumGridModel>);
+
         #[qinvokable]
         #[cxx_name = "relaidRow"]
         fn relaid_row(self: &AlbumGridModel, row: i32, columns: i32) -> i32;
@@ -108,14 +121,20 @@ type GridRow = Range<usize>;
 
 type Role = (&'static str, fn(&Tiles<'_>) -> QVariant);
 
-const ROLES: &[Role] = &[("albums", |t| t.maps())];
+/// `openTile` is the open album's place in the row, or -1.
+const ROLES: &[Role] = &[
+    ("albums", |t| t.maps()),
+    ("openTile", |t| QVariant::from(&t.open_tile)),
+];
 
 const ALBUMS_ROLE: i32 = list_model::role_id(ROLES, "albums");
+const OPEN_TILE_ROLE: i32 = list_model::role_id(ROLES, "openTile");
 
 struct Tiles<'a> {
     catalog: Option<&'a Catalog>,
     view: &'a View,
     albums: GridRow,
+    open_tile: i32,
 }
 
 impl Tiles<'_> {
@@ -146,6 +165,9 @@ pub struct AlbumGridModelRust {
     catalog: Option<Rc<Catalog>>,
     view: Rc<View>,
     cover_rows: CoverRows,
+    open_album_id: i64,
+    /// The open album, of the view's albums.
+    open: Option<usize>,
 }
 
 impl Default for AlbumGridModelRust {
@@ -153,6 +175,8 @@ impl Default for AlbumGridModelRust {
         Self {
             columns: 1,
             active: false,
+            open_album_id: -1,
+            open: None,
             catalog: None,
             view: Rc::default(),
             cover_rows: CoverRows::new(),
@@ -204,8 +228,9 @@ impl qobject::AlbumGridModel {
             .as_deref()
             .map(|catalog| grid_cover_rows(catalog, &view, width(columns)))
             .unwrap_or_default();
+        let open = still_open(catalog.as_deref(), &view, self.open_id(), reset);
         self.as_mut().begin_reset_model();
-        let old = (self.columns, self.active);
+        let old = (self.columns, self.active, self.open_album_id);
         {
             let mut rust = self.as_mut().rust_mut();
             rust.columns = columns;
@@ -213,8 +238,13 @@ impl qobject::AlbumGridModel {
             rust.catalog = catalog;
             rust.view = view;
             rust.cover_rows = cover_rows;
+            rust.open = open;
+            rust.open_album_id = open.and_then(|album| rust.album_id(album)).unwrap_or(-1);
         }
         self.as_mut().end_reset_model();
+        if old.2 != self.open_album_id {
+            self.as_mut().open_album_id_changed();
+        }
         if old.0 != columns {
             self.as_mut().columns_changed();
         }
@@ -222,6 +252,44 @@ impl qobject::AlbumGridModel {
             self.as_mut().active_changed();
         }
         self.refreshed(reset);
+    }
+
+    fn toggle_album(self: Pin<&mut Self>, album_id: i64) {
+        let open = if self.open_id() == Some(album_id) {
+            None
+        } else {
+            album_index(self.catalog.as_deref(), &self.view, album_id)
+        };
+        self.set_open(open);
+    }
+
+    fn close_album(self: Pin<&mut Self>) {
+        self.set_open(None);
+    }
+
+    fn set_open(mut self: Pin<&mut Self>, open: Option<usize>) {
+        if open == self.open {
+            return;
+        }
+        let columns = width(self.columns);
+        let mut rows: Vec<i32> = [self.open, open]
+            .into_iter()
+            .flatten()
+            .filter_map(|album| i32::try_from(album / columns).ok())
+            .collect();
+        rows.dedup();
+        let id = open.and_then(|album| self.album_id(album)).unwrap_or(-1);
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.open = open;
+            rust.open_album_id = id;
+        }
+        list_model::role_changed(self.as_mut().upcast_pin(), &rows, OPEN_TILE_ROLE);
+        self.open_album_id_changed();
+    }
+
+    fn open_id(&self) -> Option<i64> {
+        (self.open_album_id >= 0).then_some(self.open_album_id)
     }
 
     fn relaid_row(&self, row: i32, columns: i32) -> i32 {
@@ -237,6 +305,7 @@ impl qobject::AlbumGridModel {
             .map(|albums| Tiles {
                 catalog: self.catalog.as_deref(),
                 view: &self.view,
+                open_tile: open_tile(self.open, &albums),
                 albums,
             });
         list_model::data(ROLES, tiles.as_ref(), role)
@@ -249,6 +318,42 @@ impl qobject::AlbumGridModel {
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
         list_model::role_names(ROLES)
     }
+}
+
+impl AlbumGridModelRust {
+    fn album_id(&self, album: usize) -> Option<i64> {
+        album_id(self.catalog.as_deref()?, &self.view, album)
+    }
+}
+
+fn album_id(catalog: &Catalog, view: &View, album: usize) -> Option<i64> {
+    let first = *view.tracks.get(view.albums.get(album)?.start)?;
+    Some(catalog.track(first)?.album_id)
+}
+
+/// Where album `album_id` is in `view`'s albums.
+fn album_index(catalog: Option<&Catalog>, view: &View, album_id: i64) -> Option<usize> {
+    let catalog = catalog?;
+    (0..view.albums.len()).find(|&album| self::album_id(catalog, view, album) == Some(album_id))
+}
+
+/// The open album after the grid reloads: none after a reset, else album
+/// `open` wherever it now is, if it is still there.
+fn still_open(
+    catalog: Option<&Catalog>,
+    view: &View,
+    open: Option<i64>,
+    reset: bool,
+) -> Option<usize> {
+    open.filter(|_| !reset)
+        .and_then(|id| album_index(catalog, view, id))
+}
+
+/// The open album's place in the grid row of `albums`, or -1.
+fn open_tile(open: Option<usize>, albums: &GridRow) -> i32 {
+    open.filter(|album| albums.contains(album))
+        .and_then(|album| i32::try_from(album - albums.start).ok())
+        .unwrap_or(-1)
 }
 
 fn width(columns: i32) -> usize {
