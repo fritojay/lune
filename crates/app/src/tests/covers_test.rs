@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -85,14 +86,36 @@ fn the_latest_request_is_served_first() {
 }
 
 #[test]
-fn forgotten_covers_are_made_again() {
-    let (covers, ready) = covers_with(|id| Some(PathBuf::from(format!("{id}.jpg"))));
+fn a_forgotten_cover_is_still_shown_until_it_is_made_again() {
+    let generation = Arc::new(AtomicU64::new(0));
+    let made = Arc::clone(&generation);
+    let (covers, ready) = covers_with(move |id| {
+        Some(PathBuf::from(format!(
+            "{id}-{}.jpg",
+            made.load(Ordering::SeqCst)
+        )))
+    });
     covers.path(5);
     ready.recv_timeout(WAIT).unwrap();
+    generation.store(1, Ordering::SeqCst);
     covers.forget();
-    assert_eq!(covers.path(5), None, "queued again");
+    assert_eq!(covers.path(5), Some(PathBuf::from("5-0.jpg")));
     assert_eq!(ready.recv_timeout(WAIT).unwrap(), 5);
-    assert!(covers.path(5).is_some());
+    assert_eq!(covers.path(5), Some(PathBuf::from("5-1.jpg")));
+    assert!(
+        ready.recv_timeout(Duration::from_millis(200)).is_err(),
+        "made once"
+    );
+}
+
+#[test]
+fn a_forgotten_failure_is_retried() {
+    let (covers, ready) = covers_with(|_| None);
+    assert_eq!(covers.path(6), None);
+    ready.recv_timeout(WAIT).unwrap();
+    covers.forget();
+    assert_eq!(covers.path(6), None);
+    assert_eq!(ready.recv_timeout(WAIT).unwrap(), 6);
 }
 
 #[test]

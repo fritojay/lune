@@ -32,6 +32,9 @@ pub struct Covers {
 struct State {
     /// `None`: the cover couldn't be made, so it isn't retried this session.
     done: HashMap<i64, Option<PathBuf>>,
+    /// Made before the library last changed, so made again on the next
+    /// request; meanwhile it is still shown, so covers don't blink.
+    stale: HashSet<i64>,
     queued: HashSet<i64>,
     pending: Vec<i64>,
     listeners: Vec<Listener>,
@@ -64,20 +67,26 @@ impl Covers {
     /// The thumbnail of `art_id` if it is ready; otherwise queues it.
     pub fn path(&self, art_id: i64) -> Option<PathBuf> {
         let mut state = self.lock();
-        if let Some(done) = state.done.get(&art_id) {
-            return done.clone();
+        let done = state.done.get(&art_id).cloned();
+        if done.is_none() || state.stale.remove(&art_id) {
+            self.queue(&mut state, art_id);
         }
+        done.flatten()
+    }
+
+    fn queue(&self, state: &mut State, art_id: i64) {
         if state.queued.insert(art_id) {
             state.pending.push(art_id);
             self.wake.notify_one();
         }
-        None
     }
 
-    /// Forgets every cover, including failures, so they are looked up again
-    /// (after a rescan, a cover id may name a different image).
+    /// After a rescan a cover id may name a different image, so each cover
+    /// is made again when next asked for. Failures are retried at once.
     pub fn forget(&self) {
-        self.lock().done.clear();
+        let mut state = self.lock();
+        state.done.retain(|_, path| path.is_some());
+        state.stale = state.done.keys().copied().collect();
     }
 
     /// `listener` is called from a worker thread with each finished cover id.
