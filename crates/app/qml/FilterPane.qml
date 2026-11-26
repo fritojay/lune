@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import com.lune.player
 
 // The values of the chosen grouping, or another list with the same roles
 // (`label`, `detail`, `count`, `all`).
@@ -143,7 +144,7 @@ ColumnLayout {
                     elide: Text.ElideRight
                     color: filterRow.textColor
                     opacity: 0.7
-                    font.pointSize: 9
+                    font.pointSize: Theme.smallPointSize
                 }
             }
 

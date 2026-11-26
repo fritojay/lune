@@ -90,7 +90,7 @@ Item {
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 font.bold: true
-                font.pointSize: 12
+                font.pointSize: Theme.albumPointSize
                 color: album.palette.text
             }
             Text {

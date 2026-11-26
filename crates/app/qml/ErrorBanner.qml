@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import com.lune.player
 
 // A warning tint over the window color with the regular text color, so it
 // stays readable in light and dark mode. The icon carries the meaning too.
@@ -9,9 +10,8 @@ Rectangle {
     required property string message
     signal dismissed()
 
-    readonly property color warning: "#d93025"
     function wash(base: color, alpha: real): color {
-        return Qt.tint(base, Qt.rgba(warning.r, warning.g, warning.b, alpha))
+        return Qt.tint(base, Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, alpha))
     }
 
     visible: message !== ""

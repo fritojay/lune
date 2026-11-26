@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import com.lune.player
 
 // Rows inset their text by `gutter` so it never sits under the scroll bar; row
 // backgrounds still run under it.
@@ -13,7 +14,7 @@ ScrollBar {
         (contentItem as Rectangle).color = Qt.binding(() => {
             if (Application.styleHints.accessibility.contrastPreference === Qt.HighContrast)
                 return pressed ? palette.highlight : palette.text
-            return Qt.rgba(palette.text.r, palette.text.g, palette.text.b, pressed ? 0.65 : 0.45)
+            return Theme.tint(palette, pressed ? 0.65 : 0.45)
         })
     }
 }

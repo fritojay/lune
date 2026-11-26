@@ -83,7 +83,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 visible: queuePane.count > 0
                 opacity: 0.7
-                font.pointSize: Application.font.pointSize - 1
+                font.pointSize: Theme.smallPointSize
                 elide: Text.ElideRight
                 text: qsTr("%L1 tracks · %2").arg(queuePane.count).arg(queuePane.totalDuration)
             }

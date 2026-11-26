@@ -11,6 +11,14 @@ QtObject {
     // list. BenchRun flicks at that default, so raising this doesn't skew it.
     readonly property real maxFlickVelocity: 10000
 
+    // Text sizes follow the system's, so a larger system font enlarges them all.
+    readonly property real smallPointSize: Qt.application.font.pointSize - 1
+    readonly property real albumPointSize: Qt.application.font.pointSize * 1.2
+    readonly property real headingPointSize: Qt.application.font.pointSize * 1.4
+    readonly property real titlePointSize: Qt.application.font.pointSize * 1.6
+
+    readonly property color warning: "#d93025"
+
     // A tint of the text color rather than alternateBase, which the macOS style makes
     // near-white regardless of the text color, so stripes stay readable in light and dark mode.
     function stripeColor(palette: Palette): color {

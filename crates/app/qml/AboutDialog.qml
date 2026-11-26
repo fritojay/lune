@@ -24,7 +24,7 @@ Dialog {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("Lune")
             font.bold: true
-            font.pointSize: Qt.application.font.pointSize * 1.6
+            font.pointSize: Theme.titlePointSize
         }
 
         Label {

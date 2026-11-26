@@ -130,7 +130,7 @@ ColumnLayout {
         id: sortHeading
         property bool active
         signal clicked()
-        font.pointSize: Application.font.pointSize - 1
+        font.pointSize: Theme.smallPointSize
         elide: Text.ElideRight
         opacity: active || sortArea.containsMouse ? 1 : 0.6
         MouseArea {
@@ -207,7 +207,7 @@ ColumnLayout {
         Label {
             Layout.fillWidth: true
             padding: 10
-            font.pointSize: 16
+            font.pointSize: Theme.titlePointSize
             font.bold: true
             elide: Text.ElideRight
             textFormat: Text.PlainText
@@ -253,7 +253,7 @@ ColumnLayout {
             Label {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: trackPane.hasFolders ? qsTr("No music found yet") : qsTr("Your library is empty")
-                font.pointSize: 14
+                font.pointSize: Theme.headingPointSize
             }
             Button {
                 anchors.horizontalCenter: parent.horizontalCenter

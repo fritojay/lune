@@ -70,7 +70,7 @@ Rectangle {
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 opacity: 0.7
-                font.pointSize: 9
+                font.pointSize: Theme.smallPointSize
                 color: queueRow.textColor
             }
         }
