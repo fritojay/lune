@@ -35,14 +35,10 @@ ApplicationWindow {
         }
     }
 
-    // Native on macOS, where Qt moves "About…" and "Preferences…" into the application menu by their text.
+    // Native on macOS, where Qt moves "About…", "Preferences…", and "Quit" into the application menu by their text.
     menuBar: MenuBar {
         Menu {
             title: qsTr("&File")
-            Action {
-                text: qsTr("&About Lune…")
-                onTriggered: about.open()
-            }
             Action {
                 text: qsTr("&Preferences…")
                 shortcut: StandardKey.Preferences
@@ -51,6 +47,12 @@ ApplicationWindow {
             Action {
                 text: qsTr("&Unavailable Tracks (%1)…").arg(library.missingCount)
                 onTriggered: unavailableList.open()
+            }
+            MenuSeparator {}
+            Action {
+                text: Qt.platform.os === "windows" ? qsTr("E&xit") : qsTr("&Quit")
+                shortcut: StandardKey.Quit
+                onTriggered: Qt.quit()
             }
         }
         Menu {
@@ -88,6 +90,11 @@ ApplicationWindow {
             Action {
                 text: qsTr("&Keyboard Shortcuts")
                 onTriggered: shortcutList.open()
+            }
+            MenuSeparator {}
+            Action {
+                text: qsTr("&About Lune…")
+                onTriggered: about.open()
             }
         }
     }
