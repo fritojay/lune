@@ -92,26 +92,116 @@ pub enum Field {
 }
 
 impl Field {
-    fn key<'a>(self, catalog: &'a Catalog, i: usize) -> Key<'a> {
-        let track = &catalog.tracks[i];
+    /// In declaration order, so [`Catalog`] can index its keys by discriminant.
+    pub const ALL: [Self; 5] = [
+        Self::AlbumArtist,
+        Self::Artist,
+        Self::Album,
+        Self::Year,
+        Self::Genre,
+    ];
+
+    fn def(self) -> FieldDef {
         match self {
-            Self::AlbumArtist => Key::Text(&track.album_artist_key),
-            Self::Artist => Key::Text(&catalog.artist_keys[i]),
-            Self::Album => Key::Album(track.album_id),
-            Self::Year => Key::Year(track.album_year),
-            Self::Genre => Key::Text(&catalog.genre_keys[i]),
+            Self::AlbumArtist => FieldDef {
+                key: KeyKind::Stored(|t| &t.album_artist_key),
+                label: |t| t.album_artist.clone(),
+                missing: "Unknown Artist",
+                ..FieldDef::TEXT
+            },
+            Self::Artist => FieldDef {
+                key: KeyKind::Text(|t| t.artist.as_deref().unwrap_or_default()),
+                label: |t| t.artist.clone().unwrap_or_default(),
+                missing: "Unknown Artist",
+                ..FieldDef::TEXT
+            },
+            Self::Album => FieldDef {
+                key: KeyKind::Album,
+                label: |t| t.album.clone(),
+                values: ValueOrder::ByGrouping,
+                detail: Some(|t| t.album_artist.clone()),
+                reversible: false,
+                missing: "Unknown Album",
+            },
+            Self::Year => FieldDef {
+                key: KeyKind::AlbumYear,
+                label: |t| t.album_year.map(|y| y.to_string()).unwrap_or_default(),
+                reversible: true,
+                missing: "Unknown",
+                ..FieldDef::TEXT
+            },
+            Self::Genre => FieldDef {
+                key: KeyKind::Text(|t| t.genre.as_deref().unwrap_or_default()),
+                label: |t| t.genre.clone().unwrap_or_default(),
+                missing: "Unknown Genre",
+                ..FieldDef::TEXT
+            },
         }
     }
 
-    fn label(self, track: &ListTrack) -> String {
-        match self {
-            Self::AlbumArtist => track.album_artist.clone(),
-            Self::Artist => track.artist.clone().unwrap_or_default(),
-            Self::Album => track.album.clone(),
-            Self::Year => track.album_year.map(|y| y.to_string()).unwrap_or_default(),
-            Self::Genre => track.genre.clone().unwrap_or_default(),
-        }
+    /// The label shown for a value whose tag is missing.
+    pub fn missing(self) -> &'static str {
+        self.def().missing
     }
+
+    /// The keys track `i` is listed under. Always one for now; everything
+    /// that matches tracks to values goes through here.
+    fn keys<'a>(self, catalog: &'a Catalog, i: usize) -> impl Iterator<Item = Key<'a>> {
+        let track = &catalog.tracks[i];
+        std::iter::once(match self.def().key {
+            KeyKind::Text(_) => Key::Text(catalog.text_key(self, i)),
+            KeyKind::Stored(key) => Key::Text(key(track)),
+            KeyKind::Album => Key::Album(track.album_id),
+            KeyKind::AlbumYear => Key::Year(track.album_year),
+        })
+    }
+
+    fn label(self, track: &ListTrack) -> String {
+        (self.def().label)(track)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FieldDef {
+    key: KeyKind,
+    /// Empty when the tag is missing.
+    label: fn(&ListTrack) -> String,
+    values: ValueOrder,
+    /// Shown under the label in the filter pane.
+    detail: Option<fn(&ListTrack) -> String>,
+    /// Whether [`Catalog::filters_newest_first`] lists the values in reverse.
+    reversible: bool,
+    missing: &'static str,
+}
+
+impl FieldDef {
+    /// The defaults of a tag field; `key`, `label` and `missing` are
+    /// placeholders every entry replaces.
+    const TEXT: Self = Self {
+        key: KeyKind::Text(|_| ""),
+        label: |_| String::new(),
+        values: ValueOrder::ByValue,
+        detail: None,
+        reversible: false,
+        missing: "",
+    };
+}
+
+#[derive(Clone, Copy)]
+enum KeyKind {
+    /// [`normalize::key`] of this text, computed when the catalog is built.
+    Text(fn(&ListTrack) -> &str),
+    /// A normalized key the track already has.
+    Stored(fn(&ListTrack) -> &str),
+    Album,
+    AlbumYear,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ValueOrder {
+    ByValue,
+    /// In the order the grouping lists their first tracks.
+    ByGrouping,
 }
 
 #[derive(Clone, Copy)]
@@ -140,6 +230,15 @@ pub enum FilterValue {
 }
 
 impl FilterValue {
+    /// Whether it's the value of tracks missing the tag.
+    fn is_unknown(&self) -> bool {
+        match self {
+            Self::Text(text) => text.is_empty(),
+            Self::UnknownYear => true,
+            Self::All | Self::Album(_) | Self::Year(_) => false,
+        }
+    }
+
     /// `None` for `All`.
     fn key(&self) -> Option<Key<'_>> {
         match self {
@@ -234,8 +333,8 @@ impl SortColumn {
                 descending,
             ),
             Self::Artist => missing_last(
-                Some(&catalog.artist_keys[a]).filter(|k| !k.is_empty()),
-                Some(&catalog.artist_keys[b]).filter(|k| !k.is_empty()),
+                Some(catalog.text_key(Field::Artist, a)).filter(|k| !k.is_empty()),
+                Some(catalog.text_key(Field::Artist, b)).filter(|k| !k.is_empty()),
                 descending,
             ),
             // lofty reports 0 when it can't read the length.
@@ -301,9 +400,11 @@ pub struct Catalog {
     /// In album artist order: album artist key, album year (Unknown last),
     /// album title key, album, then album track order.
     tracks: Vec<ListTrack>,
-    artist_keys: Vec<String>,
+    /// Per field, by discriminant: the keys of each track for
+    /// [`KeyKind::Text`] fields, empty for the rest.
+    text_keys: [Vec<String>; Field::ALL.len()],
+    /// Title is a sort column but not a field.
     title_keys: Vec<String>,
-    genre_keys: Vec<String>,
     /// Albums with a track on a disc after the first.
     multi_disc: HashSet<i64>,
     /// Indices of `tracks` in year order: album year (Unknown last), then
@@ -321,15 +422,11 @@ pub struct Catalog {
 impl Catalog {
     /// `tracks` must be in [`crate::Library::track_list`] order.
     pub fn new(tracks: Vec<ListTrack>) -> Self {
-        let artist_keys = tracks
-            .iter()
-            .map(|t| normalize::key(t.artist.as_deref().unwrap_or_default()))
-            .collect();
+        let text_keys = Field::ALL.map(|field| match field.def().key {
+            KeyKind::Text(text) => tracks.iter().map(|t| normalize::key(text(t))).collect(),
+            KeyKind::Stored(_) | KeyKind::Album | KeyKind::AlbumYear => Vec::new(),
+        });
         let title_keys = tracks.iter().map(|t| normalize::key(&t.title)).collect();
-        let genre_keys = tracks
-            .iter()
-            .map(|t| normalize::key(t.genre.as_deref().unwrap_or_default()))
-            .collect();
         let multi_disc = tracks
             .iter()
             .filter(|t| t.disc_no.is_some_and(|d| d > 1))
@@ -346,9 +443,8 @@ impl Catalog {
         let by_id = tracks.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
         Self {
             tracks,
-            artist_keys,
+            text_keys,
             title_keys,
-            genre_keys,
             multi_disc,
             by_year,
             by_added,
@@ -377,6 +473,11 @@ impl Catalog {
 
     pub fn is_empty(&self) -> bool {
         self.tracks.is_empty()
+    }
+
+    /// The key of track `i` for `field`, which must be a [`KeyKind::Text`] field.
+    fn text_key(&self, field: Field, i: usize) -> &str {
+        &self.text_keys[field as usize][i]
     }
 
     pub fn track(&self, index: usize) -> Option<&ListTrack> {
@@ -413,23 +514,24 @@ impl Catalog {
         matches: Option<&HashSet<i64>>,
     ) -> Vec<Filter> {
         let field = grouping.field();
-        // Only albums take their order from the tracks; other values would
-        // only take their labels from a different first track.
-        let mut filters = if field == Field::Album {
+        let def = field.def();
+        // Only values in grouping order take their order from the tracks;
+        // other values would only take their labels from a different first
+        // track.
+        let mut filters = if def.values == ValueOrder::ByGrouping {
             let view = self.view(grouping, &FilterValue::All, matches);
             let order = self.newest_first(view, grouping).tracks.into_iter();
             self.filters_in(order, field, matches)
         } else {
             self.filters(grouping, matches)
         };
-        if field == Field::Year {
-            let years = filters
-                .iter()
-                .filter(|f| matches!(f.value, FilterValue::Year(_)))
-                .count();
-            if let Some(years) = filters.get_mut(1..=years) {
-                years.reverse();
-            }
+        if def.reversible
+            && let Some(values) = filters.get_mut(1..)
+        {
+            values.sort_by(|a, b| {
+                let unknown = a.value.is_unknown().cmp(&b.value.is_unknown());
+                unknown.then_with(|| b.value.cmp(&a.value))
+            });
         }
         filters
     }
@@ -441,6 +543,7 @@ impl Catalog {
         field: Field,
         matches: Option<&HashSet<i64>>,
     ) -> Vec<Filter> {
+        let def = field.def();
         let mut all = 0;
         // Each value with the position of its first track.
         let mut values: HashMap<Key<'_>, (usize, Filter)> = HashMap::new();
@@ -450,27 +553,27 @@ impl Catalog {
                 continue;
             }
             all += 1;
-            values
-                .entry(field.key(self, i))
-                .or_insert_with_key(|key| {
-                    let filter = Filter {
-                        value: key.to_value(),
-                        field,
-                        label: field.label(track),
-                        detail: (field == Field::Album).then(|| track.album_artist.clone()),
-                        tracks: 0,
-                    };
-                    (position, filter)
-                })
-                .1
-                .tracks += 1;
+            for key in field.keys(self, i) {
+                values
+                    .entry(key)
+                    .or_insert_with_key(|key| {
+                        let filter = Filter {
+                            value: key.to_value(),
+                            field,
+                            label: field.label(track),
+                            detail: def.detail.map(|detail| detail(track)),
+                            tracks: 0,
+                        };
+                        (position, filter)
+                    })
+                    .1
+                    .tracks += 1;
+            }
         }
         let mut values: Vec<(usize, Filter)> = values.into_values().collect();
-        // Albums keep the grouping's order; other values sort by themselves.
-        if field == Field::Album {
-            values.sort_unstable_by_key(|(position, _)| *position);
-        } else {
-            values.sort_unstable_by(|a, b| a.1.value.cmp(&b.1.value));
+        match def.values {
+            ValueOrder::ByGrouping => values.sort_unstable_by_key(|(position, _)| *position),
+            ValueOrder::ByValue => values.sort_unstable_by(|a, b| a.1.value.cmp(&b.1.value)),
         }
         let mut filters = Vec::with_capacity(values.len() + 1);
         filters.push(Filter {
@@ -500,7 +603,7 @@ impl Catalog {
             if matches.is_some_and(|m| !m.contains(&track.id)) {
                 continue;
             }
-            if wanted.is_some_and(|wanted| field.key(self, i) != wanted) {
+            if wanted.is_some_and(|wanted| !field.keys(self, i).any(|key| key == wanted)) {
                 continue;
             }
             let at = view.tracks.len();

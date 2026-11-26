@@ -19,8 +19,6 @@ fn missing_values_get_placeholders() {
     assert_eq!(artist("  "), "Unknown Artist");
     assert_eq!(artist("Björk"), "Björk");
     assert_eq!(album(""), "Unknown Album");
-    assert_eq!(genre(" "), "Unknown Genre");
-    assert_eq!(genre("Jazz"), "Jazz");
 }
 
 #[test]
@@ -110,6 +108,30 @@ fn shown_seconds(text: &str) -> Option<u64> {
 }
 
 proptest! {
+    #[test]
+    fn a_filter_label_is_the_tag_or_its_fields_placeholder_when_missing(
+        field in proptest::sample::select(&Field::ALL[..]),
+        label in prop_oneof![Just(String::new()), "[ \t]{1,3}", any::<String>()],
+        all: bool,
+    ) {
+        let filter = Filter {
+            value: if all { FilterValue::All } else { FilterValue::Text(label.clone()) },
+            field,
+            label: label.clone(),
+            detail: None,
+            tracks: 1,
+        };
+        let expected = if all {
+            "All"
+        } else if label.trim().is_empty() {
+            field.missing()
+        } else {
+            &label
+        };
+        prop_assert_eq!(filter_label(&filter), expected);
+        prop_assert!(!field.missing().is_empty());
+    }
+
     #[test]
     fn durations_show_whole_minutes_and_seconds_and_long_ones_add_hours(
         ms in prop_oneof![0..10_000_000u64, 3_599_000..3_601_000u64, any::<u64>()],

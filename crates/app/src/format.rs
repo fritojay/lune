@@ -27,19 +27,15 @@ pub fn track_number(disc: Option<u32>, track: Option<u32>, multi_disc: bool) -> 
 }
 
 pub fn year(year: Option<i32>) -> String {
-    year.map_or_else(|| "Unknown".to_owned(), |y| y.to_string())
+    year.map_or_else(|| Field::Year.missing().to_owned(), |y| y.to_string())
 }
 
 pub fn artist(name: &str) -> String {
-    or(name, "Unknown Artist")
+    or(name, Field::Artist.missing())
 }
 
 pub fn album(title: &str) -> String {
-    or(title, "Unknown Album")
-}
-
-pub fn genre(name: &str) -> String {
-    or(name, "Unknown Genre")
+    or(title, Field::Album.missing())
 }
 
 pub fn file_type(codec: &str) -> String {
@@ -55,12 +51,7 @@ pub fn filter_label(filter: &Filter) -> String {
     if filter.value == FilterValue::All {
         return "All".to_owned();
     }
-    match filter.field {
-        Field::AlbumArtist | Field::Artist => artist(&filter.label),
-        Field::Album => album(&filter.label),
-        Field::Year => or(&filter.label, "Unknown"),
-        Field::Genre => genre(&filter.label),
-    }
+    or(&filter.label, filter.field.missing())
 }
 
 /// Nanoseconds since the Unix epoch, as milliseconds.

@@ -62,3 +62,13 @@ symphonia (no system FFmpeg), cpal, rubato, rtrb, lofty, rusqlite (`bundled`, FT
 - Logging via `tracing`, never from the audio callback.
 - Avoid extra comments. Only comment when something is done in a non-obvious way, and say why (a workaround, an invariant, a safety or realtime constraint). Don't write comments or doc comments that restate what the code or its name already says.
 - The settings and window-state files must load files written by newer versions: an unknown key or a value this version can't read never makes the file unreadable, and an unreadable value falls back to its default. Settings keep unknown keys so saving writes them back. The exception is `library_folders`: an unreadable list is an error, so the app never saves over the user's folders.
+
+## Adding a browsable field
+
+A field the filter pane can group by (`Field` in `crates/core/src/browse.rs`):
+
+1. Add the variant to `Field`, `Field::ALL`, and `field_count` in `browse_test.rs`, and give it an entry in `Field::def`: where its key comes from, its label, and its placeholder when the tag is missing. A text field only needs `key`, `label`, and `missing` on top of `FieldDef::TEXT`.
+2. Add a `Grouping` variant that lists it (to `Grouping::ALL`, `Grouping::def`, and `grouping_count`), and its button in `crates/app/qml/Groupings.qml`.
+3. If the data isn't on `ListTrack` yet: add it to `ListTrack` and `LIST_TRACK_COLUMNS` in `query.rs`, write a migration in `db.rs`, read it in `tags.rs`, and bump `READER_VERSION`.
+
+The proptests in `browse_test.rs` run over `Grouping::ALL`, so the new grouping is tested without new tests.

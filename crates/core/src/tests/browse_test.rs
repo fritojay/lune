@@ -540,6 +540,21 @@ fn all_has_every_grouping_once_in_declaration_order() {
     }
 }
 
+/// No wildcard arm, so a new field doesn't compile until it's counted here.
+fn field_count() -> usize {
+    match Field::AlbumArtist {
+        Field::AlbumArtist | Field::Artist | Field::Album | Field::Year | Field::Genre => 5,
+    }
+}
+
+#[test]
+fn all_has_every_field_once_in_declaration_order() {
+    assert_eq!(Field::ALL.len(), field_count());
+    for (i, field) in Field::ALL.into_iter().enumerate() {
+        assert_eq!(field as usize, i, "{field:?}");
+    }
+}
+
 #[test]
 fn a_groupings_name_is_the_one_it_is_saved_under() {
     for grouping in Grouping::ALL {
@@ -618,13 +633,16 @@ fn clicking_a_heading_sorts_ascending_then_descending_then_restores_album_order(
 
 proptest! {
     #[test]
-    fn every_filters_count_is_the_size_of_its_view_of_whole_album_runs(
+    fn the_filter_counts_add_up_to_all_and_each_is_the_size_of_its_view_of_whole_album_runs(
         tracks in arb_tracks(),
         grouping in arb_grouping(),
         matches in arb_matches(),
     ) {
         let catalog = Catalog::new(tracks);
-        for filter in catalog.filters(grouping, matches.as_ref()) {
+        let filters = catalog.filters(grouping, matches.as_ref());
+        let values: usize = filters[1..].iter().map(|f| f.tracks).sum();
+        prop_assert_eq!(values, filters[0].tracks);
+        for filter in filters {
             let view = catalog.view(grouping, &filter.value, matches.as_ref());
             prop_assert_eq!(view.len(), filter.tracks);
             prop_assert_eq!(view.sort, None);
