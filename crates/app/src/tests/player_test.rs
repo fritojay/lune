@@ -147,13 +147,21 @@ fn status(
     }
 }
 
+fn opening(last_start: Option<Instant>, failures: u32) -> Opening {
+    Opening {
+        last_start,
+        failures,
+        ..Opening::default()
+    }
+}
+
 #[test]
 fn the_output_is_opened_again_when_missing_failed_or_its_preferred_device_is_back() {
     let now = Instant::now();
     let fine = status(PlaybackState::Playing, Some(1), false, false);
     let failed = status(PlaybackState::Playing, Some(1), true, false);
     let back = status(PlaybackState::Paused, Some(1), false, true);
-    for (status, last_open, due) in [
+    for (status, last_start, due) in [
         (None, None, true),
         (None, Some(now), false),
         (None, Some(now - REOPEN_EVERY), true),
@@ -163,11 +171,68 @@ fn the_output_is_opened_again_when_missing_failed_or_its_preferred_device_is_bac
         (Some(&back), Some(now - REOPEN_EVERY), true),
     ] {
         assert_eq!(
-            reopen_due(status, last_open, now),
+            opening(last_start, 0).due(status, now),
             due,
-            "{status:?} {last_open:?}"
+            "{status:?} {last_start:?}"
         );
     }
+}
+
+#[test]
+fn each_failed_open_doubles_the_wait_up_to_a_limit() {
+    let now = Instant::now();
+    let mut waits = Vec::new();
+    for failures in 0..10 {
+        let wait = (1..=60)
+            .map(Duration::from_secs)
+            .find(|&wait| opening(Some(now - wait), failures).due(None, now))
+            .unwrap();
+        waits.push(wait.as_secs());
+    }
+    assert_eq!(waits, [2, 4, 8, 16, 30, 30, 30, 30, 30, 30]);
+    assert!(opening(None, u32::MAX).due(None, now));
+}
+
+#[test]
+fn no_open_starts_while_one_is_running() {
+    let now = Instant::now();
+    let mut opening = Opening::default();
+    assert!(opening.start(None, now));
+    assert!(!opening.due(None, now + REOPEN_AT_MOST_EVERY));
+    assert!(!opening.start(None, now));
+    // Asked for again while running, so its result is out of date.
+    assert_eq!(opening.finish(Ok::<_, ()>(())), Finished::Again);
+    assert!(opening.start(None, now));
+    assert_eq!(opening.finish(Ok::<_, ()>(())), Finished::Opened((), None));
+}
+
+#[test]
+fn a_new_output_goes_on_from_where_the_old_one_was_after_opens_that_fail() {
+    let now = Instant::now();
+    let resume = (EntryId(3), Duration::from_secs(42), true);
+    let mut opening = Opening::default();
+    assert!(opening.start(Some(resume), now));
+    assert_eq!(
+        opening.finish(Err::<(), _>("busy")),
+        Finished::Failed("busy", true)
+    );
+    assert!(opening.start(None, now));
+    assert_eq!(
+        opening.finish(Err::<(), _>("busy")),
+        Finished::Failed("busy", false)
+    );
+    assert!(opening.start(None, now));
+    assert_eq!(
+        opening.finish(Ok::<_, ()>(())),
+        Finished::Opened((), Some(resume))
+    );
+    assert!(opening.start(None, now));
+    assert_eq!(opening.finish(Ok::<_, ()>(())), Finished::Opened((), None));
+    assert!(opening.start(None, now));
+    assert_eq!(
+        opening.finish(Err::<(), _>("gone")),
+        Finished::Failed("gone", true)
+    );
 }
 
 #[test]

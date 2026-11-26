@@ -167,10 +167,7 @@ pub struct PlayerControllerRust {
     volume: f64,
     muted: bool,
     player: Option<Player>,
-    last_open: Option<Instant>,
-    /// That no output could be opened has been logged, so retries don't
-    /// repeat it.
-    open_failure_logged: bool,
+    opening: Opening,
     /// The entry the engine last reported playing.
     playing_entry: Option<EntryId>,
     cover_id: Option<i64>,
@@ -199,8 +196,7 @@ impl Default for PlayerControllerRust {
             volume: 1.0,
             muted: false,
             player: None,
-            last_open: None,
-            open_failure_logged: false,
+            opening: Opening::default(),
             playing_entry: None,
             cover_id: None,
             media: None,
@@ -212,7 +208,7 @@ impl Default for PlayerControllerRust {
 
 impl cxx_qt::Initialize for qobject::PlayerController {
     fn initialize(mut self: Pin<&mut Self>) {
-        self.as_mut().open_output();
+        self.as_mut().open_output(None);
         covers::on_ready(self.qt_thread(), Self::cover_ready);
         // Created on the Qt (main) thread, as macOS requires.
         let qt_thread = self.qt_thread();
@@ -562,7 +558,7 @@ impl qobject::PlayerController {
 
     fn poll(mut self: Pin<&mut Self>) {
         let status = self.player.as_ref().map(Player::status);
-        if reopen_due(status.as_ref(), self.last_open, Instant::now()) {
+        if self.opening.due(status.as_ref(), Instant::now()) {
             self.reopen();
             return;
         }
@@ -613,26 +609,52 @@ impl qobject::PlayerController {
         }
     }
 
-    /// Opens the output the settings choose, or the default in its place.
-    fn open_output(mut self: Pin<&mut Self>) {
-        self.as_mut().rust_mut().last_open = Some(Instant::now());
+    /// Opens the output the settings choose, or the default in its place,
+    /// on another thread: finding devices can take a while. The new one goes
+    /// on from `resume`, or from where an earlier failed open would have.
+    fn open_output(mut self: Pin<&mut Self>, resume: Option<Resume>) {
+        if !self
+            .as_mut()
+            .rust_mut()
+            .opening
+            .start(resume, Instant::now())
+        {
+            return;
+        }
         let preferred = with_store(|store| store.settings().output_device.clone());
         let config = PlayerConfig {
             output: OutputKind::Device { preferred },
             ..PlayerConfig::default()
         };
-        match Player::new(config, Arc::new(session::EngineQueue)) {
-            Ok(player) => {
+        let qt_thread = self.qt_thread();
+        let spawned = std::thread::Builder::new()
+            .name("lune-output-open".into())
+            .spawn(move || {
+                let opened = Player::new(config, Arc::new(session::EngineQueue));
+                // An error means the object is gone (the app is quitting).
+                let _ = qt_thread.queue(move |controller| controller.opened(opened));
+            });
+        if let Err(err) = spawned {
+            self.opened(Err(err.into()));
+        }
+    }
+
+    fn opened(mut self: Pin<&mut Self>, opened: lune_engine::Result<Player>) {
+        match self.as_mut().rust_mut().opening.finish(opened) {
+            Finished::Again => self.open_output(None),
+            Finished::Opened(player, resume) => {
                 player.set_volume(self.volume_state().output() as f32);
-                let mut this = self.as_mut().rust_mut();
-                this.player = Some(player);
-                this.open_failure_logged = false;
+                self.as_mut().rust_mut().player = Some(player);
                 set!(self, available, available_changed, true);
+                if let Some(resume) = resume {
+                    self.go_on_from(resume);
+                }
             }
-            Err(err) => {
-                if !self.open_failure_logged {
-                    tracing::error!(%err, "no audio output; playback waits for one");
-                    self.as_mut().rust_mut().open_failure_logged = true;
+            Finished::Failed(err, first) => {
+                if first {
+                    session::report_error(&format!(
+                        "No sound output could be opened, so playback waits for one: {err}"
+                    ));
                 }
                 set!(self, available, available_changed, false);
             }
@@ -648,13 +670,14 @@ impl qobject::PlayerController {
             .and_then(|player| resume_from(&player.status()));
         // Some devices take one stream at a time, so the old one goes first.
         drop(self.as_mut().rust_mut().player.take());
-        self.as_mut().open_output();
         // The new output starts with nothing heard, which isn't the end of
         // the track that was playing.
         self.as_mut().rust_mut().playing_entry = None;
-        let Some((entry, position, playing)) = resume else {
-            return;
-        };
+        set!(self, available, available_changed, false);
+        self.open_output(resume);
+    }
+
+    fn go_on_from(self: Pin<&mut Self>, (entry, position, playing): Resume) {
         let slot = SlotId(entry.0);
         let item = {
             let mut queue = session::lock_queue();
@@ -771,18 +794,87 @@ impl qobject::PlayerController {
 }
 
 const REOPEN_EVERY: Duration = Duration::from_secs(2);
-
-/// Whether to open the output again: there is none, it failed, or it plays
-/// in place of the preferred device, which is back. At most once per
-/// [`REOPEN_EVERY`].
-fn reopen_due(status: Option<&Status>, last_open: Option<Instant>, now: Instant) -> bool {
-    let wanted = status.is_none_or(|status| status.output_failed || status.preferred_back);
-    wanted && last_open.is_none_or(|at| now.duration_since(at) >= REOPEN_EVERY)
-}
+/// Longest wait between tries while no output opens, e.g. on a machine
+/// without sound.
+const REOPEN_AT_MOST_EVERY: Duration = Duration::from_secs(30);
 
 /// Where a new output goes on from: the entry heard, its position, and
 /// whether it was playing (a paused one waits to be resumed).
-fn resume_from(status: &Status) -> Option<(EntryId, Duration, bool)> {
+type Resume = (EntryId, Duration, bool);
+
+/// When to open the output, and what the next one goes on from.
+#[derive(Debug, Default)]
+struct Opening {
+    running: bool,
+    /// Asked for while one was running, which then opens with out of date
+    /// settings, so it is opened again.
+    again: bool,
+    last_start: Option<Instant>,
+    /// Opens failed in a row; each one waits twice as long.
+    failures: u32,
+    /// Kept until an output opens, so one that fails to open doesn't lose it.
+    resume: Option<Resume>,
+}
+
+#[derive(Debug, PartialEq)]
+enum Finished<T, E> {
+    Again,
+    /// With what to go on from.
+    Opened(T, Option<Resume>),
+    /// And whether it's the first failure in a row.
+    Failed(E, bool),
+}
+
+impl Opening {
+    /// Whether to start an open now; else one is running, and another
+    /// follows it.
+    fn start(&mut self, resume: Option<Resume>, now: Instant) -> bool {
+        if resume.is_some() {
+            self.resume = resume;
+        }
+        if self.running {
+            self.again = true;
+            return false;
+        }
+        self.running = true;
+        self.last_start = Some(now);
+        true
+    }
+
+    fn finish<T, E>(&mut self, opened: Result<T, E>) -> Finished<T, E> {
+        self.running = false;
+        if std::mem::take(&mut self.again) {
+            return Finished::Again;
+        }
+        match opened {
+            Ok(opened) => {
+                self.failures = 0;
+                Finished::Opened(opened, self.resume.take())
+            }
+            Err(err) => {
+                self.failures = self.failures.saturating_add(1);
+                Finished::Failed(err, self.failures == 1)
+            }
+        }
+    }
+
+    /// Whether to open the output again: there is none, it failed, or it
+    /// plays in place of the preferred device, which is back. At most once
+    /// per [`REOPEN_EVERY`], doubled for each open that failed in a row.
+    fn due(&self, status: Option<&Status>, now: Instant) -> bool {
+        let wanted = status.is_none_or(|status| status.output_failed || status.preferred_back);
+        let wait = REOPEN_EVERY
+            .saturating_mul(2u32.saturating_pow(self.failures))
+            .min(REOPEN_AT_MOST_EVERY);
+        !self.running
+            && wanted
+            && self
+                .last_start
+                .is_none_or(|at| now.duration_since(at) >= wait)
+    }
+}
+
+fn resume_from(status: &Status) -> Option<Resume> {
     let entry = status.entry?;
     Some((
         entry,
