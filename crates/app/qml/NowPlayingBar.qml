@@ -6,27 +6,10 @@ import com.lune.player
 
 Pane {
     id: nowPlayingBar
-    required property PlayerController controller
-    required property bool available
-    required property bool hasTrack
-    required property bool playing
-    required property string title
-    required property string artist
-    required property string album
-    required property real position
-    required property real duration
-    required property real volume
-    required property bool muted
     required property bool queueShown
     // Room for the centered transport with the side controls beside it.
     readonly property real minimumWidth: transport.implicitWidth + 2 * (sideControls.implicitWidth + 8) + 16
 
-    signal previous()
-    signal togglePause()
-    signal next()
-    signal seek(real seconds)
-    signal volumeMoved(real volume)
-    signal muteToggled()
     signal queueToggled(bool shown)
 
     component TransportButton: KeyToolButton {
@@ -49,11 +32,11 @@ Pane {
             clip: true
 
             readonly property real gap: 48
-            readonly property bool scrolls: nowPlayingBar.playing && line.width > width
-            readonly property string text: nowPlayingBar.title + nowPlayingBar.artist + nowPlayingBar.album
-            readonly property string heading: nowPlayingBar.hasTrack ? nowPlayingBar.title
-                : (nowPlayingBar.available ? qsTr("Nothing playing") : qsTr("No audio output"))
-            readonly property string detail: nowPlayingBar.hasTrack ? nowPlayingBar.artist + " — " + nowPlayingBar.album : ""
+            readonly property bool scrolls: Player.playing && line.width > width
+            readonly property string text: Player.title + Player.artist + Player.album
+            readonly property string heading: Player.hasTrack ? Player.title
+                : (Player.available ? qsTr("Nothing playing") : qsTr("No audio output"))
+            readonly property string detail: Player.hasTrack ? Player.artist + " — " + Player.album : ""
 
             component TrackLine: Row {
                 id: trackLine
@@ -125,7 +108,7 @@ Pane {
                 spacing: 6
                 TransportButton {
                     icon.source: "icons/previous.svg"
-                    onClicked: nowPlayingBar.previous()
+                    onClicked: Player.previous()
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Previous")
                 }
@@ -135,13 +118,13 @@ Pane {
                     implicitWidth: 40
                     implicitHeight: 40
                     hoverEnabled: true
-                    enabled: nowPlayingBar.available
+                    enabled: Player.available
                     contentItem: Item {
                         PathIcon {
                             anchors.centerIn: parent
                             width: 20
                             height: 20
-                            name: nowPlayingBar.playing ? "pause" : "play"
+                            name: Player.playing ? "pause" : "play"
                             color: playButton.palette.highlightedText
                         }
                     }
@@ -154,15 +137,15 @@ Pane {
                         border.width: playButton.visualFocus ? 2 : 0
                         border.color: playButton.palette.highlightedText
                     }
-                    onClicked: nowPlayingBar.togglePause()
+                    onClicked: Player.togglePause()
                     Keys.onReturnPressed: click()
                     Keys.onEnterPressed: click()
                     ToolTip.visible: hovered
-                    ToolTip.text: nowPlayingBar.playing ? qsTr("Pause") : qsTr("Play")
+                    ToolTip.text: Player.playing ? qsTr("Pause") : qsTr("Play")
                 }
                 TransportButton {
                     icon.source: "icons/next.svg"
-                    onClicked: nowPlayingBar.next()
+                    onClicked: Player.next()
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Next")
                 }
@@ -173,12 +156,7 @@ Pane {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 4
-                VolumeControl {
-                    volume: nowPlayingBar.volume
-                    muted: nowPlayingBar.muted
-                    onVolumeMoved: volume => nowPlayingBar.volumeMoved(volume)
-                    onMuteToggled: nowPlayingBar.muteToggled()
-                }
+                VolumeControl {}
                 ToggleToolButton {
                     icon.source: "icons/queue.svg"
                     icon.color: palette.buttonText
@@ -196,31 +174,31 @@ Pane {
             Label {
                 Layout.preferredWidth: clockWidth.width
                 horizontalAlignment: Text.AlignRight
-                text: nowPlayingBar.controller.clock(seekBar.pressed ? seekBar.value : nowPlayingBar.position)
+                text: Player.clock(seekBar.pressed ? seekBar.value : Player.position)
                 font.features: { "tnum": 1 }
                 opacity: 0.7
                 TextMetrics {
                     id: clockWidth
                     font.features: { "tnum": 1 }
-                    text: nowPlayingBar.controller.clock(Math.max(nowPlayingBar.duration, 600))
+                    text: Player.clock(Math.max(Player.duration, 600))
                 }
             }
             Slider {
                 id: seekBar
                 Layout.fillWidth: true
                 from: 0
-                to: Math.max(nowPlayingBar.duration, 0.001)
-                enabled: nowPlayingBar.hasTrack
+                to: Math.max(Player.duration, 0.001)
+                enabled: Player.hasTrack
                 // Follows the player except while dragged; seeks on release.
                 Binding on value {
                     when: !seekBar.pressed
-                    value: nowPlayingBar.position
+                    value: Player.position
                 }
-                onPressedChanged: if (!pressed) nowPlayingBar.seek(value)
+                onPressedChanged: if (!pressed) Player.seek(value)
             }
             Label {
                 Layout.preferredWidth: clockWidth.width
-                text: nowPlayingBar.controller.clock(nowPlayingBar.duration)
+                text: Player.clock(Player.duration)
                 font.features: { "tnum": 1 }
                 opacity: 0.7
             }

@@ -6,13 +6,12 @@ import com.lune.player
 // What can be done with one playlist in the Playlists pane.
 Menu {
     id: playlistMenu
-    required property PlaylistsModel playlists
     property string playlistId
     property string name
 
     function show(row: int) {
-        playlistId = playlists.idAt(row)
-        name = playlists.nameAt(row)
+        playlistId = Playlists.idAt(row)
+        name = Playlists.nameAt(row)
         if (playlistId !== "")
             popup()
     }
@@ -23,7 +22,7 @@ Menu {
             const id = playlistMenu.playlistId
             const dialog = nameDialog.createObject(playlistMenu.parent,
                                                    { title: qsTr("Rename Playlist"), name: playlistMenu.name })
-            dialog.chosen.connect(name => playlistMenu.playlists.rename(id, name))
+            dialog.chosen.connect(name => Playlists.rename(id, name))
             dialog.open()
         }
     }
@@ -51,7 +50,7 @@ Menu {
             title: qsTr("Delete Playlist")
             standardButtons: Dialog.Ok | Dialog.Cancel
             Component.onCompleted: standardButton(Dialog.Ok).text = qsTr("Delete")
-            onAccepted: playlistMenu.playlists.remove(playlistId)
+            onAccepted: Playlists.remove(playlistId)
             onClosed: destroy()
             Label {
                 width: parent.width

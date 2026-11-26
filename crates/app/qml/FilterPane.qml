@@ -4,33 +4,44 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import com.lune.player
 
-// The values of the chosen grouping, or another list with the same roles
-// (`label`, `detail`, `count`, `all`).
+// The values of the chosen grouping, or the playlists, which have the same
+// roles (`label`, `detail`, `count`, `all`).
 ColumnLayout {
     id: filterPane
-    required property var model
-    required property int currentRow
-    // Shown under the search field while `headerShown`.
-    property alias headerItems: header.data
-    property bool headerShown: false
-    required property url cover
-    required property bool hasTrack
-    required property string album
-    signal searchEdited(string text)
-    signal rowChosen(int row)
-    signal rowMenuRequested(int row)
-    signal albumRequested()
+    readonly property bool listsPlaylists: Filters.sourceKind === "playlists"
+    readonly property var rows: listsPlaylists ? Playlists : Filters
 
     function focusSearch() {
         search.forceActiveFocus()
     }
 
-    function clearSearch() {
-        search.clear()
-        filterList.forceActiveFocus()
+    spacing: 6
+
+    Connections {
+        target: Filters
+        function onSearchCleared() {
+            search.clear()
+            filterList.forceActiveFocus()
+        }
     }
 
-    spacing: 6
+    Connections {
+        target: Playlists
+        function onPlaylistChosen(id: string) {
+            Filters.showPlaylist(id)
+        }
+    }
+
+    PlaylistMenu {
+        id: playlistMenu
+    }
+
+    Component {
+        id: newPlaylist
+        NewPlaylistDialog {
+            showMade: true
+        }
+    }
 
     RowLayout {
         Layout.fillWidth: true
@@ -41,7 +52,7 @@ ColumnLayout {
             Layout.fillWidth: true
             placeholderText: qsTr("Search")
             rightPadding: clearSearch.width
-            onTextChanged: filterPane.searchEdited(text)
+            onTextChanged: Filters.setSearch(text)
             Keys.onEscapePressed: {
                 text = ""
                 filterList.forceActiveFocus()
@@ -65,34 +76,36 @@ ColumnLayout {
         }
     }
 
-    ColumnLayout {
-        id: header
+    Button {
         Layout.fillWidth: true
         Layout.leftMargin: 6
         Layout.rightMargin: 6
-        visible: filterPane.headerShown
+        visible: filterPane.listsPlaylists
+        enabled: Playlists.loaded
+        text: qsTr("New Playlist…")
+        onClicked: newPlaylist.createObject(filterPane).open()
     }
 
     ListView {
         id: filterList
         Layout.fillWidth: true
         Layout.fillHeight: true
-        model: filterPane.model
+        model: filterPane.rows
         clip: true
         reuseItems: true
         boundsBehavior: Flickable.StopAtBounds
         maximumFlickVelocity: Theme.maxFlickVelocity
-        currentIndex: filterPane.currentRow
+        currentIndex: filterPane.rows.currentRow
         // Only the keys and clicks choose a row: the current index also moves
         // when the model resets or is swapped, which is no choice.
         keyNavigationEnabled: false
         Keys.onUpPressed: {
             decrementCurrentIndex()
-            filterPane.rowChosen(currentIndex)
+            filterPane.rows.select(currentIndex)
         }
         Keys.onDownPressed: {
             incrementCurrentIndex()
-            filterPane.rowChosen(currentIndex)
+            filterPane.rows.select(currentIndex)
         }
         ScrollBar.vertical: ListScrollBar {
             id: filterScroll
@@ -155,10 +168,11 @@ ColumnLayout {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: mouse => {
                     if (mouse.button === Qt.RightButton) {
-                        filterPane.rowMenuRequested(filterRow.index)
+                        if (filterPane.listsPlaylists)
+                            playlistMenu.show(filterRow.index)
                         return
                     }
-                    filterPane.rowChosen(filterRow.index)
+                    filterPane.rows.select(filterRow.index)
                     filterList.forceActiveFocus()
                 }
             }
@@ -168,13 +182,13 @@ ColumnLayout {
     // The playing track's cover, as large as the pane allows while leaving
     // the filter list at least half the height.
     CoverArt {
-        visible: filterPane.hasTrack
+        visible: Player.hasTrack
         readonly property real side: Math.min(parent.width - 12, parent.height / 2)
         Layout.preferredWidth: side
         Layout.preferredHeight: side
         Layout.alignment: Qt.AlignHCenter
         Layout.bottomMargin: 6
-        source: filterPane.cover
+        source: Player.cover
         // The thumbnail is already small, and decoding at the width would decode it
         // again at every step of a resize.
         decodeAtSize: false
@@ -183,9 +197,9 @@ ColumnLayout {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: filterPane.albumRequested()
+            onClicked: Filters.showAlbum(Player.currentTrackId)
             ToolTip.visible: containsMouse
-            ToolTip.text: qsTr("Go to the album “%1”").arg(filterPane.album)
+            ToolTip.text: qsTr("Go to the album “%1”").arg(Player.album)
         }
     }
 }

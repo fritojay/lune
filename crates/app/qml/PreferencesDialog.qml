@@ -6,18 +6,15 @@ import com.lune.player
 
 Dialog {
     id: preferences
-    required property list<var> folders
-    required property bool busy
-    required property string status
-
-    signal addFolderRequested()
-    signal removeFolderRequested(string path)
-    signal rescanRequested()
 
     title: qsTr("Preferences")
     modal: true
     onAboutToShow: Preferences.refreshOutputDevices()
     standardButtons: Dialog.Close
+
+    AddFolderDialog {
+        id: folderDialog
+    }
 
     // Removing a folder deletes its tracks from the library. Adding it back
     // gives them new ids, so playlists and play history never get them back.
@@ -33,7 +30,7 @@ Dialog {
             title: qsTr("Remove Folder")
             standardButtons: Dialog.Ok | Dialog.Cancel
             Component.onCompleted: standardButton(Dialog.Ok).text = qsTr("Remove")
-            onAccepted: preferences.removeFolderRequested(path)
+            onAccepted: Library.removeFolder(path)
             onClosed: destroy()
             Label {
                 width: parent.width
@@ -69,7 +66,7 @@ Dialog {
                 id: folderList
                 anchors.fill: parent
                 clip: true
-                model: preferences.folders
+                model: Library.folders
                 ScrollBar.vertical: ListScrollBar {}
                 WheelScroller {
                     view: folderList
@@ -127,17 +124,17 @@ Dialog {
             Layout.fillWidth: true
             Button {
                 text: qsTr("Add Folder…")
-                onClicked: preferences.addFolderRequested()
+                onClicked: folderDialog.open()
             }
             Button {
                 text: qsTr("Rescan Now")
-                enabled: preferences.folders.length > 0 && !preferences.busy
-                onClicked: preferences.rescanRequested()
+                enabled: Library.folders.length > 0 && !Library.busy
+                onClicked: Library.rescan()
             }
             Label {
                 Layout.fillWidth: true
-                visible: preferences.busy
-                text: preferences.status
+                visible: Library.busy
+                text: Library.status
                 textFormat: Text.PlainText
                 elide: Text.ElideMiddle
                 opacity: 0.7

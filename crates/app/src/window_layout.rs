@@ -31,6 +31,7 @@ pub mod qobject {
     extern "RustQt" {
         #[qobject]
         #[qml_element]
+        #[qml_singleton]
         #[qproperty(i32, width, READ, NOTIFY)]
         #[qproperty(i32, height, READ, NOTIFY)]
         #[qproperty(bool, maximized, READ, CONSTANT)]

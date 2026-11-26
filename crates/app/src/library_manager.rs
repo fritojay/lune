@@ -33,7 +33,8 @@ pub mod qobject {
 
     extern "RustQt" {
         #[qobject]
-        #[qml_element]
+        #[qml_element = "Library"]
+        #[qml_singleton]
         /// `{ path, lastScanned, leftOut }` per folder; `lastScanned` is
         /// epoch ms, absent if never scanned, and `leftOut` says what a full
         /// scan didn't add, absent if nothing.

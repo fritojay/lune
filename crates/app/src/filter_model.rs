@@ -43,7 +43,8 @@ pub mod qobject {
 
     extern "RustQt" {
         #[qobject]
-        #[qml_element]
+        #[qml_element = "Filters"]
+        #[qml_singleton]
         #[base = QAbstractListModel]
         #[qproperty(bool, loading)]
         #[qproperty(i32, current_row, cxx_name = "currentRow", READ, NOTIFY)]

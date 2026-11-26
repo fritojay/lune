@@ -59,22 +59,21 @@ fn an_unknown_source_selects_nothing() {
 
 #[test]
 fn every_track_list_qml_names_is_a_selection_source() {
-    let panes = [
+    let names: BTreeSet<&str> = [
+        include_str!("../../qml/main.qml"),
         include_str!("../../qml/TrackPane.qml"),
         include_str!("../../qml/QueuePane.qml"),
-    ];
-    let menus = panes
-        .iter()
-        .flat_map(|qml| qml.lines())
-        .filter_map(|line| line.trim().strip_prefix("source: \""));
-    let plays = include_str!("../../qml/main.qml")
-        .split("player.play(\"")
-        .skip(1);
-    let names: Vec<&str> = menus
-        .chain(plays)
-        .map(|rest| &rest[..rest.find('"').unwrap()])
-        .collect();
-    assert_eq!(names, ["view", "queue", "queue", "view"]);
+    ]
+    .into_iter()
+    .flat_map(|qml| {
+        let menus = qml
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("source: \""));
+        menus.chain(qml.split("Player.play(\"").skip(1))
+    })
+    .map(|rest| &rest[..rest.find('"').unwrap()])
+    .collect();
+    assert_eq!(names, BTreeSet::from(["queue", "view"]));
     for name in names {
         assert!(Selection::new(name, [0]).is_some(), "{name}");
     }

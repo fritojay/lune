@@ -1,36 +1,31 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import com.lune.player
 
 ApplicationWindow {
     id: window
-    width: layout.width
-    height: layout.height
-    visibility: layout.maximized ? Window.Maximized : Window.Windowed
-    title: player.hasTrack ? qsTr("%1 – %2").arg(player.title).arg(player.artist) : qsTr("Lune")
+    width: WindowLayout.width
+    height: WindowLayout.height
+    visibility: WindowLayout.maximized ? Window.Maximized : Window.Windowed
+    title: Player.hasTrack ? qsTr("%1 – %2").arg(Player.title).arg(Player.artist) : qsTr("Lune")
 
-    property bool queueShown: layout.queueShown
+    property bool queueShown: WindowLayout.queueShown
     // The size while not maximized, which is what gets saved.
-    property real normalWidth: layout.width
-    property real normalHeight: layout.height
+    property real normalWidth: WindowLayout.width
+    property real normalHeight: WindowLayout.height
 
     onWidthChanged: if (visibility === Window.Windowed) normalWidth = width
     onHeightChanged: if (visibility === Window.Windowed) normalHeight = height
 
-    Component.onCompleted: layout.fit(Screen.desktopAvailableWidth, Screen.desktopAvailableHeight,
-                                      mainPane.SplitView.minimumWidth)
-
-    WindowLayout {
-        id: layout
-    }
+    Component.onCompleted: WindowLayout.fit(Screen.desktopAvailableWidth, Screen.desktopAvailableHeight,
+                                            mainPane.SplitView.minimumWidth)
 
     Connections {
         target: Qt.application
         function onAboutToQuit() {
-            layout.save(window.normalWidth, window.normalHeight, window.visibility === Window.Maximized,
+            WindowLayout.save(window.normalWidth, window.normalHeight, window.visibility === Window.Maximized,
                         filterPane.SplitView.preferredWidth, queuePane.SplitView.preferredWidth, window.queueShown)
         }
     }
@@ -45,7 +40,7 @@ ApplicationWindow {
                 onTriggered: settings.open()
             }
             Action {
-                text: qsTr("&Unavailable Tracks (%1)…").arg(library.missingCount)
+                text: qsTr("&Unavailable Tracks (%1)…").arg(Library.missingCount)
                 onTriggered: unavailableList.open()
             }
             MenuSeparator {}
@@ -61,33 +56,29 @@ ApplicationWindow {
                 text: qsTr("Albums as &List")
                 shortcut: listKey.sequence
                 checkable: true
-                checked: !layout.albumGrid
+                checked: !WindowLayout.albumGrid
                 onTriggered: {
-                    layout.albumGrid = false
+                    WindowLayout.albumGrid = false
                     // Triggering toggles `checked`, which breaks its binding.
-                    checked = Qt.binding(() => !layout.albumGrid)
+                    checked = Qt.binding(() => !WindowLayout.albumGrid)
                 }
             }
             Action {
                 text: qsTr("Albums as &Grid")
                 shortcut: gridKey.sequence
                 checkable: true
-                checked: layout.albumGrid
+                checked: WindowLayout.albumGrid
                 onTriggered: {
-                    layout.albumGrid = true
-                    checked = Qt.binding(() => layout.albumGrid)
+                    WindowLayout.albumGrid = true
+                    checked = Qt.binding(() => WindowLayout.albumGrid)
                 }
             }
             MenuSeparator {}
             SortMenu {
                 title: qsTr("&Sort")
-                items: filters.sortMenu
-                onSortChosen: (column, descending) => filters.setSort(column, descending)
             }
             ColumnsMenu {
                 title: qsTr("&Columns")
-                hiddenColumns: layout.hiddenColumns
-                onColumnToggled: (column, shown) => layout.setColumnShown(column, shown)
             }
         }
         Menu {
@@ -104,52 +95,6 @@ ApplicationWindow {
         }
     }
 
-    LibraryManager {
-        id: library
-    }
-
-    MissingModel {
-        id: missingTracks
-    }
-
-    FilterModel {
-        id: filters
-        onSearchCleared: filterPane.clearSearch()
-    }
-
-    PlaylistsModel {
-        id: playlistsModel
-        onPlaylistChosen: id => filters.showPlaylist(id)
-    }
-
-    AlbumListModel {
-        id: albums
-        // A rescan keeps the list where it was.
-        onModelAboutToBeReset: trackPane.list.keepPosition()
-        onRefreshed: reset => trackPane.resetView(reset)
-    }
-
-    AlbumGridModel {
-        id: albumGrid
-        onModelAboutToBeReset: trackPane.keepGridPosition()
-        onRefreshed: reset => trackPane.resetGrid(reset)
-    }
-
-    AlbumListModel {
-        id: openAlbum
-        oneAlbum: true
-        albumId: trackPane.shownAlbumId
-    }
-
-    QueueModel {
-        id: queueModel
-        currentRow: player.queueIndex
-    }
-
-    PlayerController {
-        id: player
-    }
-
     BenchProbe {
         id: bench
         onListFilled: benchRun.start()
@@ -160,27 +105,27 @@ ApplicationWindow {
     Shortcut {
         id: playPauseKey
         sequence: "Space"
-        onActivated: player.togglePause()
+        onActivated: Player.togglePause()
     }
     Shortcut {
         id: seekBackKey
         sequence: "Left"
-        onActivated: player.seekBy(-5)
+        onActivated: Player.seekBy(-5)
     }
     Shortcut {
         id: seekForwardKey
         sequence: "Right"
-        onActivated: player.seekBy(5)
+        onActivated: Player.seekBy(5)
     }
     Shortcut {
         id: previousKey
         sequence: "Ctrl+Left"
-        onActivated: player.previous()
+        onActivated: Player.previous()
     }
     Shortcut {
         id: nextKey
         sequence: "Ctrl+Right"
-        onActivated: player.next()
+        onActivated: Player.next()
     }
     Shortcut {
         id: findKey
@@ -233,23 +178,10 @@ ApplicationWindow {
         width: Math.min(400, window.width - 40)
     }
 
-    FolderDialog {
-        id: folderDialog
-        title: qsTr("Add a music folder")
-        options: library.nativeFolderDialog ? 0 : FolderDialog.DontUseNativeDialog
-        onAccepted: library.addFolder(selectedFolder)
-    }
-
     PreferencesDialog {
         id: settings
         anchors.centerIn: parent
         width: Math.min(560, window.width - 40)
-        folders: library.folders
-        busy: library.busy
-        status: library.status
-        onAddFolderRequested: folderDialog.open()
-        onRemoveFolderRequested: path => library.removeFolder(path)
-        onRescanRequested: library.rescan()
     }
 
     UnavailableDialog {
@@ -257,10 +189,6 @@ ApplicationWindow {
         anchors.centerIn: parent
         width: Math.min(720, window.width - 40)
         height: Math.min(560, window.height - 40)
-        model: missingTracks
-        count: library.missingCount
-        onForgetRequested: trackId => library.forgetMissing(trackId)
-        onForgetAllRequested: library.forgetAllMissing()
     }
 
     ColumnLayout {
@@ -270,8 +198,8 @@ ApplicationWindow {
         // Errors from the library thread (settings file, database).
         ErrorBanner {
             Layout.fillWidth: true
-            message: library.error
-            onDismissed: library.clearError()
+            message: Library.error
+            onDismissed: Library.clearError()
         }
 
         // The settings could not be saved.
@@ -296,12 +224,6 @@ ApplicationWindow {
 
             GroupingBar {
                 id: groupingBar
-                onSourceChosen: (kind, sourceId) => {
-                    if (kind === "grouping")
-                        filters.setGrouping(sourceId)
-                    else if (kind === "playlists")
-                        filters.showPlaylists()
-                }
             }
         }
 
@@ -330,30 +252,8 @@ ApplicationWindow {
 
             FilterPane {
                 id: filterPane
-                SplitView.preferredWidth: layout.filterPaneWidth
+                SplitView.preferredWidth: WindowLayout.filterPaneWidth
                 SplitView.minimumWidth: 160
-                // The playlists stand in for a grouping's values.
-                readonly property bool listsPlaylists: filters.sourceKind === "playlists"
-                readonly property var rows: listsPlaylists ? playlistsModel : filters
-                model: rows
-                currentRow: rows.currentRow
-                cover: player.cover
-                hasTrack: player.hasTrack
-                album: player.album
-                onSearchEdited: text => filters.setSearch(text)
-                onRowChosen: row => rows.select(row)
-                onRowMenuRequested: row => {
-                    if (listsPlaylists)
-                        playlistMenu.show(row)
-                }
-                headerShown: listsPlaylists
-                headerItems: Button {
-                    Layout.fillWidth: true
-                    enabled: playlistsModel.loaded
-                    text: qsTr("New Playlist…")
-                    onClicked: window.newPlaylist([], true)
-                }
-                onAlbumRequested: filters.showAlbum(player.currentTrackId)
             }
 
             ColumnLayout {
@@ -366,37 +266,7 @@ ApplicationWindow {
                     id: trackPane
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    model: albums
-                    gridModel: albumGrid
-                    openAlbumModel: openAlbum
-                    albumCount: albums.albumCount
-                    trackCount: filters.trackCount
-                    title: filters.title
-                    loading: filters.loading
-                    sortMenu: filters.sortMenu
-                    sortHeadings: filters.sortHeadings
-                    scanStatus: library.busy ? library.status : ""
-                    hiddenColumns: layout.hiddenColumns
-                    columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
-                    albumGrid: layout.albumGrid
-                    controller: player
-                    playlists: playlistsModel
-                    onNewPlaylistRequested: trackIds => window.newPlaylist(trackIds, false)
-                    flat: filters.flat
-                    playlistShown: filterPane.listsPlaylists
-                    reorderable: filters.reorderable
-                    onRemoveFromPlaylistRequested: rows => playlistsModel.removeTracks(rows)
-                    onMoveRequested: (rows, to) => playlistsModel.moveTracks(rows, to)
-                    emptyHint: filters.emptyHint
-                    emptyLibrary: filters.emptyLibrary
-                    offerAddFolder: filters.offerAddFolder
-                    onAlbumGridChosen: grid => layout.albumGrid = grid
-                    onSortClicked: column => filters.sortBy(column)
-                    onSortChosen: (column, descending) => filters.setSort(column, descending)
-                    onColumnToggled: (column, shown) => layout.setColumnShown(column, shown)
                     onPlayRequested: start => window.playView(start)
-                    onAlbumRequested: trackId => filters.showAlbum(trackId)
-                    onAddFolderRequested: folderDialog.open()
                 }
 
                 Rectangle {
@@ -408,24 +278,7 @@ ApplicationWindow {
                 NowPlayingBar {
                     id: nowPlayingBar
                     Layout.fillWidth: true
-                    controller: player
-                    available: player.available
-                    hasTrack: player.hasTrack
-                    playing: player.playing
-                    title: player.title
-                    artist: player.artist
-                    album: player.album
-                    position: player.position
-                    duration: player.duration
-                    volume: player.volume
-                    muted: player.muted
                     queueShown: window.queueShown
-                    onPrevious: player.previous()
-                    onTogglePause: player.togglePause()
-                    onNext: player.next()
-                    onSeek: seconds => player.seek(seconds)
-                    onVolumeMoved: volume => player.setVolume(volume)
-                    onMuteToggled: player.toggleMute()
                     onQueueToggled: shown => window.queueShown = shown
                 }
             }
@@ -433,53 +286,14 @@ ApplicationWindow {
             QueuePane {
                 id: queuePane
                 visible: window.queueShown
-                SplitView.preferredWidth: layout.queuePaneWidth
+                SplitView.preferredWidth: WindowLayout.queuePaneWidth
                 SplitView.minimumWidth: 200
-                model: queueModel
-                count: queueModel.count
-                currentRow: queueModel.currentRow
-                totalDuration: queueModel.totalDuration
-                shuffle: player.shuffle
-                controller: player
-                playlists: playlistsModel
-                onNewPlaylistRequested: trackIds => window.newPlaylist(trackIds, false)
-                onShuffleToggled: shuffle => player.setShuffle(shuffle)
-                onClearRequested: player.clearQueue()
-                onPlayRequested: row => player.play("queue", row)
-                onRemoveRequested: rows => player.removeQueueRows(rows)
-                onMoveRequested: (rows, to) => player.moveQueueRows(rows, to)
-                onAlbumRequested: trackId => filters.showAlbum(trackId)
             }
         }
     }
 
-    PlaylistMenu {
-        id: playlistMenu
-        playlists: playlistsModel
-    }
-
-    Component {
-        id: playlistNameDialog
-        PlaylistNameDialog {}
-    }
-
-    // Asks for a name, then makes a playlist of `trackIds`, and with `show`
-    // shows it.
-    function newPlaylist(trackIds: list<real>, show: bool) {
-        const dialog = playlistNameDialog.createObject(window.contentItem, {
-            title: qsTr("New Playlist"),
-            name: playlistsModel.suggestedName(qsTr("New Playlist"))
-        })
-        dialog.chosen.connect(name => {
-            const id = playlistsModel.create(name, trackIds)
-            if (show)
-                filters.showPlaylist(id)
-        })
-        dialog.open()
-    }
-
     function playView(index) {
-        player.play("view", index)
+        Player.play("view", index)
         queuePane.showCurrent()
     }
 
@@ -487,7 +301,7 @@ ApplicationWindow {
         id: benchRun
         list: trackPane.list
         grid: trackPane.gridList
-        onGridRequested: layout.albumGrid = true
+        onGridRequested: WindowLayout.albumGrid = true
         onPhaseStarted: name => bench.beginPhase(name)
         onFrame: seconds => bench.frame(seconds)
         onFinished: {

@@ -8,95 +8,73 @@ import com.lune.player
 // where clicking one opens that album's tracks.
 ColumnLayout {
     id: trackPane
-    required property var model
-    // `model`'s albums a row of the grid at a time.
-    required property AlbumGridModel gridModel
-    // `model` narrowed to the open album by its `albumId`.
-    required property AlbumListModel openAlbumModel
-    required property int albumCount
-    required property int trackCount
-    required property string title
-    required property bool loading
-    // FilterModel's.
-    required property var sortMenu
-    required property var sortHeadings
-    required property string scanStatus
-    required property var hiddenColumns
-    required property var columnWidths
-    required property bool albumGrid
-    required property PlayerController controller
-    required property PlaylistsModel playlists
-    // A track list, not albums with covers: a column sort or a playlist.
-    required property bool flat
-    required property bool playlistShown
-    required property bool reorderable
-    // Shown in place of an empty track list; FilterModel's.
-    required property string emptyHint
-    required property string emptyLibrary
-    required property bool offerAddFolder
     // The tracks' cells: under the headings in the list, inside the open
     // album's panel in the grid.
     readonly property real rowWidth: grid ? albumRows.panelWidth - tracksLeft - tracksRight
                                             - 2 * Theme.cellInset
                                           : headingCells.width
-    readonly property bool grid: albumGrid && !flat
-    // The album `openAlbumModel` holds. It outlasts the grid's open album
+    readonly property var columnWidths: WindowLayout.columnWidths(rowWidth, WindowLayout.hiddenColumns)
+    readonly property bool grid: WindowLayout.albumGrid && !Filters.flat
+    readonly property bool playlistShown: Filters.sourceKind === "playlists"
+    // The album `openAlbum` holds. It outlasts the grid's open album
     // while that album's panel shuts, so its tracks don't vanish first.
     property real shownAlbumId: -1
-    readonly property int tracksLeft: flat ? 0 : 2 * Theme.albumPadding + Theme.coverSize
-    readonly property int tracksRight: flat ? 0 : Theme.albumPadding
+    readonly property int tracksLeft: Filters.flat ? 0 : 2 * Theme.albumPadding + Theme.coverSize
+    readonly property int tracksRight: Filters.flat ? 0 : Theme.albumPadding
     readonly property TrackList list: albumList
     readonly property ListView gridList: albumRows
 
-    signal sortClicked(string column)
-    signal sortChosen(string column, bool descending)
-    signal columnToggled(string column, bool shown)
     signal playRequested(int start)
-    signal albumRequested(real trackId)
-    signal removeFromPlaylistRequested(list<int> rows)
-    // `rows` keep their order and go before the row now at `to`.
-    signal moveRequested(list<int> rows, int to)
-    signal addFolderRequested()
-    signal albumGridChosen(bool grid)
-    signal newPlaylistRequested(list<real> trackIds)
 
     // The first grid row in view and the columns it had, so the album that
     // starts it stays in view when the grid is relaid.
     property int keptRow
     property int keptColumns: 1
 
-    function resetView(reset: bool) {
-        trackSelection.clear()
-        if (reset)
-            albumList.positionViewAtBeginning()
-        else
-            albumList.restorePosition()
-    }
-
-    function keepGridPosition() {
-        keptRow = Math.max(0, albumRows.indexAt(0, albumRows.contentY))
-        keptColumns = gridModel.columns
-    }
-
-    function resetGrid(reset: bool) {
-        if (reset) {
-            // The grid closed its album; no panel is left to shut.
-            shownAlbumId = -1
-            albumRows.positionViewAtBeginning()
-        } else {
-            albumRows.positionViewAtIndex(gridModel.relaidRow(keptRow, keptColumns), ListView.Beginning)
-        }
-    }
-
     onGridChanged: shownAlbumId = -1
 
-    Connections {
-        target: trackPane.gridModel
-        function onOpenAlbumIdChanged() {
+    AlbumListModel {
+        id: albums
+        // A rescan keeps the list where it was.
+        onModelAboutToBeReset: albumList.keepPosition()
+        onRefreshed: reset => {
             trackSelection.clear()
-            if (trackPane.gridModel.openAlbumId >= 0)
-                trackPane.shownAlbumId = trackPane.gridModel.openAlbumId
+            if (reset)
+                albumList.positionViewAtBeginning()
+            else
+                albumList.restorePosition()
         }
+    }
+
+    AlbumGridModel {
+        id: gridModel
+        columns: albumRows.columns
+        active: trackPane.grid
+        onModelAboutToBeReset: {
+            trackPane.keptRow = Math.max(0, albumRows.indexAt(0, albumRows.contentY))
+            trackPane.keptColumns = columns
+        }
+        onRefreshed: reset => {
+            if (reset) {
+                // The grid closed its album; no panel is left to shut.
+                trackPane.shownAlbumId = -1
+                albumRows.positionViewAtBeginning()
+            } else {
+                albumRows.positionViewAtIndex(relaidRow(trackPane.keptRow, trackPane.keptColumns), ListView.Beginning)
+            }
+        }
+        onOpenAlbumIdChanged: {
+            trackSelection.clear()
+            if (openAlbumId >= 0)
+                trackPane.shownAlbumId = openAlbumId
+        }
+    }
+
+    // The view narrowed to the open album.
+    AlbumListModel {
+        id: openAlbum
+        oneAlbum: true
+        albumId: trackPane.shownAlbumId
     }
 
     component SortHeading: Label {
@@ -117,6 +95,10 @@ ColumnLayout {
 
     spacing: 0
 
+    AddFolderDialog {
+        id: folderDialog
+    }
+
     // The selected tracks, as rows of the view.
     TrackSelection {
         id: trackSelection
@@ -124,12 +106,8 @@ ColumnLayout {
 
     TrackMenu {
         id: trackMenu
-        controller: trackPane.controller
-        playlists: trackPane.playlists
         source: "view"
-        onNewPlaylistRequested: trackIds => trackPane.newPlaylistRequested(trackIds)
         onPlayRequested: start => trackPane.playRequested(start)
-        onAlbumRequested: trackId => trackPane.albumRequested(trackId)
 
         CollapsingMenuSeparator {
             visible: trackPane.playlistShown
@@ -137,32 +115,28 @@ ColumnLayout {
         CollapsingMenuItem {
             text: qsTr("Remove from Playlist")
             visible: trackPane.playlistShown
-            onTriggered: trackPane.removeFromPlaylistRequested(trackMenu.rows)
+            onTriggered: Playlists.removeTracks(trackMenu.rows)
         }
         CollapsingMenuItem {
             text: qsTr("Move to Top")
             visible: trackPane.playlistShown
-            enabled: trackPane.reorderable
-            onTriggered: trackPane.moveRequested(trackMenu.rows, 0)
+            enabled: Filters.reorderable
+            onTriggered: Playlists.moveTracks(trackMenu.rows, 0)
         }
         CollapsingMenuItem {
             text: qsTr("Move to Bottom")
             visible: trackPane.playlistShown
-            enabled: trackPane.reorderable
-            onTriggered: trackPane.moveRequested(trackMenu.rows, trackPane.trackCount)
+            enabled: Filters.reorderable
+            onTriggered: Playlists.moveTracks(trackMenu.rows, Filters.trackCount)
         }
     }
 
     SortMenu {
         id: sortMenu
-        items: trackPane.sortMenu
-        onSortChosen: (column, descending) => trackPane.sortChosen(column, descending)
 
         MenuSeparator {}
         ColumnsMenu {
             title: qsTr("Columns")
-            hiddenColumns: trackPane.hiddenColumns
-            onColumnToggled: (column, shown) => trackPane.columnToggled(column, shown)
         }
     }
 
@@ -182,18 +156,18 @@ ColumnLayout {
             font.bold: true
             elide: Text.ElideRight
             textFormat: Text.PlainText
-            text: trackPane.loading ? qsTr("Loading…") : trackPane.title
+            text: Filters.loading ? qsTr("Loading…") : Filters.title
         }
         ViewButton {
             icon.source: "icons/list.svg"
-            toggledOn: !trackPane.albumGrid
-            onToggleRequested: trackPane.albumGridChosen(false)
+            toggledOn: !WindowLayout.albumGrid
+            onToggleRequested: WindowLayout.albumGrid = false
             ToolTip.text: qsTr("Show albums as a list")
         }
         ViewButton {
             icon.source: "icons/grid.svg"
-            toggledOn: trackPane.albumGrid
-            onToggleRequested: trackPane.albumGridChosen(true)
+            toggledOn: WindowLayout.albumGrid
+            onToggleRequested: WindowLayout.albumGrid = true
             ToolTip.text: qsTr("Show albums as a grid")
         }
     }
@@ -202,35 +176,35 @@ ColumnLayout {
         leftPadding: 10
         bottomPadding: 6
         opacity: 0.7
-        visible: !trackPane.loading
+        visible: !Filters.loading
         elide: Text.ElideMiddle
         textFormat: Text.PlainText
-        text: (trackPane.flat ? qsTr("%L1 tracks").arg(trackPane.trackCount)
-                              : qsTr("%L1 albums, %L2 tracks").arg(trackPane.albumCount).arg(trackPane.trackCount))
-              + (trackPane.playlistShown && !trackPane.reorderable && trackPane.trackCount > 1
+        text: (Filters.flat ? qsTr("%L1 tracks").arg(Filters.trackCount)
+                            : qsTr("%L1 albums, %L2 tracks").arg(albums.albumCount).arg(Filters.trackCount))
+              + (trackPane.playlistShown && !Filters.reorderable && Filters.trackCount > 1
                  ? " · " + qsTr("Clear the sort and search to reorder") : "")
-              + (trackPane.scanStatus ? " · " + trackPane.scanStatus : "")
+              + (Library.busy ? " · " + Library.status : "")
     }
 
     // An empty library. With folders, the scan's progress is in the line above.
     Item {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: trackPane.emptyLibrary !== ""
+        visible: Filters.emptyLibrary !== ""
         Column {
             anchors.centerIn: parent
             spacing: 12
             Label {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: trackPane.emptyLibrary
+                text: Filters.emptyLibrary
                 font.pointSize: Theme.headingPointSize
             }
             Button {
                 anchors.horizontalCenter: parent.horizontalCenter
-                visible: trackPane.offerAddFolder
+                visible: Filters.offerAddFolder
                 text: qsTr("Add a Music Folder…")
                 highlighted: true
-                onClicked: trackPane.addFolderRequested()
+                onClicked: folderDialog.open()
             }
         }
     }
@@ -238,13 +212,13 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: trackPane.emptyHint !== ""
+        visible: Filters.emptyHint !== ""
         padding: 16
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         wrapMode: Text.Wrap
         opacity: 0.6
-        text: trackPane.emptyHint
+        text: Filters.emptyHint
     }
 
     Item {
@@ -267,18 +241,18 @@ ColumnLayout {
             anchors.rightMargin: trackPane.tracksRight + Theme.cellInset + albumList.gutter
             spacing: Columns.spacing
             Repeater {
-                model: Columns.shown(trackPane.hiddenColumns)
+                model: Columns.shown(WindowLayout.hiddenColumns)
                 SortHeading {
                     required property var modelData
                     required property int index
                     readonly property real columnWidth: trackPane.columnWidths[index] ?? 0
-                    readonly property var heading: trackPane.sortHeadings[modelData.id]
+                    readonly property var heading: Filters.sortHeadings[modelData.id]
                     visible: columnWidth > 0
                     Layout.preferredWidth: columnWidth
                     horizontalAlignment: modelData.alignRight ? Text.AlignRight : Text.AlignLeft
                     text: heading.text
                     active: heading.active
-                    onClicked: trackPane.sortClicked(modelData.id)
+                    onClicked: Filters.sortBy(modelData.id)
                 }
             }
         }
@@ -295,21 +269,21 @@ ColumnLayout {
         id: albumList
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: !trackPane.grid && trackPane.albumCount > 0
-        model: trackPane.model
-        onMoveRequested: (rows, to) => trackPane.moveRequested(rows, to)
+        visible: !trackPane.grid && albums.albumCount > 0
+        model: albums
+        onMoveRequested: (rows, to) => Playlists.moveTracks(rows, to)
 
         delegate: AlbumDelegate {
             id: listAlbum
             width: ListView.view.width
-            flat: trackPane.flat
-            reorderable: trackPane.reorderable
+            flat: Filters.flat
+            reorderable: Filters.reorderable
             dropRow: albumList.dropRow
-            lastRow: trackPane.trackCount - 1
+            lastRow: Filters.trackCount - 1
             tracksLeft: trackPane.tracksLeft
             tracksRight: trackPane.tracksRight
             selection: trackSelection
-            hiddenColumns: trackPane.hiddenColumns
+            hiddenColumns: WindowLayout.hiddenColumns
             columnWidths: trackPane.columnWidths
             gutter: albumList.gutter
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
@@ -335,8 +309,8 @@ ColumnLayout {
         readonly property real cellWidth: Math.floor(usableWidth / columns)
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: trackPane.grid && trackPane.albumCount > 0
-        model: trackPane.gridModel
+        visible: trackPane.grid && albums.albumCount > 0
+        model: gridModel
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         maximumFlickVelocity: Theme.maxFlickVelocity
@@ -345,16 +319,6 @@ ColumnLayout {
         }
         WheelScroller {
             view: albumRows
-        }
-        Binding {
-            target: trackPane.gridModel
-            property: "columns"
-            value: albumRows.columns
-        }
-        Binding {
-            target: trackPane.gridModel
-            property: "active"
-            value: trackPane.grid
         }
 
         delegate: Column {
@@ -380,7 +344,7 @@ ColumnLayout {
                         trackCount: modelData.trackCount
                         open: index === gridRow.openTile
                         nowPlaying: modelData.nowPlaying
-                        onOpened: albumId => trackPane.gridModel.toggleAlbum(albumId)
+                        onOpened: albumId => gridModel.toggleAlbum(albumId)
                         onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
                         onMenuRequested: (start, tracks) => {
                             trackSelection.selectRange(start, tracks)
@@ -402,14 +366,14 @@ ColumnLayout {
                 // model already holds the other album, so a slow close would
                 // show its tracks here.
                 Behavior on height {
-                    enabled: panel.open || trackPane.gridModel.openAlbumId < 0
+                    enabled: panel.open || gridModel.openAlbumId < 0
                     NumberAnimation {
                         duration: 180
                         easing.type: Easing.OutCubic
                         onFinished: {
                             if (panel.open)
                                 albumRows.positionViewAtIndex(gridRow.index, ListView.Contain)
-                            else if (trackPane.gridModel.openAlbumId < 0)
+                            else if (gridModel.openAlbumId < 0)
                                 trackPane.shownAlbumId = -1
                         }
                     }
@@ -431,7 +395,7 @@ ColumnLayout {
                         width: parent.width
                         Repeater {
                             // Kept while the panel closes, so it doesn't empty first.
-                            model: panel.height > 0 || panel.open ? trackPane.openAlbumModel : 0
+                            model: panel.height > 0 || panel.open ? openAlbum : 0
                             AlbumDelegate {
                                 width: background.width
                                 flat: false
@@ -441,7 +405,7 @@ ColumnLayout {
                                 tracksLeft: trackPane.tracksLeft
                                 tracksRight: trackPane.tracksRight
                                 selection: trackSelection
-                                hiddenColumns: trackPane.hiddenColumns
+                                hiddenColumns: WindowLayout.hiddenColumns
                                 columnWidths: trackPane.columnWidths
                                 gutter: 0
                                 onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
@@ -455,7 +419,7 @@ ColumnLayout {
                         anchors.right: parent.right
                         anchors.margins: 4
                         icon.source: "icons/clear.svg"
-                        onClicked: trackPane.gridModel.closeAlbum()
+                        onClicked: gridModel.closeAlbum()
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("Close the album")
                     }

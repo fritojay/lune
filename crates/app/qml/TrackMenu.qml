@@ -7,27 +7,22 @@ import com.lune.player
 // TrackMenu come after these. Play and Go to Album use the first row.
 Menu {
     id: trackMenu
-    required property PlayerController controller
     // The list the rows are in: "view" (the main pane) or "queue", as
     // Selection::new in player.rs reads it.
     required property string source
-    required property PlaylistsModel playlists
     // Ascending.
     property list<int> rows
     property real trackId: -1
     property list<real> trackIds
 
     signal playRequested(int row)
-    signal albumRequested(real trackId)
-    // For a new playlist of the tracks the menu was for, as they were when it opened.
-    signal newPlaylistRequested(list<real> trackIds)
 
     function show(rows: list<int>) {
         if (rows.length === 0)
             return
         trackMenu.rows = rows
-        trackIds = controller.trackIds(source, rows)
-        trackId = controller.trackId(source, rows[0])
+        trackIds = Player.trackIds(source, rows)
+        trackId = Player.trackId(source, rows[0])
         popup()
     }
 
@@ -37,31 +32,32 @@ Menu {
     }
     MenuItem {
         text: qsTr("Play Next")
-        onTriggered: trackMenu.controller.playNext(trackMenu.source, trackMenu.rows)
+        onTriggered: Player.playNext(trackMenu.source, trackMenu.rows)
     }
     MenuItem {
         text: qsTr("Add to Queue")
-        onTriggered: trackMenu.controller.addToQueue(trackMenu.source, trackMenu.rows)
+        onTriggered: Player.addToQueue(trackMenu.source, trackMenu.rows)
     }
     Menu {
         id: playlistMenu
         title: qsTr("Add to Playlist")
         MenuItem {
             text: qsTr("New Playlist…")
-            enabled: trackMenu.playlists.loaded
-            onTriggered: trackMenu.newPlaylistRequested(trackMenu.trackIds)
+            enabled: Playlists.loaded
+            // The tracks the menu was for, as they were when it opened.
+            onTriggered: newPlaylist.createObject(trackMenu.parent, { trackIds: trackMenu.trackIds }).open()
         }
         CollapsingMenuSeparator {
             visible: playlistItems.count > 0
         }
         Instantiator {
             id: playlistItems
-            model: trackMenu.playlists
+            model: Playlists
             delegate: MenuItem {
                 required property string playlistId
                 required property string menuText
                 text: menuText
-                onTriggered: trackMenu.controller.addToPlaylist(trackMenu.source, trackMenu.rows, playlistId)
+                onTriggered: Player.addToPlaylist(trackMenu.source, trackMenu.rows, playlistId)
             }
             // After New Playlist… and the separator.
             onObjectAdded: (index, object) => playlistMenu.insertItem(index + 2, object)
@@ -72,6 +68,11 @@ Menu {
     MenuItem {
         text: qsTr("Go to Album")
         enabled: trackMenu.trackId >= 0
-        onTriggered: trackMenu.albumRequested(trackMenu.trackId)
+        onTriggered: Filters.showAlbum(trackMenu.trackId)
+    }
+
+    Component {
+        id: newPlaylist
+        NewPlaylistDialog {}
     }
 }

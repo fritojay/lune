@@ -2,14 +2,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import com.lune.player
 
 Dialog {
-    id: unavailable
-    required property var model
-    required property int count
-
-    signal forgetRequested(real trackId)
-    signal forgetAllRequested()
 
     title: qsTr("Unavailable Tracks")
     modal: true
@@ -36,7 +31,7 @@ Dialog {
                 id: trackList
                 anchors.fill: parent
                 clip: true
-                model: unavailable.model
+                model: MissingModel {}
                 ScrollBar.vertical: ListScrollBar {}
                 WheelScroller {
                     view: trackList
@@ -44,7 +39,7 @@ Dialog {
 
                 Label {
                     anchors.centerIn: parent
-                    visible: unavailable.count === 0
+                    visible: Library.missingCount === 0
                     opacity: 0.6
                     text: qsTr("No unavailable tracks")
                 }
@@ -83,7 +78,7 @@ Dialog {
                         Button {
                             text: qsTr("Remove")
                             flat: true
-                            onClicked: unavailable.forgetRequested(row.trackId)
+                            onClicked: Library.forgetMissing(row.trackId)
                         }
                     }
                 }
@@ -92,7 +87,7 @@ Dialog {
 
         Button {
             text: qsTr("Remove All…")
-            enabled: unavailable.count > 0
+            enabled: Library.missingCount > 0
             onClicked: confirmRemoveAll.open()
         }
     }
@@ -103,10 +98,10 @@ Dialog {
         modal: true
         title: qsTr("Remove All Unavailable Tracks?")
         standardButtons: Dialog.Cancel | Dialog.Ok
-        onAccepted: unavailable.forgetAllRequested()
+        onAccepted: Library.forgetAllMissing()
 
         Label {
-            text: qsTr("%n track(s) and their play history will be forgotten. Files that come back later are added as new tracks.", "", unavailable.count)
+            text: qsTr("%n track(s) and their play history will be forgotten. Files that come back later are added as new tracks.", "", Library.missingCount)
             wrapMode: Text.WordWrap
             width: Math.min(implicitWidth, 400)
         }

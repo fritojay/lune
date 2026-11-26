@@ -6,61 +6,40 @@ import com.lune.player
 
 ColumnLayout {
     id: queuePane
-    required property var model
-    required property int count
-    required property int currentRow
-    required property string totalDuration
-    required property bool shuffle
-    required property PlayerController controller
-    required property PlaylistsModel playlists
-
-    signal shuffleToggled(bool shuffle)
-    signal clearRequested()
-    signal playRequested(int row)
-    signal removeRequested(list<int> rows)
-    // `rows` keep their order and go before the row now at `to`.
-    signal moveRequested(list<int> rows, int to)
-    signal albumRequested(real trackId)
-    signal newPlaylistRequested(list<real> trackIds)
 
     function showCurrent() {
-        queueList.positionViewAtIndex(currentRow, ListView.Contain)
+        queueList.positionViewAtIndex(queueModel.currentRow, ListView.Contain)
     }
 
     spacing: 0
 
-    TrackSelection {
-        id: queueSelection
-    }
-
-    // Rows move on every change.
-    Connections {
-        target: queuePane.model
-        function onModelAboutToBeReset() {
-            queueList.keepPosition()
-        }
-        function onRefreshed() {
+    QueueModel {
+        id: queueModel
+        currentRow: Player.queueIndex
+        // Rows move on every change.
+        onModelAboutToBeReset: queueList.keepPosition()
+        onRefreshed: {
             queueSelection.clear()
             queueList.restorePosition()
         }
     }
 
+    TrackSelection {
+        id: queueSelection
+    }
+
     TrackMenu {
         id: queueMenu
-        controller: queuePane.controller
-        playlists: queuePane.playlists
         source: "queue"
-        onNewPlaylistRequested: trackIds => queuePane.newPlaylistRequested(trackIds)
-        onPlayRequested: row => queuePane.playRequested(row)
-        onAlbumRequested: trackId => queuePane.albumRequested(trackId)
+        onPlayRequested: row => Player.play("queue", row)
         MenuSeparator {}
         MenuItem {
             text: qsTr("Remove")
-            onTriggered: queuePane.removeRequested(queueMenu.rows)
+            onTriggered: Player.removeQueueRows(queueMenu.rows)
         }
         MenuItem {
             text: qsTr("Clear Queue")
-            onTriggered: queuePane.clearRequested()
+            onTriggered: Player.clearQueue()
         }
     }
 
@@ -81,25 +60,25 @@ ColumnLayout {
             }
             Label {
                 Layout.fillWidth: true
-                visible: queuePane.count > 0
+                visible: queueModel.count > 0
                 opacity: 0.7
                 font.pointSize: Theme.smallPointSize
                 elide: Text.ElideRight
-                text: qsTr("%L1 tracks · %2").arg(queuePane.count).arg(queuePane.totalDuration)
+                text: qsTr("%L1 tracks · %2").arg(queueModel.count).arg(queueModel.totalDuration)
             }
         }
         ToggleToolButton {
             icon.source: "icons/shuffle.svg"
             icon.color: checked ? palette.highlight : palette.buttonText
-            toggledOn: queuePane.shuffle
-            onToggleRequested: on => queuePane.shuffleToggled(on)
+            toggledOn: Player.shuffle
+            onToggleRequested: on => Player.setShuffle(on)
             ToolTip.visible: hovered
             ToolTip.text: checked ? qsTr("Shuffle is on") : qsTr("Shuffle is off")
         }
         KeyToolButton {
             text: qsTr("Clear")
-            enabled: queuePane.count > 0
-            onClicked: queuePane.clearRequested()
+            enabled: queueModel.count > 0
+            onClicked: Player.clearQueue()
         }
     }
 
@@ -112,7 +91,7 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: queuePane.count === 0
+        visible: queueModel.count === 0
         padding: 16
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
@@ -125,21 +104,21 @@ ColumnLayout {
         id: queueList
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: queuePane.count > 0
+        visible: queueModel.count > 0
         // No model while hidden: delegates would still be made, and ask for covers.
-        model: queuePane.visible ? queuePane.model : null
+        model: queuePane.visible ? queueModel : null
         onModelChanged: if (model) queuePane.showCurrent()
-        onMoveRequested: (rows, to) => queuePane.moveRequested(rows, to)
+        onMoveRequested: (rows, to) => Player.moveQueueRows(rows, to)
 
         delegate: QueueDelegate {
             id: queueRow
             width: ListView.view.width
-            currentRow: queuePane.currentRow
-            rowCount: queuePane.count
+            currentRow: queueModel.currentRow
+            rowCount: queueModel.count
             dropRow: queueList.dropRow
             gutter: queueList.gutter
             selection: queueSelection
-            onPlayRequested: queuePane.playRequested(queueRow.index)
+            onPlayRequested: Player.play("queue", queueRow.index)
             onMenuRequested: queueMenu.show(queueSelection.rows())
             onDragMoved: y => queueList.dropRow = queueList.dropTarget(queueRow, y)
             onDragEnded: queueList.endDrag(queueSelection, queueRow.index)

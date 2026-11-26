@@ -38,7 +38,8 @@ pub mod qobject {
 
     extern "RustQt" {
         #[qobject]
-        #[qml_element]
+        #[qml_element = "Player"]
+        #[qml_singleton]
         #[qproperty(bool, available, READ, NOTIFY)]
         #[qproperty(bool, playing, READ, NOTIFY)]
         #[qproperty(bool, has_track, cxx_name = "hasTrack", READ, NOTIFY)]

@@ -5,10 +5,6 @@ import QtQuick.Layouts
 import com.lune.player
 
 RowLayout {
-    id: groupingBar
-    // `kind` and `sourceId` as SourcesModel lists them.
-    signal sourceChosen(string kind, string sourceId)
-
     spacing: 2
 
     Repeater {
@@ -36,7 +32,10 @@ RowLayout {
                 sources.choose(index)
                 // A click toggles `checked`, which breaks its binding.
                 checked = Qt.binding(() => tab.current)
-                groupingBar.sourceChosen(kind, sourceId)
+                if (kind === "grouping")
+                    Filters.setGrouping(sourceId)
+                else if (kind === "playlists")
+                    Filters.showPlaylists()
             }
             Keys.onReturnPressed: click()
             Keys.onEnterPressed: click()

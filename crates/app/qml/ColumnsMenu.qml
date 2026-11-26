@@ -4,21 +4,17 @@ import QtQuick.Controls
 import com.lune.player
 
 Menu {
-    id: columnsMenu
-    required property var hiddenColumns
-    signal columnToggled(string column, bool shown)
-
     Repeater {
         model: Columns.hideable
         MenuItem {
             id: columnItem
             required property var modelData
-            readonly property bool shown: !columnsMenu.hiddenColumns.includes(modelData.id)
+            readonly property bool shown: !WindowLayout.hiddenColumns.includes(modelData.id)
             text: modelData.title
             checkable: true
             checked: shown
             onTriggered: {
-                columnsMenu.columnToggled(modelData.id, !shown)
+                WindowLayout.setColumnShown(modelData.id, !shown)
                 // A click toggles `checked`, which breaks its binding.
                 checked = Qt.binding(() => columnItem.shown)
             }

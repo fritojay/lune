@@ -5,10 +5,7 @@ import com.lune.player
 
 Menu {
     id: sortMenu
-    // FilterModel's sortMenu.
-    required property var items
-
-    signal sortChosen(string column, bool descending)
+    readonly property var items: Filters.sortMenu
 
     component SortMenuItem: MenuItem {
         id: sortItem
@@ -18,7 +15,7 @@ Menu {
         checkable: true
         checked: item.checked
         onTriggered: {
-            (menu as SortMenu).sortChosen(sortItem.item.column, sortItem.item.descending)
+            Filters.setSort(sortItem.item.column, sortItem.item.descending)
             // A click toggles `checked`, which breaks its binding.
             checked = Qt.binding(() => sortItem.item.checked)
         }

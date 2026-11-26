@@ -37,7 +37,8 @@ pub mod qobject {
 
     extern "RustQt" {
         #[qobject]
-        #[qml_element]
+        #[qml_element = "Playlists"]
+        #[qml_singleton]
         #[base = QAbstractListModel]
         #[qproperty(i32, count, READ, NOTIFY)]
         /// Playlists can be made and changed: they have loaded.
