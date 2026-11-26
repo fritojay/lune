@@ -21,7 +21,6 @@ ColumnLayout {
     required property var sortMenu
     required property var sortHeadings
     required property string scanStatus
-    required property real currentTrackId
     required property var hiddenColumns
     required property var columnWidths
     required property bool albumGrid
@@ -310,7 +309,6 @@ ColumnLayout {
             tracksLeft: trackPane.tracksLeft
             tracksRight: trackPane.tracksRight
             selection: trackSelection
-            currentTrackId: trackPane.currentTrackId
             hiddenColumns: trackPane.hiddenColumns
             columnWidths: trackPane.columnWidths
             gutter: albumList.gutter
@@ -380,9 +378,8 @@ ColumnLayout {
                         albumId: modelData.albumId
                         firstIndex: modelData.firstIndex
                         trackCount: modelData.trackCount
-                        trackIds: modelData.trackIds
                         open: index === gridRow.openTile
-                        currentTrackId: trackPane.currentTrackId
+                        nowPlaying: modelData.nowPlaying
                         onOpened: albumId => trackPane.gridModel.toggleAlbum(albumId)
                         onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
                         onMenuRequested: (start, tracks) => {
@@ -444,7 +441,6 @@ ColumnLayout {
                                 tracksLeft: trackPane.tracksLeft
                                 tracksRight: trackPane.tracksRight
                                 selection: trackSelection
-                                currentTrackId: trackPane.currentTrackId
                                 hiddenColumns: trackPane.hiddenColumns
                                 columnWidths: trackPane.columnWidths
                                 gutter: 0

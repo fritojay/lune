@@ -770,6 +770,7 @@ impl qobject::PlayerController {
             current_track_id_changed,
             track_id.unwrap_or(-1)
         );
+        session::set_now_playing(track_id);
         set!(self, has_track, has_track_changed, track.is_some());
         let (title, artist, album) = match &track {
             Some(t) => (

@@ -376,7 +376,6 @@ ApplicationWindow {
                     sortMenu: filters.sortMenu
                     sortHeadings: filters.sortHeadings
                     scanStatus: library.busy ? library.status : ""
-                    currentTrackId: player.currentTrackId
                     hiddenColumns: layout.hiddenColumns
                     columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
                     albumGrid: layout.albumGrid

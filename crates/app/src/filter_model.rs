@@ -250,7 +250,8 @@ impl cxx_qt::Initialize for qobject::FilterModel {
             | Change::Missing
             | Change::Queue
             | Change::Browse
-            | Change::OutputDevice => {}
+            | Change::OutputDevice
+            | Change::NowPlaying => {}
         });
     }
 }

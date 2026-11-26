@@ -25,6 +25,9 @@ fn each_setter_sends_its_change() {
     set_has_folders(true);
     set_has_folders(true);
     set_has_folders(false);
+    set_now_playing(Some(4));
+    set_now_playing(Some(4));
+    set_now_playing(None);
     assert_eq!(
         *changes.borrow(),
         [
@@ -37,6 +40,8 @@ fn each_setter_sends_its_change() {
             Change::Browse,
             Change::Folders,
             Change::Folders,
+            Change::NowPlaying,
+            Change::NowPlaying,
         ]
     );
 }

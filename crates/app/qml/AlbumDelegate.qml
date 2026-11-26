@@ -21,7 +21,8 @@ Item {
     required property bool footer
     required property int albumTrackCount
     required property var trackColumns
-    required property var trackIds
+    // Of this delegate's tracks, or -1.
+    required property int playingIndex
 
     required property bool flat
     // Tracks can be dragged to another row (only when `flat`).
@@ -30,7 +31,6 @@ Item {
     required property int dropRow
     required property int lastRow
     required property TrackSelection selection
-    required property real currentTrackId
     required property var hiddenColumns
     required property var columnWidths
     required property real gutter
@@ -112,7 +112,7 @@ Item {
                 required property int index
                 readonly property int viewIndex: album.firstIndex + index
                 readonly property bool selected: album.selection.revision >= 0 && album.selection.contains(viewIndex)
-                readonly property bool nowPlaying: album.trackIds[index] === album.currentTrackId
+                readonly property bool nowPlaying: index === album.playingIndex
                 // With reuseItems, a recycled album can get its new trackCount
                 // before its new lists, so an index may briefly be past their end.
                 function field(list) { return list[index] ?? "" }

@@ -12,9 +12,10 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::rc::Rc;
 
+use cxx_qt::casting::Upcast;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{
-    QHash, QHashPair_i32_QByteArray, QList, QMap, QMapPair_QString_QVariant, QModelIndex, QString,
+    QHash, QHashPair_i32_QByteArray, QMap, QMapPair_QString_QVariant, QModelIndex, QString,
     QStringList, QVariant,
 };
 use lune_core::{Catalog, ListTrack, SortColumn, View, file_type};
@@ -110,6 +111,8 @@ pub struct Album<'a> {
     range: Range<usize>,
     part: Range<usize>,
     first: &'a ListTrack,
+    /// The track playing, wherever it is.
+    playing: Option<i64>,
 }
 
 impl Album<'_> {
@@ -126,6 +129,12 @@ impl Album<'_> {
 
     fn is_header(&self) -> bool {
         self.part.start == self.range.start
+    }
+
+    /// Which of the tracks shown is playing, if one is.
+    pub fn playing_index(&self) -> Option<usize> {
+        let playing = self.playing?;
+        self.shown().iter().position(|t| t.id == playing)
     }
 }
 
@@ -160,16 +169,15 @@ pub const ROLES: &[Role] = &[
     ("header", |a| QVariant::from(&a.is_header())),
     ("footer", |a| QVariant::from(&(a.part.end == a.range.end))),
     ("trackColumns", track_columns),
-    ("trackIds", |a| {
-        let mut ids = QList::<i64>::default();
-        for t in a.shown() {
-            ids.append(t.id);
-        }
-        QVariant::from(&ids)
+    // Of the tracks shown, or -1.
+    ("playingIndex", |a| {
+        let index = a.playing_index().and_then(|i| i32::try_from(i).ok());
+        QVariant::from(&index.unwrap_or(-1))
     }),
 ];
 
 const COVER_ROLE: i32 = list_model::role_id(ROLES, "cover");
+const PLAYING_ROLE: i32 = list_model::role_id(ROLES, "playingIndex");
 
 pub struct AlbumListModelRust {
     album_count: i32,
@@ -180,11 +188,14 @@ pub struct AlbumListModelRust {
     rows: Vec<Row>,
     /// The rows showing each cover, so a finished cover doesn't scan every album.
     cover_rows: CoverRows,
+    /// The track the rows mark as playing.
+    playing: Option<i64>,
 }
 
 impl Default for AlbumListModelRust {
     fn default() -> Self {
         Self {
+            playing: session::now_playing(),
             album_count: 0,
             one_album: false,
             album_id: -1,
@@ -199,10 +210,10 @@ impl Default for AlbumListModelRust {
 impl cxx_qt::Initialize for qobject::AlbumListModel {
     fn initialize(self: Pin<&mut Self>) {
         covers::update_rows_on_ready(self.qt_thread(), |model| &model.cover_rows, COVER_ROLE);
-        session::on_change(self.qt_thread(), |model, change| {
-            if let Change::View { reset } = change {
-                model.refresh(reset);
-            }
+        session::on_change(self.qt_thread(), |model, change| match change {
+            Change::View { reset } => model.refresh(reset),
+            Change::NowPlaying => model.now_playing(),
+            _ => {}
         });
     }
 }
@@ -247,11 +258,21 @@ impl qobject::AlbumListModel {
         self.refreshed(reset);
     }
 
+    /// Marks the new track playing and unmarks the old, in only the rows
+    /// that show them.
+    fn now_playing(mut self: Pin<&mut Self>) {
+        let playing = session::now_playing();
+        let ids: Vec<i64> = [self.playing, playing].into_iter().flatten().collect();
+        let rows = rows_showing(self.catalog.as_deref(), &self.view, &self.rows, &ids);
+        self.as_mut().rust_mut().playing = playing;
+        list_model::role_changed(self.upcast_pin(), &rows, PLAYING_ROLE);
+    }
+
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
         let album = usize::try_from(index.row())
             .ok()
             .and_then(|row| self.rows.get(row))
-            .and_then(|row| row_at(self.catalog.as_deref(), &self.view, row));
+            .and_then(|row| row_at(self.catalog.as_deref(), &self.view, row, self.playing));
         list_model::data(ROLES, album.as_ref(), role)
     }
 
@@ -268,6 +289,7 @@ pub fn album_at<'a>(
     catalog: Option<&'a Catalog>,
     view: &'a View,
     album: usize,
+    playing: Option<i64>,
 ) -> Option<Album<'a>> {
     let range = view.albums.get(album)?.clone();
     row_at(
@@ -277,10 +299,16 @@ pub fn album_at<'a>(
             album,
             tracks: range,
         },
+        playing,
     )
 }
 
-fn row_at<'a>(catalog: Option<&'a Catalog>, view: &'a View, row: &Row) -> Option<Album<'a>> {
+fn row_at<'a>(
+    catalog: Option<&'a Catalog>,
+    view: &'a View,
+    row: &Row,
+    playing: Option<i64>,
+) -> Option<Album<'a>> {
     let catalog = catalog?;
     Some(Album {
         catalog,
@@ -288,7 +316,35 @@ fn row_at<'a>(catalog: Option<&'a Catalog>, view: &'a View, row: &Row) -> Option
         range: view.albums.get(row.album)?.clone(),
         part: row.tracks.clone(),
         first: first_track(Some(catalog), view, row.album)?,
+        playing,
     })
+}
+
+/// The `rows` that show any of tracks `ids`.
+pub fn rows_showing(catalog: Option<&Catalog>, view: &View, rows: &[Row], ids: &[i64]) -> Vec<i32> {
+    (0..)
+        .zip(rows)
+        .filter(|(_, row)| shows(catalog, view, &row.tracks, ids))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// The albums of `view` that hold any of tracks `ids`.
+pub fn albums_showing(catalog: Option<&Catalog>, view: &View, ids: &[i64]) -> Vec<usize> {
+    (0..view.albums.len())
+        .filter(|&album| shows(catalog, view, &view.albums[album], ids))
+        .collect()
+}
+
+/// Whether the view's `tracks` hold any of tracks `ids`.
+fn shows(catalog: Option<&Catalog>, view: &View, tracks: &Range<usize>, ids: &[i64]) -> bool {
+    let (Some(catalog), Some(tracks)) = (catalog, view.tracks.get(tracks.clone())) else {
+        return false;
+    };
+    tracks
+        .iter()
+        .filter_map(|&i| catalog.track(i))
+        .any(|t| ids.contains(&t.id))
 }
 
 fn is_header(view: &View, row: &Row) -> bool {

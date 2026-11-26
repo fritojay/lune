@@ -12,16 +12,15 @@ Item {
     required property real albumId
     required property int firstIndex
     required property int trackCount
-    required property var trackIds
 
-    required property real currentTrackId
     required property bool open
 
     signal opened(real albumId)
     signal playRequested(int viewIndex)
     signal menuRequested(int start, int tracks)
 
-    readonly property bool nowPlaying: trackIds.indexOf(currentTrackId) >= 0
+    // One of its tracks is playing.
+    required property bool nowPlaying
 
     Rectangle {
         anchors.centerIn: content

@@ -105,15 +105,15 @@ pub mod qobject {
 }
 
 /// The roles of [`album_model::ROLES`] a tile shows. The track columns are
-/// left out: building them for every album in view would be wasted.
-const TILE_ROLES: [&str; 7] = [
+/// left out: building them for every album in view would be wasted. A tile
+/// also has `nowPlaying`: whether one of its tracks plays.
+const TILE_ROLES: [&str; 6] = [
     "albumTitle",
     "albumArtist",
     "cover",
     "albumId",
     "firstIndex",
     "trackCount",
-    "trackIds",
 ];
 
 /// A grid row: its albums' indices in the view.
@@ -135,13 +135,14 @@ struct Tiles<'a> {
     view: &'a View,
     albums: GridRow,
     open_tile: i32,
+    playing: Option<i64>,
 }
 
 impl Tiles<'_> {
     fn maps(&self) -> QVariant {
         let mut tiles = QList::<QVariant>::default();
         for album in self.albums.clone() {
-            if let Some(album) = album_at(self.catalog, self.view, album) {
+            if let Some(album) = album_at(self.catalog, self.view, album, self.playing) {
                 tiles.append(tile(&album));
             }
         }
@@ -156,6 +157,10 @@ fn tile(album: &Album<'_>) -> QVariant {
             map.insert(QString::from(*name), value(album));
         }
     }
+    map.insert(
+        QString::from("nowPlaying"),
+        QVariant::from(&album.playing_index().is_some()),
+    );
     QVariant::from(&map)
 }
 
@@ -168,6 +173,8 @@ pub struct AlbumGridModelRust {
     open_album_id: i64,
     /// The open album, of the view's albums.
     open: Option<usize>,
+    /// The track the tiles mark as playing.
+    playing: Option<i64>,
 }
 
 impl Default for AlbumGridModelRust {
@@ -177,6 +184,7 @@ impl Default for AlbumGridModelRust {
             active: false,
             open_album_id: -1,
             open: None,
+            playing: session::now_playing(),
             catalog: None,
             view: Rc::default(),
             cover_rows: CoverRows::new(),
@@ -187,10 +195,10 @@ impl Default for AlbumGridModelRust {
 impl cxx_qt::Initialize for qobject::AlbumGridModel {
     fn initialize(self: Pin<&mut Self>) {
         covers::update_rows_on_ready(self.qt_thread(), |model| &model.cover_rows, ALBUMS_ROLE);
-        session::on_change(self.qt_thread(), |model, change| {
-            if let Change::View { reset } = change {
-                model.refresh(reset);
-            }
+        session::on_change(self.qt_thread(), |model, change| match change {
+            Change::View { reset } => model.refresh(reset),
+            Change::NowPlaying => model.now_playing(),
+            _ => {}
         });
     }
 }
@@ -254,6 +262,22 @@ impl qobject::AlbumGridModel {
         self.refreshed(reset);
     }
 
+    /// Marks the new track's tile playing and unmarks the old one's, in only
+    /// the rows that hold them.
+    fn now_playing(mut self: Pin<&mut Self>) {
+        let playing = session::now_playing();
+        let ids: Vec<i64> = [self.playing, playing].into_iter().flatten().collect();
+        let columns = width(self.columns);
+        let mut rows: Vec<i32> =
+            album_model::albums_showing(self.catalog.as_deref(), &self.view, &ids)
+                .into_iter()
+                .filter_map(|album| i32::try_from(album / columns).ok())
+                .collect();
+        rows.dedup();
+        self.as_mut().rust_mut().playing = playing;
+        list_model::role_changed(self.upcast_pin(), &rows, ALBUMS_ROLE);
+    }
+
     fn toggle_album(self: Pin<&mut Self>, album_id: i64) {
         let open = if self.open_id() == Some(album_id) {
             None
@@ -306,6 +330,7 @@ impl qobject::AlbumGridModel {
                 catalog: self.catalog.as_deref(),
                 view: &self.view,
                 open_tile: open_tile(self.open, &albums),
+                playing: self.playing,
                 albums,
             });
         list_model::data(ROLES, tiles.as_ref(), role)

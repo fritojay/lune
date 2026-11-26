@@ -40,6 +40,8 @@ pub enum Change {
     OutputDevice,
     /// [`has_folders`] changed.
     Folders,
+    /// [`now_playing`] changed.
+    NowPlaying,
 }
 
 #[derive(Default)]
@@ -52,6 +54,7 @@ struct UiState {
     unused_playlist_id: Option<ListId>,
     browse: Option<BrowseState>,
     has_folders: bool,
+    now_playing: Option<i64>,
     listeners: Vec<Rc<dyn Fn(Change)>>,
 }
 
@@ -182,6 +185,19 @@ pub fn set_has_folders(has_folders: bool) {
         UI.with_borrow_mut(|ui| std::mem::replace(&mut ui.has_folders, has_folders) != has_folders);
     if changed {
         notify(Change::Folders);
+    }
+}
+
+/// The track id of the queue's current track, which the views mark.
+pub fn now_playing() -> Option<i64> {
+    UI.with_borrow(|ui| ui.now_playing)
+}
+
+pub fn set_now_playing(track_id: Option<i64>) {
+    let changed =
+        UI.with_borrow_mut(|ui| std::mem::replace(&mut ui.now_playing, track_id) != track_id);
+    if changed {
+        notify(Change::NowPlaying);
     }
 }
 

@@ -254,3 +254,58 @@ fn unknown_values_have_empty_or_placeholder_text() {
         ],
     );
 }
+
+/// Albums of `sizes` tracks, track ids counting from 1.
+fn catalog_of(sizes: &[usize]) -> Catalog {
+    let mut id = 0;
+    let tracks = sizes
+        .iter()
+        .zip(1..)
+        .flat_map(|(&size, album)| (0..size).map(move |_| album))
+        .map(|album| {
+            id += 1;
+            track(id, album, None)
+        })
+        .collect();
+    Catalog::new(tracks)
+}
+
+proptest! {
+    #[test]
+    fn only_the_row_holding_the_playing_track_marks_it_and_only_that_row_changes(
+        sizes in prop::collection::vec(1..=2 * MAX_ROW_TRACKS, 0..5),
+        playing in prop::option::of(0..400i64),
+    ) {
+        let catalog = catalog_of(&sizes);
+        let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
+        let rows = shown_rows(Some(&catalog), &view, false, -1);
+        let ids: Vec<i64> = playing.into_iter().collect();
+        let mut marked = Vec::new();
+        for (index, row) in (0..).zip(&rows) {
+            let expected = view.tracks[row.tracks.clone()]
+                .iter()
+                .position(|&i| Some(catalog.track(i).unwrap().id) == playing);
+            let album = row_at(Some(&catalog), &view, row, playing).unwrap();
+            prop_assert_eq!(album.playing_index(), expected);
+            if expected.is_some() {
+                marked.push(index);
+            }
+        }
+        let in_library = playing.is_some_and(|id| (1..=catalog.len() as i64).contains(&id));
+        prop_assert_eq!(marked.len(), usize::from(in_library));
+        prop_assert_eq!(rows_showing(Some(&catalog), &view, &rows, &ids), marked.clone());
+        let albums: Vec<usize> = marked.iter().map(|&row| rows[row as usize].album).collect();
+        prop_assert_eq!(albums_showing(Some(&catalog), &view, &ids), albums);
+    }
+}
+
+#[test]
+fn nothing_is_marked_without_a_catalog_or_a_track() {
+    let catalog = catalog_of(&[2, 3]);
+    let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
+    let rows = shown_rows(Some(&catalog), &view, false, -1);
+    assert!(rows_showing(None, &view, &rows, &[1]).is_empty());
+    assert!(rows_showing(Some(&catalog), &view, &rows, &[]).is_empty());
+    assert_eq!(rows_showing(Some(&catalog), &view, &rows, &[1, 5]), [0, 1]);
+    assert!(albums_showing(None, &view, &[1]).is_empty());
+}
