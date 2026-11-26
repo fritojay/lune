@@ -380,9 +380,7 @@ ApplicationWindow {
                     reorderable: filters.reorderable
                     onRemoveFromPlaylistRequested: rows => playlistsModel.removeTracks(rows)
                     onMoveRequested: (rows, to) => playlistsModel.moveTracks(rows, to)
-                    emptyHint: !filterPane.listsPlaylists ? ""
-                             : playlistsModel.count === 0 ? qsTr("No playlists yet. Click New Playlist to make one.")
-                             : qsTr("This playlist is empty. Right-click tracks and choose Add to Playlist to add them here.")
+                    emptyHint: filters.emptyReason
                     onAlbumGridChosen: grid => layout.albumGrid = grid
                     onSortClicked: column => filters.sortBy(column)
                     onSortChosen: (column, descending) => filters.setSort(column, descending)

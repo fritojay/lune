@@ -59,6 +59,9 @@ pub mod qobject {
         /// A playlist in its own order, with no search, so its tracks can be
         /// moved.
         #[qproperty(bool, reorderable, READ, NOTIFY)]
+        /// Shown in place of an empty main pane; empty when there's nothing
+        /// to say.
+        #[qproperty(QString, empty_reason, cxx_name = "emptyReason", READ, NOTIFY)]
         type FilterModel = super::FilterModelRust;
     }
 
@@ -157,6 +160,7 @@ pub struct FilterModelRust {
     source_kind: QString,
     flat: bool,
     reorderable: bool,
+    empty_reason: QString,
     /// What the properties show. Until the first `reload`, the last run's.
     state: BrowseState,
     rows: Vec<Filter>,
@@ -182,6 +186,7 @@ impl Default for FilterModelRust {
             source_kind: QString::from(sources_model::kind(state.source)),
             flat: false,
             reorderable: false,
+            empty_reason: QString::default(),
             state,
             rows: Vec::new(),
             last_playlist: None,
@@ -461,7 +466,15 @@ impl qobject::FilterModel {
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
         let flat = view.flat;
         let reorderable = reorderable(&self.state, &self.search);
+        let searching = !matches!(self.search, TrackFilter::All);
+        let reason = empty_reason(self.state.source, searching, view.len());
         session::set_view(view, reset);
+        set!(
+            self,
+            empty_reason,
+            empty_reason_changed,
+            QString::from(reason)
+        );
         set!(self, flat, flat_changed, flat);
         set!(self, reorderable, reorderable_changed, reorderable);
         set!(self, title, title_changed, QString::from(&title));
@@ -494,6 +507,22 @@ fn all(grouping: Grouping) -> Filter {
         label: String::new(),
         detail: None,
         tracks: 0,
+    }
+}
+
+/// Why the main pane shows no tracks, when the user can do something about
+/// it. An empty library has its own screen.
+fn empty_reason(source: Source, searching: bool, tracks: usize) -> &'static str {
+    match (tracks, source, searching) {
+        (1.., _, _) => "",
+        (_, _, true) => "No tracks match the search.",
+        (_, Source::Playlist { id: None }, _) => {
+            "No playlists yet. Click New Playlist to make one."
+        }
+        (_, Source::Playlist { id: Some(_) }, _) => {
+            "This playlist is empty. Right-click tracks and choose Add to Playlist to add them here."
+        }
+        (_, Source::Library(_), false) => "",
     }
 }
 

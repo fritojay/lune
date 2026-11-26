@@ -251,21 +251,23 @@ ColumnLayout {
               + (trackPane.scanStatus ? " · " + trackPane.scanStatus : "")
     }
 
-    // An empty library with no folders: the first thing to do.
+    // An empty library: adding a folder is the first thing to do, or with
+    // folders, the scan (in the line above) hasn't found music yet.
     Item {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: !trackPane.loading && !trackPane.hasFolders && trackPane.albumCount === 0
+        visible: !trackPane.loading && !trackPane.hinted && trackPane.albumCount === 0
         Column {
             anchors.centerIn: parent
             spacing: 12
             Label {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: qsTr("Your library is empty")
+                text: trackPane.hasFolders ? qsTr("No music found yet") : qsTr("Your library is empty")
                 font.pointSize: 14
             }
             Button {
                 anchors.horizontalCenter: parent.horizontalCenter
+                visible: !trackPane.hasFolders
                 text: qsTr("Add a Music Folder…")
                 highlighted: true
                 onClicked: trackPane.addFolderRequested()
@@ -332,7 +334,7 @@ ColumnLayout {
         id: albumList
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: !trackPane.grid && !trackPane.hinted && (trackPane.albumCount > 0 || trackPane.hasFolders)
+        visible: !trackPane.grid && trackPane.albumCount > 0
         model: trackPane.model
         onMoveRequested: (rows, to) => trackPane.moveRequested(rows, to)
 
@@ -373,7 +375,7 @@ ColumnLayout {
         readonly property real cellWidth: Math.floor(usableWidth / columns)
         Layout.fillWidth: true
         Layout.fillHeight: true
-        visible: trackPane.grid && !trackPane.hinted && (trackPane.albumCount > 0 || trackPane.hasFolders)
+        visible: trackPane.grid && trackPane.albumCount > 0
         model: trackPane.gridModel
         clip: true
         boundsBehavior: Flickable.StopAtBounds
