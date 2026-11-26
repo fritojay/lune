@@ -108,3 +108,33 @@ proptest! {
         }
     }
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    /// Dropping a buffered next track keeps the whole of the track before
+    /// it, however many pieces of the dropped one were already prepared.
+    /// Output already made past the cut stays (see `finish_at`).
+    #[test]
+    fn cutting_at_a_track_start_keeps_exactly_the_track_before_it(
+        a_frames in 1usize..6_000,
+        b_pieces in 0usize..40,
+        piece_frames in 1usize..20,
+    ) {
+        let mut c = Converter::new(48_000, 2);
+        let mut out = Vec::new();
+        let a_start = c.prepare(44_100, 2, &mut out).unwrap();
+        c.track_starts_at(a_start);
+        c.process(&vec![0.25; 2 * a_frames], 1.0, &mut out).unwrap();
+        let b_start = c.prepare(44_100, 2, &mut out).unwrap();
+        c.track_starts_at(b_start);
+        c.process(&vec![0.25; 2 * piece_frames], 1.0, &mut out).unwrap();
+        for _ in 0..b_pieces {
+            c.prepare(44_100, 2, &mut out).unwrap();
+            c.process(&vec![0.25; 2 * piece_frames], 1.0, &mut out).unwrap();
+        }
+        let made = (out.len() / 2) as u64;
+        c.finish_at(b_start, &mut out).unwrap();
+        prop_assert_eq!((out.len() / 2) as u64, made.max(b_start));
+    }
+}
