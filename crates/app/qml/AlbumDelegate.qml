@@ -3,7 +3,7 @@ import QtQuick
 import QtQuick.Layouts
 import com.lune.player
 
-// One album: its cover beside its tracks. A sorted view shows one track per
+// One album: its cover beside its tracks. A flat view shows one track per
 // delegate, with no cover or header.
 Item {
     id: album
@@ -18,7 +18,12 @@ Item {
     required property var trackColumns
     required property var trackIds
 
-    required property bool sorted
+    required property bool flat
+    // Tracks can be dragged to another row (only when `flat`).
+    required property bool reorderable
+    // The row a dragged track would land before, or -1.
+    required property int dropRow
+    required property int lastRow
     required property TrackSelection selection
     required property real currentTrackId
     required property var hiddenColumns
@@ -30,8 +35,11 @@ Item {
     signal playRequested(int viewIndex)
     // For `selection`'s rows.
     signal menuRequested()
+    // `y` is in this delegate's coordinates.
+    signal dragMoved(real y)
+    signal dragEnded(int viewIndex)
 
-    height: sorted ? Theme.rowHeight
+    height: flat ? Theme.rowHeight
                    : Math.max(Theme.coverSize, header.height + trackCount * Theme.rowHeight)
                      + 2 * Theme.albumPadding
 
@@ -40,7 +48,7 @@ Item {
         y: Theme.albumPadding
         width: Theme.coverSize
         height: Theme.coverSize
-        visible: !album.sorted
+        visible: !album.flat
         source: album.cover
 
         MouseArea {
@@ -62,13 +70,13 @@ Item {
     Column {
         id: tracks
         x: album.tracksLeft
-        y: album.sorted ? 0 : Theme.albumPadding
+        y: album.flat ? 0 : Theme.albumPadding
         width: album.width - x - album.tracksRight
 
         Column {
             id: header
             width: parent.width
-            visible: !album.sorted
+            visible: !album.flat
             bottomPadding: 6
             Text {
                 width: parent.width - album.gutter
@@ -107,7 +115,7 @@ Item {
                 height: Theme.rowHeight
                 color: selected ? album.palette.highlight
                      : rowArea.containsMouse ? Theme.hoverColor(album.palette)
-                     : (album.sorted ? viewIndex : index) % 2 ? Theme.stripeColor(album.palette) : "transparent"
+                     : (album.flat ? viewIndex : index) % 2 ? Theme.stripeColor(album.palette) : "transparent"
 
                 RowLayout {
                     anchors.fill: parent
@@ -164,6 +172,24 @@ Item {
                         if (mouse.button === Qt.LeftButton)
                             album.playRequested(trackRow.viewIndex)
                     }
+                }
+
+                Rectangle {
+                    readonly property bool below: album.dropRow === trackRow.viewIndex + 1
+                                                  && trackRow.viewIndex === album.lastRow
+                    width: parent.width
+                    height: 2
+                    y: below ? parent.height - 1 : -1
+                    visible: album.dropRow === trackRow.viewIndex || below
+                    color: album.palette.highlight
+                }
+
+                DragHandler {
+                    enabled: album.reorderable
+                    target: null
+                    xAxis.enabled: false
+                    onCentroidChanged: if (active) album.dragMoved(trackRow.mapToItem(album, 0, centroid.position.y).y)
+                    onActiveChanged: if (!active) album.dragEnded(trackRow.viewIndex)
                 }
             }
         }

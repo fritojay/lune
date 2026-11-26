@@ -373,6 +373,11 @@ ApplicationWindow {
                     columnWidths: layout.columnWidths(trackPane.rowWidth, layout.hiddenColumns)
                     albumGrid: layout.albumGrid
                     controller: player
+                    flat: filters.flat
+                    playlistShown: filterPane.listsPlaylists
+                    reorderable: filters.reorderable
+                    onRemoveFromPlaylistRequested: rows => playlistsModel.removeTracks(rows)
+                    onMoveRequested: (rows, to) => playlistsModel.moveTracks(rows, to)
                     emptyHint: !filterPane.listsPlaylists ? ""
                              : playlistsModel.count === 0 ? qsTr("No playlists yet. Click New Playlist to make one.")
                              : qsTr("This playlist is empty. Right-click tracks and choose Add to Playlist to add them here.")

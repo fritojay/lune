@@ -599,11 +599,13 @@ pub fn menu_choice(
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
     pub tracks: Vec<usize>,
-    /// Consecutive runs of one album, as ranges of `tracks`. A sorted view
-    /// isn't grouped by album and has one range per track.
+    /// Consecutive runs of one album, as ranges of `tracks`. A flat view
+    /// has one range per track.
     pub albums: Vec<Range<usize>>,
     /// `None` in album order.
     pub sort: Option<Sort>,
+    /// Not grouped by album: a sorted view, or a playlist.
+    pub flat: bool,
 }
 
 impl View {
@@ -613,6 +615,11 @@ impl View {
 
     pub fn is_empty(&self) -> bool {
         self.tracks.is_empty()
+    }
+
+    fn flatten(&mut self) {
+        self.albums = (0..self.tracks.len()).map(|i| i..i + 1).collect();
+        self.flat = true;
     }
 }
 
@@ -814,7 +821,32 @@ impl Catalog {
         let order = track_ids
             .iter()
             .filter_map(|id| self.by_id.get(id).copied());
-        self.view_in(order, filter)
+        let mut view = self.view_in(order, filter);
+        view.flatten();
+        view
+    }
+
+    /// For each row of `view`, a [`Catalog::playlist_view`] of `track_ids`
+    /// (sorted or not), the position in `track_ids` it shows. `None` only
+    /// when `view` is of another list.
+    pub fn playlist_positions(&self, view: &View, track_ids: &[i64]) -> Vec<Option<usize>> {
+        // A playlist view, even sorted (the sort is stable), keeps a track's
+        // repeats in playlist order, and shows all of them or none.
+        let mut positions: HashMap<i64, Vec<usize>> = HashMap::new();
+        for (position, &id) in track_ids.iter().enumerate() {
+            positions.entry(id).or_default().push(position);
+        }
+        let mut seen: HashMap<i64, usize> = HashMap::new();
+        view.tracks
+            .iter()
+            .map(|&i| {
+                let id = self.tracks.get(i)?.id;
+                let repeat = seen.entry(id).or_default();
+                let position = positions.get(&id)?.get(*repeat).copied();
+                *repeat += 1;
+                position
+            })
+            .collect()
     }
 
     fn view_in(&self, order: impl Iterator<Item = usize>, filter: &TrackFilter) -> View {
@@ -842,7 +874,7 @@ impl Catalog {
     pub fn sorted(&self, mut view: View, sort: Sort) -> View {
         view.tracks
             .sort_by(|&a, &b| sort.column.compare(self, a, b, sort.descending));
-        view.albums = (0..view.tracks.len()).map(|i| i..i + 1).collect();
+        view.flatten();
         view.sort = Some(sort);
         view
     }

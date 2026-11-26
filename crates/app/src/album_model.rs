@@ -306,11 +306,11 @@ fn total_duration(tracks: &[&ListTrack]) -> String {
     }
 }
 
-/// The cover of the album starting with `first`. A sorted view is a flat
-/// track list without covers, so asking for one would only queue thumbnails
+/// The cover of the album starting with `first`. A flat view is a track
+/// list without covers, so asking for one would only queue thumbnails
 /// nobody sees.
 fn shown_cover(view: &View, first: &ListTrack) -> Option<i64> {
-    first.art_id.filter(|_| view.sort.is_none())
+    first.art_id.filter(|_| !view.flat)
 }
 
 /// The indices of `view`'s albums: with `one_album`, those whose album id

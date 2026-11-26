@@ -58,6 +58,31 @@ impl Playlist {
         ListId(largest.saturating_add(1))
     }
 
+    pub fn remove(&mut self, positions: &[usize]) {
+        let remove: HashSet<usize> = positions.iter().copied().collect();
+        self.track_ids = std::mem::take(&mut self.track_ids)
+            .into_iter()
+            .enumerate()
+            .filter(|(position, _)| !remove.contains(position))
+            .map(|(_, id)| id)
+            .collect();
+    }
+
+    /// Moves the tracks at `positions`, keeping their order, so they sit
+    /// before the track that was at `to`, or at the end when `to` is past it.
+    pub fn move_to(&mut self, positions: &[usize], to: usize) {
+        let moving: HashSet<usize> = positions.iter().copied().collect();
+        let to = to.min(self.track_ids.len());
+        let before = moving.iter().filter(|&&position| position < to).count();
+        let (moved, mut rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.track_ids)
+            .into_iter()
+            .enumerate()
+            .partition(|(position, _)| moving.contains(position));
+        let at = to - before;
+        rest.splice(at..at, moved);
+        self.track_ids = rest.into_iter().map(|(_, id)| id).collect();
+    }
+
     /// `id` while it is one of `playlists`, else the first of them by name.
     pub fn existing_or_first(id: Option<ListId>, playlists: &[Self]) -> Option<ListId> {
         match id {

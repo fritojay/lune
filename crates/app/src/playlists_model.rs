@@ -9,7 +9,7 @@
 use std::pin::Pin;
 
 use cxx_qt::{CxxQtType, Threading};
-use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
+use cxx_qt_lib::{QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QVariant};
 use lune_core::{ListId, Playlist, Source};
 
 use crate::list_model::{self, Role, text};
@@ -30,6 +30,8 @@ pub mod qobject {
         type QHash_i32_QByteArray = cxx_qt_lib::QHash<cxx_qt_lib::QHashPair_i32_QByteArray>;
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qlist.h");
+        type QList_i32 = cxx_qt_lib::QList<i32>;
     }
 
     extern "RustQt" {
@@ -70,6 +72,18 @@ pub mod qobject {
 
         #[qinvokable]
         fn remove(self: Pin<&mut PlaylistsModel>, id: &QString);
+
+        /// Removes the tracks at the main pane's `rows` from the playlist it
+        /// shows.
+        #[qinvokable]
+        #[cxx_name = "removeTracks"]
+        fn remove_tracks(self: Pin<&mut PlaylistsModel>, rows: &QList_i32);
+
+        /// Moves the tracks at the main pane's `rows`, keeping their order, to
+        /// before its row `to`, or to the end when `to` is past the last.
+        #[qinvokable]
+        #[cxx_name = "moveTracks"]
+        fn move_tracks(self: Pin<&mut PlaylistsModel>, rows: &QList_i32, to: i32);
 
         /// `base`, or `base` and a number when a playlist has that name.
         #[qinvokable]
@@ -219,6 +233,24 @@ impl qobject::PlaylistsModel {
         session::edit_playlists(|playlists| playlists.retain(|p| p.id != id));
     }
 
+    fn remove_tracks(self: Pin<&mut Self>, rows: &QList<i32>) {
+        edit_shown(|playlist, positions| {
+            let remove: Vec<usize> = picked(positions, rows).collect();
+            playlist.remove(&remove);
+        });
+    }
+
+    fn move_tracks(self: Pin<&mut Self>, rows: &QList<i32>, to: i32) {
+        edit_shown(|playlist, positions| {
+            let moving: Vec<usize> = picked(positions, rows).collect();
+            let to = usize::try_from(to)
+                .ok()
+                .and_then(|row| positions.get(row).copied().flatten())
+                .unwrap_or(playlist.track_ids.len());
+            playlist.move_to(&moving, to);
+        });
+    }
+
     fn suggested_name_from_qml(&self, base: &QString) -> QString {
         QString::from(&suggested_name(&base.to_string(), &self.playlists))
     }
@@ -234,6 +266,33 @@ impl qobject::PlaylistsModel {
     fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
         list_model::role_names(ROLES)
     }
+}
+
+/// Edits the playlist the main pane shows, given each of its rows' position
+/// in the playlist.
+fn edit_shown(edit: impl FnOnce(&mut Playlist, &[Option<usize>])) {
+    let (Source::Playlist { id: Some(id) }, Some(catalog)) =
+        (session::browse().source, session::catalog())
+    else {
+        return;
+    };
+    let view = session::view();
+    session::edit_playlists(|playlists| {
+        if let Some(playlist) = playlists.iter_mut().find(|p| p.id == id) {
+            let positions = catalog.playlist_positions(&view, &playlist.track_ids);
+            edit(playlist, &positions);
+        }
+    });
+}
+
+/// The positions shown at `rows`.
+fn picked<'a>(
+    positions: &'a [Option<usize>],
+    rows: &'a QList<i32>,
+) -> impl Iterator<Item = usize> + 'a {
+    rows.iter()
+        .filter_map(|&row| usize::try_from(row).ok())
+        .filter_map(|row| positions.get(row).copied().flatten())
 }
 
 fn list_id(id: &QString) -> Option<ListId> {

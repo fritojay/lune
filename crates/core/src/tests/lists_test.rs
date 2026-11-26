@@ -154,6 +154,56 @@ proptest! {
     }
 }
 
+fn playlist(track_ids: Vec<i64>) -> Playlist {
+    Playlist {
+        id: ListId(2),
+        name: String::new(),
+        track_ids,
+    }
+}
+
+proptest! {
+    #[test]
+    fn removing_keeps_the_other_tracks_in_order(
+        track_ids in prop::collection::vec(0..5i64, 0..10),
+        positions in prop::collection::vec(0..12usize, 0..6),
+    ) {
+        let mut edited = playlist(track_ids.clone());
+        edited.remove(&positions);
+        let kept: Vec<i64> = track_ids
+            .iter()
+            .enumerate()
+            .filter(|(position, _)| !positions.contains(position))
+            .map(|(_, &id)| id)
+            .collect();
+        prop_assert_eq!(edited.track_ids, kept);
+    }
+
+    #[test]
+    fn moving_puts_the_tracks_together_in_order_before_the_target_and_keeps_the_rest(
+        track_ids in prop::collection::vec(0..5i64, 0..10),
+        positions in prop::collection::vec(0..12usize, 0..6),
+        to in 0..12usize,
+    ) {
+        let mut edited = playlist(track_ids.clone());
+        edited.move_to(&positions, to);
+        let picked = |moving: bool| -> Vec<i64> {
+            track_ids
+                .iter()
+                .enumerate()
+                .filter(|(position, _)| positions.contains(position) == moving)
+                .map(|(_, &id)| id)
+                .collect()
+        };
+        let (moved, rest) = (picked(true), picked(false));
+        let to = to.min(track_ids.len());
+        let at = (0..to).filter(|position| !positions.contains(position)).count();
+        let mut expected = rest;
+        expected.splice(at..at, moved);
+        prop_assert_eq!(edited.track_ids, expected);
+    }
+}
+
 proptest! {
     #[test]
     fn a_list_id_parses_back_from_how_it_is_shown(id in any::<i64>()) {

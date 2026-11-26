@@ -27,6 +27,10 @@ ColumnLayout {
     required property var columnWidths
     required property bool albumGrid
     required property PlayerController controller
+    // A track list, not albums with covers: a column sort or a playlist.
+    required property bool flat
+    required property bool playlistShown
+    required property bool reorderable
     // Shown in place of an empty track list.
     required property string emptyHint
     readonly property bool hinted: !loading && trackCount === 0 && emptyHint !== ""
@@ -35,9 +39,7 @@ ColumnLayout {
     readonly property real rowWidth: grid ? albumRows.panelWidth - tracksLeft - tracksRight
                                             - 2 * Theme.cellInset
                                           : headingCells.width
-    // A column sort shows a flat track list instead of albums with covers.
-    readonly property bool sorted: sortColumn !== ""
-    readonly property bool grid: albumGrid && !sorted
+    readonly property bool grid: albumGrid && !flat
     property real openAlbumId: -1
     // The album `openAlbumModel` holds. It outlasts `openAlbumId` while the
     // closed album's panel shuts, so its tracks don't vanish first.
@@ -46,8 +48,8 @@ ColumnLayout {
         if (openAlbumId >= 0)
             shownAlbumId = openAlbumId
     }
-    readonly property int tracksLeft: sorted ? 0 : 2 * Theme.albumPadding + Theme.coverSize
-    readonly property int tracksRight: sorted ? 0 : Theme.albumPadding
+    readonly property int tracksLeft: flat ? 0 : 2 * Theme.albumPadding + Theme.coverSize
+    readonly property int tracksRight: flat ? 0 : Theme.albumPadding
     readonly property ListView list: albumList
 
     signal sortClicked(string column)
@@ -55,6 +57,9 @@ ColumnLayout {
     signal columnToggled(string column, bool shown)
     signal playRequested(int start)
     signal albumRequested(real trackId)
+    signal removeFromPlaylistRequested(list<int> rows)
+    // `rows` keep their order and go before the row now at `to`.
+    signal moveRequested(list<int> rows, int to)
     signal addFolderRequested()
     signal albumGridChosen(bool grid)
 
@@ -153,6 +158,32 @@ ColumnLayout {
         source: "view"
         onPlayRequested: start => trackPane.playRequested(start)
         onAlbumRequested: trackId => trackPane.albumRequested(trackId)
+
+        // Collapsed rather than hidden: a hidden menu item still takes its space.
+        MenuSeparator {
+            visible: trackPane.playlistShown
+            height: visible ? implicitHeight : 0
+        }
+        MenuItem {
+            text: qsTr("Remove from Playlist")
+            visible: trackPane.playlistShown
+            height: visible ? implicitHeight : 0
+            onTriggered: trackPane.removeFromPlaylistRequested(trackMenu.rows)
+        }
+        MenuItem {
+            text: qsTr("Move to Top")
+            visible: trackPane.playlistShown
+            height: visible ? implicitHeight : 0
+            enabled: trackPane.reorderable
+            onTriggered: trackPane.moveRequested(trackMenu.rows, 0)
+        }
+        MenuItem {
+            text: qsTr("Move to Bottom")
+            visible: trackPane.playlistShown
+            height: visible ? implicitHeight : 0
+            enabled: trackPane.reorderable
+            onTriggered: trackPane.moveRequested(trackMenu.rows, trackPane.trackCount)
+        }
     }
 
     SortMenu {
@@ -218,8 +249,10 @@ ColumnLayout {
         visible: !trackPane.loading
         elide: Text.ElideMiddle
         textFormat: Text.PlainText
-        text: (trackPane.sorted ? qsTr("%L1 tracks").arg(trackPane.trackCount)
-                                : qsTr("%L1 albums, %L2 tracks").arg(trackPane.albumCount).arg(trackPane.trackCount))
+        text: (trackPane.flat ? qsTr("%L1 tracks").arg(trackPane.trackCount)
+                              : qsTr("%L1 albums, %L2 tracks").arg(trackPane.albumCount).arg(trackPane.trackCount))
+              + (trackPane.playlistShown && !trackPane.reorderable && trackPane.trackCount > 1
+                 ? " · " + qsTr("Clear the sort and search to reorder") : "")
               + (trackPane.scanStatus ? " · " + trackPane.scanStatus : "")
     }
 
@@ -316,9 +349,25 @@ ColumnLayout {
         WheelScroller {
             view: albumList
         }
+        // The row a dragged track would land before, or -1.
+        property int dropRow: -1
+
+        function dropTarget(item: Item, y: real): int {
+            const p = item.mapToItem(albumList.contentItem, 0, y)
+            const row = albumList.indexAt(0, p.y)
+            if (row < 0)
+                return p.y < 0 ? 0 : trackPane.trackCount
+            const top = albumList.itemAtIndex(row).y
+            return p.y - top > Theme.rowHeight / 2 ? row + 1 : row
+        }
+
         delegate: AlbumDelegate {
+            id: listAlbum
             width: ListView.view.width
-            sorted: trackPane.sorted
+            flat: trackPane.flat
+            reorderable: trackPane.reorderable
+            dropRow: albumList.dropRow
+            lastRow: trackPane.trackCount - 1
             tracksLeft: trackPane.tracksLeft
             tracksRight: trackPane.tracksRight
             selection: trackSelection
@@ -328,6 +377,14 @@ ColumnLayout {
             gutter: albumScroll.gutter
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
             onMenuRequested: trackMenu.show(trackSelection.rows())
+            onDragMoved: y => albumList.dropRow = albumList.dropTarget(listAlbum, y)
+            onDragEnded: viewIndex => {
+                if (albumList.dropRow < 0)
+                    return
+                trackPane.moveRequested(trackSelection.contains(viewIndex) ? trackSelection.rows() : [viewIndex],
+                                        albumList.dropRow)
+                albumList.dropRow = -1
+            }
         }
     }
 
@@ -446,7 +503,10 @@ ColumnLayout {
                             model: panel.height > 0 || panel.open ? trackPane.openAlbumModel : 0
                             AlbumDelegate {
                                 width: background.width
-                                sorted: false
+                                flat: false
+                                reorderable: false
+                                dropRow: -1
+                                lastRow: -1
                                 tracksLeft: trackPane.tracksLeft
                                 tracksRight: trackPane.tracksRight
                                 selection: trackSelection

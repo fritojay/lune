@@ -1150,7 +1150,7 @@ proptest! {
         let state = BrowseState { source: Source::Playlist { id: shown.then_some(id) }, selected, sort, album_descending };
         let browsed = catalog.browse(&state, &playlists, &search);
 
-        let expected: Vec<i64> = if listed && shown { track_ids } else { Vec::new() }
+        let expected: Vec<i64> = if listed && shown { track_ids.clone() } else { Vec::new() }
             .into_iter()
             .filter(|id| catalog.by_id.get(id).is_some_and(|&i| search.passes(&catalog, i)))
             .collect();
@@ -1174,18 +1174,29 @@ proptest! {
                 let unsorted = catalog.browsed_view(&unsorted, &playlists, &search);
                 prop_assert_eq!(&catalog.sorted(unsorted, sort), &browsed.view);
             }
-            None => {
-                prop_assert_eq!(ids(&browsed.view), expected);
-                let album = |at: usize| catalog.track(browsed.view.tracks[at]).unwrap().album_id;
-                let mut end = 0;
-                for run in &browsed.view.albums {
-                    prop_assert_eq!(run.start, end);
-                    prop_assert!(run.clone().all(|at| album(at) == album(run.start)));
-                    prop_assert!(end == 0 || album(end - 1) != album(run.start));
-                    end = run.end;
-                }
-                prop_assert_eq!(end, browsed.view.len());
-            }
+            None => prop_assert_eq!(ids(&browsed.view), expected),
+        }
+        prop_assert!(browsed.view.flat);
+        let runs: Vec<Range<usize>> = (0..browsed.view.len()).map(|i| i..i + 1).collect();
+        prop_assert_eq!(&browsed.view.albums, &runs);
+
+        // Each row shows its own position of the playlist; unsorted, in order.
+        let shown_ids = if listed && shown { &track_ids[..] } else { &[] };
+        let positions: Vec<usize> = catalog
+            .playlist_positions(&browsed.view, shown_ids)
+            .into_iter()
+            .map(Option::unwrap)
+            .collect();
+        prop_assert_eq!(
+            positions.iter().map(|&p| shown_ids[p]).collect::<Vec<_>>(),
+            ids(&browsed.view)
+        );
+        let mut distinct = positions.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        prop_assert_eq!(distinct.len(), positions.len());
+        if sort.is_none() {
+            prop_assert!(positions.is_sorted());
         }
     }
 }

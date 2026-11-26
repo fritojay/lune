@@ -54,6 +54,11 @@ pub mod qobject {
         #[qproperty(bool, album_directional, cxx_name = "albumDirectional", READ, NOTIFY)]
         /// `SourcesModel`'s `kind` of the source.
         #[qproperty(QString, source_kind, cxx_name = "sourceKind", READ, NOTIFY)]
+        /// The main pane is a track list, not albums with covers.
+        #[qproperty(bool, flat, READ, NOTIFY)]
+        /// A playlist in its own order, with no search, so its tracks can be
+        /// moved.
+        #[qproperty(bool, reorderable, READ, NOTIFY)]
         type FilterModel = super::FilterModelRust;
     }
 
@@ -150,6 +155,8 @@ pub struct FilterModelRust {
     sort_descending: bool,
     album_directional: bool,
     source_kind: QString,
+    flat: bool,
+    reorderable: bool,
     /// What the properties show. Until the first `reload`, the last run's.
     state: BrowseState,
     rows: Vec<Filter>,
@@ -173,6 +180,8 @@ impl Default for FilterModelRust {
             sort_descending,
             album_directional: state.source.has_album_direction(),
             source_kind: QString::from(sources_model::kind(state.source)),
+            flat: false,
+            reorderable: false,
             state,
             rows: Vec::new(),
             last_playlist: None,
@@ -446,7 +455,13 @@ impl qobject::FilterModel {
             (Source::Library(grouping), None) => format::filter_label(&all(grouping)),
         };
         let count = i32::try_from(view.len()).unwrap_or(i32::MAX);
+        let flat = view.flat;
+        let reorderable = matches!(self.state.source, Source::Playlist { id: Some(_) })
+            && self.state.sort.is_none()
+            && matches!(self.search, TrackFilter::All);
         session::set_view(view, reset);
+        set!(self, flat, flat_changed, flat);
+        set!(self, reorderable, reorderable_changed, reorderable);
         set!(self, title, title_changed, QString::from(&title));
         set!(self, track_count, track_count_changed, count);
     }
