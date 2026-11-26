@@ -39,25 +39,13 @@ Menu {
 
     Component {
         id: confirmDelete
-        Dialog {
-            id: confirm
+        ConfirmDialog {
             required property string playlistId
             required property string name
-            parent: Overlay.overlay
-            anchors.centerIn: parent
-            width: Math.min(400, parent.width - 40)
-            modal: true
             title: qsTr("Delete Playlist")
-            standardButtons: Dialog.Ok | Dialog.Cancel
-            Component.onCompleted: standardButton(Dialog.Ok).text = qsTr("Delete")
+            acceptText: qsTr("Delete")
+            text: qsTr("Delete “%1”? Its tracks stay in your library.").arg(name)
             onAccepted: Playlists.remove(playlistId)
-            onClosed: destroy()
-            Label {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                textFormat: Text.PlainText
-                text: qsTr("Delete “%1”? Its tracks stay in your library.").arg(confirm.name)
-            }
         }
     }
 }

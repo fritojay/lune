@@ -5,7 +5,7 @@ import QtQuick.Layouts
 import com.lune.player
 
 Dialog {
-
+    id: unavailable
     title: qsTr("Unavailable Tracks")
     modal: true
     standardButtons: Dialog.Close
@@ -88,22 +88,17 @@ Dialog {
         Button {
             text: qsTr("Remove All…")
             enabled: Library.missingCount > 0
-            onClicked: confirmRemoveAll.open()
+            onClicked: confirmRemoveAll.createObject(unavailable).open()
         }
     }
 
-    Dialog {
+    Component {
         id: confirmRemoveAll
-        anchors.centerIn: parent
-        modal: true
-        title: qsTr("Remove All Unavailable Tracks?")
-        standardButtons: Dialog.Cancel | Dialog.Ok
-        onAccepted: Library.forgetAllMissing()
-
-        Label {
+        ConfirmDialog {
+            title: qsTr("Remove All Unavailable Tracks?")
+            acceptText: qsTr("Remove All")
             text: qsTr("%n track(s) and their play history will be forgotten. Files that come back later are added as new tracks.", "", Library.missingCount)
-            wrapMode: Text.WordWrap
-            width: Math.min(implicitWidth, 400)
+            onAccepted: Library.forgetAllMissing()
         }
     }
 }

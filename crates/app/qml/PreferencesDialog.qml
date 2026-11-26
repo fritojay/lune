@@ -20,24 +20,12 @@ Dialog {
     // gives them new ids, so playlists and play history never get them back.
     Component {
         id: confirmRemove
-        Dialog {
-            id: confirm
+        ConfirmDialog {
             required property string path
-            parent: Overlay.overlay
-            anchors.centerIn: parent
-            width: Math.min(440, parent.width - 40)
-            modal: true
             title: qsTr("Remove Folder")
-            standardButtons: Dialog.Ok | Dialog.Cancel
-            Component.onCompleted: standardButton(Dialog.Ok).text = qsTr("Remove")
+            acceptText: qsTr("Remove")
+            text: qsTr("Remove “%1” from the library? Its tracks are also taken out of your playlists and Recently Played, even if you add the folder again. The files themselves are not touched.").arg(path)
             onAccepted: Library.removeFolder(path)
-            onClosed: destroy()
-            Label {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                textFormat: Text.PlainText
-                text: qsTr("Remove “%1” from the library? Its tracks are also taken out of your playlists and Recently Played, even if you add the folder again. The files themselves are not touched.").arg(confirm.path)
-            }
         }
     }
 
