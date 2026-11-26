@@ -111,6 +111,13 @@ impl cxx_qt::Initialize for qobject::LibraryManager {
             },
         );
         self.as_mut().rust_mut().service = Some(service);
+        let qt_thread = self.qt_thread();
+        session::subscribe_errors(move |message| {
+            let message = QString::from(message);
+            // An error means the object is gone (the app is quitting).
+            let _ =
+                qt_thread.queue(move |mut manager| set!(manager, error, error_changed, message));
+        });
         self.as_mut().rust_mut().busy = true;
         self.as_mut().rust_mut().error = QString::from(&load_error.unwrap_or_default());
         self.as_mut().rust_mut().native_folder_dialog = !in_flatpak(Path::new("/.flatpak-info"));

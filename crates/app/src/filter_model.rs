@@ -201,7 +201,7 @@ impl cxx_qt::Initialize for qobject::FilterModel {
             let library = match Library::open(&db_path) {
                 Ok(library) => library,
                 Err(err) => {
-                    tracing::error!(%err, "search is unavailable");
+                    session::report_error(&format!("Search is unavailable: {err}"));
                     return;
                 }
             };
@@ -214,7 +214,7 @@ impl cxx_qt::Initialize for qobject::FilterModel {
                 let matches = match library.search_ids(&text) {
                     Ok(ids) => ids,
                     Err(err) => {
-                        tracing::warn!(%err, "search failed");
+                        session::report_error(&format!("Search failed: {err}"));
                         continue;
                     }
                 };

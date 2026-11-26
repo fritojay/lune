@@ -223,6 +223,32 @@ fn notify(change: Change) {
     }
 }
 
+type ErrorListener = Box<dyn Fn(&str) + Send>;
+
+fn error_listeners() -> &'static Mutex<Vec<ErrorListener>> {
+    static LISTENERS: OnceLock<Mutex<Vec<ErrorListener>>> = OnceLock::new();
+    LISTENERS.get_or_init(Mutex::default)
+}
+
+/// Logs `message` and shows it to the user; call from any thread.
+pub fn report_error(message: &str) {
+    tracing::error!("{message}");
+    let listeners = error_listeners()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    for listener in listeners.iter() {
+        listener(message);
+    }
+}
+
+/// `listener` is called, on the thread that reports, with each error.
+pub fn subscribe_errors(listener: impl Fn(&str) + Send + 'static) {
+    error_listeners()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(Box::new(listener));
+}
+
 /// The engine's view of the queue.
 pub struct EngineQueue;
 
@@ -268,7 +294,7 @@ fn saver() -> &'static Mutex<Option<Saver>> {
                 let mut library = match Library::open(&db_path) {
                     Ok(library) => library,
                     Err(err) => {
-                        tracing::error!(%err, "the queue will not be saved");
+                        report_error(&format!("The queue and playlists can't be saved: {err}"));
                         return;
                     }
                 };
@@ -293,7 +319,9 @@ fn saver() -> &'static Mutex<Option<Saver>> {
                     if let Some(playlists) = playlists {
                         match library.save_playlists(&saved_playlists, playlists) {
                             Ok(()) => saved_playlists = playlists.clone(),
-                            Err(err) => tracing::error!(%err, "could not save the playlists"),
+                            Err(err) => {
+                                report_error(&format!("The playlists could not be saved: {err}"));
+                            }
                         }
                     }
                     let result = if batch.contains(&Save::Queue) {
@@ -307,7 +335,7 @@ fn saver() -> &'static Mutex<Option<Saver>> {
                         Ok(())
                     };
                     if let Err(err) = result {
-                        tracing::error!(%err, "could not save the queue");
+                        report_error(&format!("The queue could not be saved: {err}"));
                     }
                 }
             });

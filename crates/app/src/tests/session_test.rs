@@ -146,3 +146,21 @@ fn new_playlists_take_the_unused_id_then_the_ones_after_it() {
         ]
     );
 }
+
+#[test]
+fn an_error_reported_on_any_thread_reaches_every_error_listener() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    for listener in 0..2 {
+        let tx = tx.clone();
+        // Other tests may report errors of their own meanwhile.
+        subscribe_errors(move |message| {
+            if message == "the disk is on fire" {
+                let _ = tx.send(listener);
+            }
+        });
+    }
+    std::thread::spawn(|| report_error("the disk is on fire"))
+        .join()
+        .unwrap();
+    assert_eq!(rx.try_iter().collect::<Vec<_>>(), [0, 1]);
+}
