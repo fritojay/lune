@@ -52,26 +52,17 @@ ApplicationWindow {
         }
         Menu {
             title: qsTr("&View")
-            Action {
+            ToggleAction {
                 text: qsTr("Albums as &List")
                 shortcut: listKey.sequence
-                checkable: true
-                checked: !WindowLayout.albumGrid
-                onTriggered: {
-                    WindowLayout.albumGrid = false
-                    // Triggering toggles `checked`, which breaks its binding.
-                    checked = Qt.binding(() => !WindowLayout.albumGrid)
-                }
+                toggledOn: !WindowLayout.albumGrid
+                onToggleRequested: WindowLayout.albumGrid = false
             }
-            Action {
+            ToggleAction {
                 text: qsTr("Albums as &Grid")
                 shortcut: gridKey.sequence
-                checkable: true
-                checked: WindowLayout.albumGrid
-                onTriggered: {
-                    WindowLayout.albumGrid = true
-                    checked = Qt.binding(() => WindowLayout.albumGrid)
-                }
+                toggledOn: WindowLayout.albumGrid
+                onToggleRequested: WindowLayout.albumGrid = true
             }
             MenuSeparator {}
             SortMenu {

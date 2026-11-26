@@ -10,14 +10,11 @@ Menu {
     component SortMenuItem: MenuItem {
         id: sortItem
         required property var item
-        text: item.text
-        enabled: item.enabled
-        checkable: true
-        checked: item.checked
-        onTriggered: {
-            Filters.setSort(sortItem.item.column, sortItem.item.descending)
-            // A click toggles `checked`, which breaks its binding.
-            checked = Qt.binding(() => sortItem.item.checked)
+        action: ToggleAction {
+            text: sortItem.item.text
+            enabled: sortItem.item.enabled
+            toggledOn: sortItem.item.checked
+            onToggleRequested: Filters.setSort(sortItem.item.column, sortItem.item.descending)
         }
     }
 
