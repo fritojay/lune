@@ -17,6 +17,16 @@ pub fn long_duration(ms: u64) -> String {
     format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
 }
 
+/// A playback position or length; negative or not a number is the start.
+pub fn clock(seconds: f64) -> String {
+    let ms = if seconds.is_finite() && seconds > 0.0 {
+        (seconds * 1000.0) as u64
+    } else {
+        0
+    };
+    long_duration(ms)
+}
+
 /// The disc is shown only for albums with more than one disc.
 pub fn track_number(disc: Option<u32>, track: Option<u32>, multi_disc: bool) -> String {
     match (track, multi_disc) {

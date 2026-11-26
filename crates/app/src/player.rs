@@ -137,6 +137,10 @@ pub mod qobject {
         #[cxx_name = "toggleMute"]
         fn toggle_mute(self: Pin<&mut PlayerController>);
 
+        /// `seconds` as the now-playing bar shows a time.
+        #[qinvokable]
+        fn clock(self: &PlayerController, seconds: f64) -> QString;
+
         /// Reads the engine's status; call a few times a second.
         #[qinvokable]
         fn poll(self: Pin<&mut PlayerController>);
@@ -539,6 +543,10 @@ impl qobject::PlayerController {
             MediaCommand::SeekBy(seconds) => self.seek_by(seconds),
             MediaCommand::SetVolume(volume) => self.set_volume_from_qml(volume),
         }
+    }
+
+    fn clock(&self, seconds: f64) -> QString {
+        QString::from(&format::clock(seconds))
     }
 
     fn report_playback(mut self: Pin<&mut Self>, state: PlaybackState, position: Duration) {

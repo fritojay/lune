@@ -401,6 +401,7 @@ ApplicationWindow {
                 NowPlayingBar {
                     id: nowPlayingBar
                     Layout.fillWidth: true
+                    controller: player
                     available: player.available
                     hasTrack: player.hasTrack
                     playing: player.playing

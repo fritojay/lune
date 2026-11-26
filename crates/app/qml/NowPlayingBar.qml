@@ -2,9 +2,11 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import com.lune.player
 
 Pane {
     id: nowPlayingBar
+    required property PlayerController controller
     required property bool available
     required property bool hasTrack
     required property bool playing
@@ -26,11 +28,6 @@ Pane {
     signal volumeMoved(real volume)
     signal muteToggled()
     signal queueToggled(bool shown)
-
-    function clock(seconds: real): string {
-        const s = Math.max(0, Math.floor(seconds))
-        return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")
-    }
 
     component TransportButton: ToolButton {
         icon.width: 20
@@ -208,13 +205,13 @@ Pane {
             Label {
                 Layout.preferredWidth: clockWidth.width
                 horizontalAlignment: Text.AlignRight
-                text: nowPlayingBar.clock(seekBar.pressed ? seekBar.value : nowPlayingBar.position)
+                text: nowPlayingBar.controller.clock(seekBar.pressed ? seekBar.value : nowPlayingBar.position)
                 font.features: { "tnum": 1 }
                 opacity: 0.7
                 TextMetrics {
                     id: clockWidth
                     font.features: { "tnum": 1 }
-                    text: nowPlayingBar.clock(Math.max(nowPlayingBar.duration, 600))
+                    text: nowPlayingBar.controller.clock(Math.max(nowPlayingBar.duration, 600))
                 }
             }
             Slider {
@@ -232,7 +229,7 @@ Pane {
             }
             Label {
                 Layout.preferredWidth: clockWidth.width
-                text: nowPlayingBar.clock(nowPlayingBar.duration)
+                text: nowPlayingBar.controller.clock(nowPlayingBar.duration)
                 font.features: { "tnum": 1 }
                 opacity: 0.7
             }

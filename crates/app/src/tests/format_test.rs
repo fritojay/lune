@@ -127,6 +127,16 @@ proptest! {
     }
 
     #[test]
+    fn a_clock_shows_the_whole_seconds_played_and_hours_once_there_are_any(
+        seconds in prop_oneof![0.0..10_000.0f64, Just(-3.0), Just(f64::NAN), Just(f64::INFINITY)],
+    ) {
+        let shown = if seconds.is_finite() && seconds > 0.0 { seconds.floor() as u64 } else { 0 };
+        let clock = clock(seconds);
+        prop_assert_eq!(shown_seconds(&clock), Some(shown));
+        prop_assert_eq!(clock.matches(':').count(), if shown < 3600 { 1 } else { 2 });
+    }
+
+    #[test]
     fn durations_show_whole_minutes_and_seconds_and_long_ones_add_hours(
         ms in prop_oneof![0..10_000_000u64, 3_599_000..3_601_000u64, any::<u64>()],
     ) {
