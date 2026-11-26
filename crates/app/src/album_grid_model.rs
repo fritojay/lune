@@ -269,8 +269,9 @@ fn grid_row(albums: usize, columns: usize, row: usize) -> Option<GridRow> {
 
 /// For each cover in `view`, the grid rows that show it.
 fn grid_cover_rows(catalog: &Catalog, view: &View, columns: usize) -> CoverRows {
-    let every_album: Vec<usize> = (0..view.albums.len()).collect();
-    let mut rows = album_model::cover_rows(catalog, view, &every_album);
+    let mut rows = covers::rows_by_cover(
+        (0..view.albums.len()).map(|album| album_model::album_cover(catalog, view, album)),
+    );
     for grid_rows in rows.values_mut() {
         for row in grid_rows.iter_mut() {
             *row /= i32::try_from(columns).unwrap_or(i32::MAX);

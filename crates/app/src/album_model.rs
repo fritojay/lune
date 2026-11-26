@@ -88,20 +88,44 @@ pub mod qobject {
     impl cxx_qt::Initialize for AlbumListModel {}
 }
 
-/// An album of the view, as its roles read it.
+/// Most tracks one row shows. An album is one delegate with a row per
+/// track, so a huge one (such as untagged files, which all share one album)
+/// would be built whole, and kept, as soon as any of it scrolls into view.
+/// Even, so stripes carry on across an album's rows.
+pub const MAX_ROW_TRACKS: usize = 64;
+
+/// A model row: some of the tracks of one of the view's albums.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    album: usize,
+    /// Of the view's tracks.
+    tracks: Range<usize>,
+}
+
+/// The part of an album of the view one row shows, as its roles read it.
 pub struct Album<'a> {
     catalog: &'a Catalog,
     view: &'a View,
+    /// The whole album, of the view's tracks.
     range: Range<usize>,
+    part: Range<usize>,
     first: &'a ListTrack,
 }
 
 impl Album<'_> {
-    fn tracks(&self) -> Vec<&ListTrack> {
-        self.view.tracks[self.range.clone()]
+    fn tracks(&self, range: Range<usize>) -> Vec<&ListTrack> {
+        self.view.tracks[range]
             .iter()
             .filter_map(|&i| self.catalog.track(i))
             .collect()
+    }
+
+    fn shown(&self) -> Vec<&ListTrack> {
+        self.tracks(self.part.clone())
+    }
+
+    fn is_header(&self) -> bool {
+        self.part.start == self.range.start
     }
 }
 
@@ -117,19 +141,28 @@ pub const ROLES: &[Role] = &[
     ("genre", |a| {
         text(a.first.album_genre.as_deref().unwrap_or_default())
     }),
-    ("duration", |a| text(&total_duration(&a.tracks()))),
-    ("cover", |a| covers::url(shown_cover(a.view, a.first))),
+    ("duration", |a| {
+        text(&total_duration(&a.tracks(a.range.clone())))
+    }),
+    ("cover", |a| {
+        covers::url(shown_cover(a.view, a.first).filter(|_| a.is_header()))
+    }),
     ("albumId", |a| QVariant::from(&a.first.album_id)),
     ("firstIndex", |a| {
-        QVariant::from(&i32::try_from(a.range.start).unwrap_or(i32::MAX))
+        QVariant::from(&i32::try_from(a.part.start).unwrap_or(i32::MAX))
     }),
     ("trackCount", |a| {
+        QVariant::from(&i32::try_from(a.part.len()).unwrap_or(i32::MAX))
+    }),
+    ("albumTrackCount", |a| {
         QVariant::from(&i32::try_from(a.range.len()).unwrap_or(i32::MAX))
     }),
+    ("header", |a| QVariant::from(&a.is_header())),
+    ("footer", |a| QVariant::from(&(a.part.end == a.range.end))),
     ("trackColumns", track_columns),
     ("trackIds", |a| {
         let mut ids = QList::<i64>::default();
-        for t in a.tracks() {
+        for t in a.shown() {
             ids.append(t.id);
         }
         QVariant::from(&ids)
@@ -144,8 +177,7 @@ pub struct AlbumListModelRust {
     album_id: i64,
     catalog: Option<Rc<Catalog>>,
     view: Rc<View>,
-    /// The view's album indices, one per row.
-    rows: Vec<usize>,
+    rows: Vec<Row>,
     /// The rows showing each cover, so a finished cover doesn't scan every album.
     cover_rows: CoverRows,
 }
@@ -196,7 +228,8 @@ impl qobject::AlbumListModel {
         let view = session::view();
         let catalog = session::catalog();
         let rows = shown_rows(catalog.as_deref(), &view, self.one_album, self.album_id);
-        let count = i32::try_from(rows.len()).unwrap_or(i32::MAX);
+        let albums = rows.iter().filter(|row| is_header(&view, row)).count();
+        let count = i32::try_from(albums).unwrap_or(i32::MAX);
         let cover_rows = catalog
             .as_deref()
             .map(|catalog| cover_rows(catalog, &view, &rows))
@@ -218,7 +251,7 @@ impl qobject::AlbumListModel {
         let album = usize::try_from(index.row())
             .ok()
             .and_then(|row| self.rows.get(row))
-            .and_then(|&album| album_at(self.catalog.as_deref(), &self.view, album));
+            .and_then(|row| row_at(self.catalog.as_deref(), &self.view, row));
         list_model::data(ROLES, album.as_ref(), role)
     }
 
@@ -236,13 +269,32 @@ pub fn album_at<'a>(
     view: &'a View,
     album: usize,
 ) -> Option<Album<'a>> {
+    let range = view.albums.get(album)?.clone();
+    row_at(
+        catalog,
+        view,
+        &Row {
+            album,
+            tracks: range,
+        },
+    )
+}
+
+fn row_at<'a>(catalog: Option<&'a Catalog>, view: &'a View, row: &Row) -> Option<Album<'a>> {
     let catalog = catalog?;
     Some(Album {
         catalog,
         view,
-        range: view.albums.get(album)?.clone(),
-        first: first_track(Some(catalog), view, album)?,
+        range: view.albums.get(row.album)?.clone(),
+        part: row.tracks.clone(),
+        first: first_track(Some(catalog), view, row.album)?,
     })
+}
+
+fn is_header(view: &View, row: &Row) -> bool {
+    view.albums
+        .get(row.album)
+        .is_some_and(|album| album.start == row.tracks.start)
 }
 
 /// The first track of album `row` in `view`; its fields describe the album.
@@ -253,7 +305,7 @@ fn first_track<'a>(catalog: Option<&'a Catalog>, view: &View, row: usize) -> Opt
 
 /// Each column's text for each track, by column name.
 fn track_columns(album: &Album<'_>) -> QVariant {
-    let tracks = album.tracks();
+    let tracks = album.shown();
     let mut columns = QMap::<QMapPair_QString_QVariant>::default();
     for column in SortColumn::ALL {
         let texts: QStringList = tracks
@@ -306,29 +358,36 @@ fn shown_cover(view: &View, first: &ListTrack) -> Option<i64> {
     first.art_id.filter(|_| !view.flat)
 }
 
-/// The indices of `view`'s albums: with `one_album`, those whose album id
-/// is `album_id` (none for -1), otherwise all of them.
-fn shown_rows(
-    catalog: Option<&Catalog>,
-    view: &View,
-    one_album: bool,
-    album_id: i64,
-) -> Vec<usize> {
-    if !one_album {
-        return (0..view.albums.len()).collect();
-    }
+/// The rows of `view`'s albums, each album split into parts of at most
+/// [`MAX_ROW_TRACKS`]: with `one_album`, those of album `album_id` (none for
+/// -1), otherwise all of them.
+fn shown_rows(catalog: Option<&Catalog>, view: &View, one_album: bool, album_id: i64) -> Vec<Row> {
+    let shown = |album: usize| {
+        !one_album || first_track(catalog, view, album).is_some_and(|t| t.album_id == album_id)
+    };
     (0..view.albums.len())
-        .filter(|&album| first_track(catalog, view, album).is_some_and(|t| t.album_id == album_id))
+        .filter(|&album| shown(album))
+        .flat_map(|album| {
+            let range = view.albums[album].clone();
+            range.clone().step_by(MAX_ROW_TRACKS).map(move |start| Row {
+                album,
+                tracks: start..range.end.min(start + MAX_ROW_TRACKS),
+            })
+        })
         .collect()
 }
 
-/// For each cover of `view`'s albums at `rows`, the rows that show it.
-pub fn cover_rows(catalog: &Catalog, view: &View, rows: &[usize]) -> CoverRows {
-    covers::rows_by_cover(
-        rows.iter().map(|&album| {
-            first_track(Some(catalog), view, album).and_then(|t| shown_cover(view, t))
-        }),
-    )
+pub fn album_cover(catalog: &Catalog, view: &View, album: usize) -> Option<i64> {
+    first_track(Some(catalog), view, album).and_then(|t| shown_cover(view, t))
+}
+
+/// For each cover, the `rows` that show it: the first of each album's.
+fn cover_rows(catalog: &Catalog, view: &View, rows: &[Row]) -> CoverRows {
+    covers::rows_by_cover(rows.iter().map(|row| {
+        is_header(view, row)
+            .then(|| album_cover(catalog, view, row.album))
+            .flatten()
+    }))
 }
 
 #[cfg(test)]

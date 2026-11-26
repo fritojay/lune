@@ -15,6 +15,11 @@ Item {
     required property url cover
     required property int firstIndex
     required property int trackCount
+    // A long album is split over several delegates: the first has the
+    // header and cover, the last the padding below.
+    required property bool header
+    required property bool footer
+    required property int albumTrackCount
     required property var trackColumns
     required property var trackIds
 
@@ -40,15 +45,16 @@ Item {
     signal dragEnded(int viewIndex)
 
     height: flat ? Theme.rowHeight
-                   : Math.max(Theme.coverSize, header.height + trackCount * Theme.rowHeight)
-                     + 2 * Theme.albumPadding
+                 : Math.max(album.header ? Theme.albumPadding + Theme.coverSize : 0,
+                            tracks.y + (albumHeader.visible ? albumHeader.height : 0) + trackCount * Theme.rowHeight)
+                   + (album.footer ? Theme.albumPadding : 0)
 
     CoverArt {
         x: Theme.albumPadding
         y: Theme.albumPadding
         width: Theme.coverSize
         height: Theme.coverSize
-        visible: !album.flat
+        visible: !album.flat && album.header
         source: album.cover
 
         MouseArea {
@@ -60,7 +66,7 @@ Item {
             }
             onClicked: mouse => {
                 if (mouse.button === Qt.RightButton) {
-                    album.selection.selectRange(album.firstIndex, album.trackCount)
+                    album.selection.selectRange(album.firstIndex, album.albumTrackCount)
                     album.menuRequested()
                 }
             }
@@ -70,13 +76,13 @@ Item {
     Column {
         id: tracks
         x: album.tracksLeft
-        y: album.flat ? 0 : Theme.albumPadding
+        y: album.header && !album.flat ? Theme.albumPadding : 0
         width: album.width - x - album.tracksRight
 
         Column {
-            id: header
+            id: albumHeader
             width: parent.width
-            visible: !album.flat
+            visible: !album.flat && album.header
             bottomPadding: 6
             Text {
                 width: parent.width - album.gutter

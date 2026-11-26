@@ -1,4 +1,5 @@
 use lune_core::{Grouping, Sort, SortColumn, TrackFilter};
+use proptest::prelude::*;
 
 use super::*;
 use crate::test_util::{list_track as track, qml_values};
@@ -14,7 +15,11 @@ fn cover_rows_lists_every_album_showing_each_cover() {
         track(5, 4, Some(8)),
     ]);
     let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
-    let rows = cover_rows(&catalog, &view, &[0, 1, 2, 3]);
+    let rows = cover_rows(
+        &catalog,
+        &view,
+        &shown_rows(Some(&catalog), &view, false, -1),
+    );
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[&7], [0, 2]);
     assert_eq!(rows[&8], [3]);
@@ -28,7 +33,7 @@ fn cover_rows_numbers_only_the_albums_shown() {
         track(3, 3, Some(9)),
     ]);
     let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
-    let rows = cover_rows(&catalog, &view, &[2]);
+    let rows = cover_rows(&catalog, &view, &shown_rows(Some(&catalog), &view, true, 3));
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[&9], [0]);
 }
@@ -36,7 +41,53 @@ fn cover_rows_numbers_only_the_albums_shown() {
 #[test]
 fn cover_rows_of_an_empty_view_is_empty() {
     let catalog = Catalog::new(Vec::new());
-    assert!(cover_rows(&catalog, &View::default(), &[]).is_empty());
+    assert!(
+        cover_rows(
+            &catalog,
+            &View::default(),
+            &shown_rows(Some(&catalog), &View::default(), false, -1)
+        )
+        .is_empty()
+    );
+}
+
+fn albums(rows: &[Row]) -> Vec<usize> {
+    rows.iter().map(|row| row.album).collect()
+}
+
+proptest! {
+    #[test]
+    fn rows_cover_each_album_in_order_in_parts_of_at_most_the_limit_with_one_header(
+        sizes in prop::collection::vec(1..=3 * MAX_ROW_TRACKS, 0..6),
+    ) {
+        let mut id = 0;
+        let tracks: Vec<ListTrack> = sizes
+            .iter()
+            .zip(1..)
+            .flat_map(|(&size, album)| {
+                (0..size).map(move |_| album)
+            })
+            .map(|album| {
+                id += 1;
+                track(id, album, Some(album))
+            })
+            .collect();
+        let catalog = Catalog::new(tracks);
+        let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
+        let rows = shown_rows(Some(&catalog), &view, false, -1);
+        let covered: Vec<usize> = rows.iter().flat_map(|row| row.tracks.clone()).collect();
+        prop_assert_eq!(covered, (0..view.len()).collect::<Vec<_>>());
+        for row in &rows {
+            prop_assert!((1..=MAX_ROW_TRACKS).contains(&row.tracks.len()));
+            prop_assert!(view.albums[row.album].start <= row.tracks.start);
+            prop_assert!(row.tracks.end <= view.albums[row.album].end);
+        }
+        let headers: Vec<usize> =
+            rows.iter().filter(|row| is_header(&view, row)).map(|row| row.album).collect();
+        prop_assert_eq!(headers, (0..view.albums.len()).collect::<Vec<_>>());
+        let covers = cover_rows(&catalog, &view, &rows);
+        prop_assert_eq!(covers.values().map(Vec::len).sum::<usize>(), view.albums.len());
+    }
 }
 
 #[test]
@@ -47,7 +98,10 @@ fn every_album_is_shown_unless_one_album_is_asked_for() {
         track(3, 2, None),
     ]);
     let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
-    assert_eq!(shown_rows(Some(&catalog), &view, false, -1), [0, 1]);
+    assert_eq!(
+        albums(&shown_rows(Some(&catalog), &view, false, -1)),
+        [0, 1]
+    );
 }
 
 #[test]
@@ -58,7 +112,7 @@ fn an_album_id_shows_only_that_albums_rows() {
         track(3, 2, None),
     ]);
     let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
-    assert_eq!(shown_rows(Some(&catalog), &view, true, 2), [1]);
+    assert_eq!(albums(&shown_rows(Some(&catalog), &view, true, 2)), [1]);
 }
 
 #[test]
@@ -85,7 +139,8 @@ fn a_sorted_view_shows_no_covers() {
         descending: false,
     };
     let view = catalog.sorted(view, sort);
-    assert!(cover_rows(&catalog, &view, &[0, 1]).is_empty());
+    let rows = shown_rows(Some(&catalog), &view, false, -1);
+    assert!(cover_rows(&catalog, &view, &rows).is_empty());
 }
 
 #[test]
