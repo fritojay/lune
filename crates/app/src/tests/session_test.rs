@@ -1,4 +1,6 @@
 use super::*;
+use lune_core::{Grouping, TrackFilter};
+
 use crate::test_util::list_track;
 
 /// The changes sent from now on, in order.
@@ -58,6 +60,28 @@ fn a_listener_can_read_the_new_state_and_subscribe() {
     });
     set_catalog(Catalog::new(vec![list_track(1, 1, None)]));
     assert_eq!(*seen.borrow(), [1]);
+}
+
+#[test]
+fn a_play_updates_the_catalog_the_list_models_hold_rather_than_a_copy() {
+    set_catalog(Catalog::new(vec![
+        list_track(1, 1, None),
+        list_track(2, 2, None),
+    ]));
+    let held = catalog().unwrap();
+    let changes = recorded();
+    record_play(2);
+    assert!(Rc::ptr_eq(&held, &catalog().unwrap()));
+    assert_eq!(*changes.borrow(), [Change::Played]);
+    let played = held.view(Grouping::RecentlyPlayed, &TrackFilter::All);
+    assert_eq!(
+        played
+            .tracks
+            .iter()
+            .map(|&i| held.track(i).unwrap().id)
+            .collect::<Vec<_>>(),
+        [2]
+    );
 }
 
 #[test]

@@ -414,13 +414,11 @@ fn recently_played_lists_only_played_albums_by_their_latest_play() {
 
 #[test]
 fn a_recorded_play_moves_its_album_to_the_top_of_recently_played() {
-    let mut catalog = Catalog::new(vec![
+    let catalog = Catalog::new(vec![
         played(track(1, "A", 10, "One", None), 100),
         track(2, "B", 20, "Two", None),
     ]);
-    let at = SystemTime::now();
-    catalog.record_play(2, at);
-    assert_eq!(catalog.by_id(2).unwrap().played_ns, Some(unix_ns(at)));
+    catalog.record_play(2, SystemTime::now());
     let view = catalog.view(Grouping::RecentlyPlayed, &TrackFilter::All);
     assert_eq!(ids(&catalog, &view), [2, 1]);
     // Recently Added is unaffected.
@@ -433,7 +431,7 @@ fn a_recorded_play_moves_its_album_to_the_top_of_recently_played() {
 
 #[test]
 fn a_play_of_an_unknown_track_changes_nothing() {
-    let mut catalog = Catalog::new(vec![played(track(1, "A", 10, "One", None), 100)]);
+    let catalog = Catalog::new(vec![played(track(1, "A", 10, "One", None), 100)]);
     catalog.record_play(99, SystemTime::now());
     let view = catalog.view(Grouping::RecentlyPlayed, &TrackFilter::All);
     assert_eq!(ids(&catalog, &view), [1]);
@@ -1059,7 +1057,7 @@ proptest! {
         pick in any::<Index>(),
     ) {
         prop_assume!(!tracks.is_empty());
-        let mut catalog = Catalog::new(tracks);
+        let catalog = Catalog::new(tracks);
         let before = catalog.clone();
         let played = catalog.track(pick.index(catalog.len())).unwrap().clone();
         catalog.record_play(played.id, SystemTime::now());

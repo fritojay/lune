@@ -171,11 +171,9 @@ pub fn set_browse(browse: BrowseState) {
 /// the DB is updated in the background.
 pub fn record_play(track_id: i64) {
     let at = SystemTime::now();
-    UI.with_borrow_mut(|ui| {
-        if let Some(catalog) = &mut ui.catalog {
-            Rc::make_mut(catalog).record_play(track_id, at);
-        }
-    });
+    if let Some(catalog) = catalog() {
+        catalog.record_play(track_id, at);
+    }
     save(Save::Play(track_id, at));
     notify(Change::Played);
 }

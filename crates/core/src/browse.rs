@@ -1,6 +1,7 @@
 //! Grouping and filtering for the browser. Everything runs over the
 //! in-memory track list, so switching views or filters never queries SQLite.
 
+use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -291,12 +292,12 @@ impl Order {
                 depends_on_played: false,
             },
             Self::Added => OrderDef {
-                tracks: TrackOrder::AlbumRecency(|t| t.added_ns),
+                tracks: TrackOrder::AlbumRecency(|catalog, i| catalog.tracks[i].added_ns),
                 direction: Direction::AlwaysNewestFirst,
                 depends_on_played: false,
             },
             Self::Played => OrderDef {
-                tracks: TrackOrder::AlbumRecency(|t| t.played_ns),
+                tracks: TrackOrder::AlbumRecency(Catalog::played_ns),
                 direction: Direction::AlwaysNewestFirst,
                 depends_on_played: true,
             },
@@ -308,7 +309,7 @@ impl Order {
 struct OrderDef {
     tracks: TrackOrder,
     direction: Direction,
-    /// Whether [`Catalog::record_play`] has to rebuild it.
+    /// Whether [`Catalog::record_play`] makes it out of date.
     depends_on_played: bool,
 }
 
@@ -317,14 +318,16 @@ enum TrackOrder {
     Catalog,
     /// Catalog order, stably sorted by this.
     StableBy(fn(&ListTrack, &ListTrack) -> Ordering),
-    /// Only albums with this date, by their newest, newest first.
-    AlbumRecency(fn(&ListTrack) -> Option<i64>),
+    /// Only albums with this date (of the catalog's track at an index), by
+    /// their newest, newest first.
+    AlbumRecency(fn(&Catalog, usize) -> Option<i64>),
 }
 
 impl TrackOrder {
     /// Indices of `tracks` in this order; `None` for catalog order, which
     /// needs no index.
-    fn index(self, tracks: &[ListTrack]) -> Option<Vec<usize>> {
+    fn index(self, catalog: &Catalog) -> Option<Vec<usize>> {
+        let tracks = &catalog.tracks;
         match self {
             Self::Catalog => None,
             Self::StableBy(compare) => {
@@ -332,7 +335,7 @@ impl TrackOrder {
                 order.sort_by(|&a, &b| compare(&tracks[a], &tracks[b]));
                 Some(order)
             }
-            Self::AlbumRecency(date) => Some(by_recency(tracks, date)),
+            Self::AlbumRecency(date) => Some(by_recency(tracks, |i| date(catalog, i))),
         }
     }
 }
@@ -645,8 +648,14 @@ pub struct Catalog {
     title_keys: Vec<String>,
     /// Albums with a track on a disc after the first.
     multi_disc: HashSet<i64>,
-    /// Per order, by discriminant: [`TrackOrder::index`].
-    orders: [Option<Vec<usize>>; Order::ALL.len()],
+    /// Per order, by discriminant: [`TrackOrder::index`], built when first
+    /// used. Shared, not `&mut`, so recording a play never copies the
+    /// catalog that list models hold.
+    orders: [RefCell<Option<Arc<Vec<usize>>>>; Order::ALL.len()],
+    /// Plays recorded since the catalog was built, by track index. They win
+    /// over the tracks' own `played_ns`, which keep the dates they were
+    /// loaded with.
+    played: RefCell<HashMap<usize, i64>>,
     by_id: HashMap<i64, usize>,
 }
 
@@ -663,35 +672,35 @@ impl Catalog {
             .filter(|t| t.disc_no.is_some_and(|d| d > 1))
             .map(|t| t.album_id)
             .collect();
-        let orders = Order::ALL.map(|order| order.def().tracks.index(&tracks));
         let by_id = tracks.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
         Self {
             tracks,
             text_keys,
             title_keys,
             multi_disc,
-            orders,
+            orders: Default::default(),
+            played: RefCell::default(),
             by_id,
         }
     }
 
     /// Records that playback of track `track_id` started at `at`, moving its
     /// album to the top of [`Grouping::RecentlyPlayed`].
-    pub fn record_play(&mut self, track_id: i64, at: SystemTime) {
-        let Some(track) = self
-            .by_id
-            .get(&track_id)
-            .and_then(|&i| self.tracks.get_mut(i))
-        else {
+    pub fn record_play(&self, track_id: i64, at: SystemTime) {
+        let Some(&i) = self.by_id.get(&track_id) else {
             return;
         };
-        track.played_ns = Some(unix_ns(at));
+        self.played.borrow_mut().insert(i, unix_ns(at));
         for order in Order::ALL {
-            let def = order.def();
-            if def.depends_on_played {
-                self.orders[order as usize] = def.tracks.index(&self.tracks);
+            if order.def().depends_on_played {
+                self.orders[order as usize].take();
             }
         }
+    }
+
+    fn played_ns(&self, i: usize) -> Option<i64> {
+        let recorded = self.played.borrow().get(&i).copied();
+        recorded.or(self.tracks[i].played_ns)
     }
 
     pub fn len(&self) -> usize {
@@ -985,9 +994,17 @@ impl Catalog {
     }
 
     fn order(&self, grouping: Grouping) -> Box<dyn Iterator<Item = usize> + '_> {
-        match &self.orders[grouping.def().order as usize] {
+        let order = grouping.def().order;
+        let index = {
+            let mut cached = self.orders[order as usize].borrow_mut();
+            if cached.is_none() {
+                *cached = order.def().tracks.index(self).map(Arc::new);
+            }
+            cached.clone()
+        };
+        match index {
             None => Box::new(0..self.tracks.len()),
-            Some(order) => Box::new(order.iter().copied()),
+            Some(index) => Box::new((0..index.len()).map(move |k| index[k])),
         }
     }
 }
@@ -1008,10 +1025,10 @@ fn keys_of<'a>(texts: impl Iterator<Item = &'a str>) -> Vec<String> {
 /// Indices of the tracks of albums with a `date`, newest album first. An
 /// album's date is its newest track's, like its year is its max year. Ties
 /// keep catalog order.
-fn by_recency(tracks: &[ListTrack], date: impl Fn(&ListTrack) -> Option<i64>) -> Vec<usize> {
+fn by_recency(tracks: &[ListTrack], date: impl Fn(usize) -> Option<i64>) -> Vec<usize> {
     let mut latest: HashMap<i64, i64> = HashMap::new();
-    for track in tracks {
-        if let Some(date) = date(track) {
+    for (i, track) in tracks.iter().enumerate() {
+        if let Some(date) = date(i) {
             latest
                 .entry(track.album_id)
                 .and_modify(|l| *l = (*l).max(date))
