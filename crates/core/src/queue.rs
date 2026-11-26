@@ -1,7 +1,7 @@
 //! The play queue: a snapshot of tracks, separate from every view, so filter
 //! changes and rescans never alter it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, RandomState};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -9,6 +9,7 @@ use std::time::Duration;
 use rusqlite::{Connection, OptionalExtension, named_params};
 
 use crate::Result;
+use crate::lists::{self, ListId};
 
 /// One slot in the queue. The same track can be queued more than once, each
 /// time in its own slot.
@@ -339,19 +340,18 @@ impl Queue {
 /// Replaces the saved queue with `queue`, in one transaction.
 pub(crate) fn save(conn: &mut Connection, queue: &Queue) -> Result<()> {
     let tx = conn.transaction()?;
-    tx.execute("DELETE FROM queue", [])?;
-    {
+    let track_ids: Vec<i64> = queue.items.iter().map(|item| item.track_id).collect();
+    lists::save_items(&tx, ListId::QUEUE, &track_ids)?;
+    tx.execute("DELETE FROM queue_shuffle", [])?;
+    if let Some(original) = queue.original_positions() {
         let mut insert = tx.prepare(
-            "INSERT INTO queue (position, track_id, original_position)
-             VALUES (:position, :track_id, :original_position)",
+            "INSERT INTO queue_shuffle (position, original_position)
+             VALUES (:position, :original_position)",
         )?;
-        let original = queue.original_positions();
-        for (i, item) in queue.items.iter().enumerate() {
-            let original = original.as_ref().and_then(|o| o.get(i)).map(|&p| p as i64);
+        for (i, original) in original.into_iter().enumerate() {
             insert.execute(named_params! {
                 ":position": i as i64,
-                ":track_id": item.track_id,
-                ":original_position": original,
+                ":original_position": original as i64,
             })?;
         }
     }
@@ -397,29 +397,26 @@ pub(crate) fn load(conn: &Connection) -> Result<Queue> {
         )
         .optional()?
         .unwrap_or((None, false, 0));
-    let mut stmt = conn.prepare(
-        "SELECT q.position, q.track_id, t.path, q.original_position
-         FROM queue q JOIN tracks t ON t.id = q.track_id
-         ORDER BY q.position",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, i64>("position")?,
-            row.get::<_, i64>("track_id")?,
-            row.get::<_, String>("path")?,
-            row.get::<_, Option<i64>>("original_position")?,
-        ))
-    })?;
+    let mut stmt = conn.prepare("SELECT position, original_position FROM queue_shuffle")?;
+    let saved_original: HashMap<i64, i64> = stmt
+        .query_map([], |row| {
+            Ok((row.get("position")?, row.get("original_position")?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
     let mut tracks = Vec::new();
     let mut original = Vec::new();
     let mut new_cursor = None;
-    for row in rows {
-        let (position, track_id, path, original_position) = row?;
+    for (position, (track_id, path)) in lists::load_items(conn, ListId::QUEUE)?
+        .into_iter()
+        .enumerate()
+    {
+        let Some(path) = path else { continue };
+        let position = position as i64;
         if Some(position) == cursor {
             new_cursor = Some(tracks.len());
         }
-        tracks.push((track_id, PathBuf::from(path)));
-        original.push(original_position.unwrap_or(i64::MAX));
+        tracks.push((track_id, path));
+        original.push(saved_original.get(&position).copied().unwrap_or(i64::MAX));
     }
     let original = shuffle.then(|| {
         // Rank the saved positions, which have gaps where tracks were dropped.

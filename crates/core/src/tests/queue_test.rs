@@ -3,6 +3,7 @@ use proptest::sample::Index;
 
 use super::*;
 use crate::db;
+use crate::test_util::library_with_tracks;
 
 fn tracks(ids: impl IntoIterator<Item = i64>) -> Vec<(i64, PathBuf)> {
     ids.into_iter()
@@ -32,23 +33,6 @@ fn shuffle_is_a_permutation_with_the_current_track_first() {
     assert_ne!(shuffled, list, "50 tracks came back in order");
     shuffled.sort_unstable();
     assert_eq!(shuffled, list);
-}
-
-fn library_with_tracks(conn: &Connection, ids: &[i64]) {
-    conn.execute(
-        "INSERT INTO albums (id, album_artist, album_artist_key, title, title_key)
-         VALUES (1, 'A', 'a', 'T', 't')",
-        [],
-    )
-    .unwrap();
-    for id in ids {
-        conn.execute(
-            "INSERT INTO tracks (id, path, mtime_ns, size, album_id, duration_ms, codec)
-             VALUES (:id, :path, 0, 0, 1, 1000, 'mp3')",
-            named_params! { ":id": id, ":path": format!("{id}.mp3") },
-        )
-        .unwrap();
-    }
 }
 
 #[test]
@@ -87,19 +71,6 @@ fn a_deleted_current_track_loads_with_nothing_current() {
     let loaded = load(&conn).unwrap();
     assert_eq!(ids(&loaded), [1]);
     assert!(loaded.current().is_none());
-}
-
-#[test]
-fn rescans_never_alter_the_saved_queue() {
-    // The queue table has no foreign key; only loading drops missing tracks.
-    let mut conn = db::open_in_memory().unwrap();
-    library_with_tracks(&conn, &[1, 2]);
-    save(&mut conn, &queue_of([1, 2], 0)).unwrap();
-    conn.execute("DELETE FROM tracks WHERE id = 2", []).unwrap();
-    let saved: i64 = conn
-        .query_row("SELECT COUNT(*) AS n FROM queue", [], |r| r.get("n"))
-        .unwrap();
-    assert_eq!(saved, 2);
 }
 
 #[test]

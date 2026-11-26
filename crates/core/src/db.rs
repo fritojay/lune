@@ -143,6 +143,35 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE queue_state ADD COLUMN resume_ms INTEGER NOT NULL DEFAULT 0;
     "#,
+    // v12: ordered track lists, so playlists can share the queue's storage.
+    // The queue becomes list 1; its shuffle order, cursor, and resume
+    // position stay queue-only.
+    r#"
+    CREATE TABLE lists (
+        id         INTEGER PRIMARY KEY,
+        kind       TEXT NOT NULL,           -- 'queue'
+        name       TEXT,
+        created_ns INTEGER NOT NULL
+    );
+    CREATE TABLE list_items (
+        list_id  INTEGER NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        track_id INTEGER NOT NULL,          -- no foreign key, as with v1's queue
+        PRIMARY KEY (list_id, position)
+    ) WITHOUT ROWID;
+    -- While shuffled: each queue position's place in the unshuffled order.
+    CREATE TABLE queue_shuffle (
+        position          INTEGER PRIMARY KEY,
+        original_position INTEGER NOT NULL
+    );
+    INSERT INTO lists (id, kind, created_ns)
+        VALUES (1, 'queue', CAST(unixepoch('subsec') * 1000 AS INTEGER) * 1000000);
+    INSERT INTO list_items (list_id, position, track_id)
+        SELECT 1, position, track_id FROM queue;
+    INSERT INTO queue_shuffle (position, original_position)
+        SELECT position, original_position FROM queue WHERE original_position IS NOT NULL;
+    DROP TABLE queue;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

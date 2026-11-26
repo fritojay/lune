@@ -121,6 +121,18 @@ fn a_v5_database_keeps_its_tracks_present() {
     assert!(crate::query::missing_tracks(&conn).unwrap().is_empty());
 }
 
+/// Turns a current schema back into v11's, for tests that fake an older
+/// schema from a database the current code filled in.
+const UNDO_V12: &str = "
+    CREATE TABLE queue (
+        position          INTEGER PRIMARY KEY,
+        track_id          INTEGER NOT NULL,
+        original_position INTEGER
+    );
+    DROP TABLE queue_shuffle;
+    DROP TABLE list_items;
+    DROP TABLE lists;";
+
 #[test]
 fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
     let dir = crate::test_util::TempDir::new();
@@ -131,14 +143,15 @@ fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
     };
     quick(&mut conn);
     let before = crate::query::track_list(&conn).unwrap()[0].clone();
-    conn.execute_batch(
+    conn.execute_batch(&format!(
         "ALTER TABLE tracks DROP COLUMN bitrate_kbps;
          ALTER TABLE tracks DROP COLUMN reader_version;
          ALTER TABLE tracks DROP COLUMN genre;
          ALTER TABLE albums DROP COLUMN genre;
          ALTER TABLE queue_state DROP COLUMN resume_ms;
-         PRAGMA user_version = 7;",
-    )
+         {UNDO_V12}
+         PRAGMA user_version = 7;"
+    ))
     .unwrap();
 
     migrate(&conn).unwrap();
@@ -164,13 +177,14 @@ fn a_v8_database_rereads_every_file_once() {
         crate::scan::scan(conn, dir.path(), crate::ScanMode::Quick, &mut |_| {}).unwrap()
     };
     quick(&mut conn);
-    conn.execute_batch(
+    conn.execute_batch(&format!(
         "ALTER TABLE tracks DROP COLUMN reader_version;
          ALTER TABLE tracks DROP COLUMN genre;
          ALTER TABLE albums DROP COLUMN genre;
          ALTER TABLE queue_state DROP COLUMN resume_ms;
-         PRAGMA user_version = 8;",
-    )
+         {UNDO_V12}
+         PRAGMA user_version = 8;"
+    ))
     .unwrap();
 
     migrate(&conn).unwrap();
@@ -197,13 +211,14 @@ fn a_v9_database_rereads_every_file_once_to_fill_in_genres() {
         (track.genre, track.album_genre)
     };
     quick(&mut conn);
-    conn.execute_batch(
+    conn.execute_batch(&format!(
         "ALTER TABLE tracks DROP COLUMN genre;
          ALTER TABLE albums DROP COLUMN genre;
          UPDATE tracks SET reader_version = 1;
          ALTER TABLE queue_state DROP COLUMN resume_ms;
-         PRAGMA user_version = 9;",
-    )
+         {UNDO_V12}
+         PRAGMA user_version = 9;"
+    ))
     .unwrap();
 
     migrate(&conn).unwrap();
@@ -235,4 +250,33 @@ fn a_v10_database_keeps_its_queue_and_resumes_from_the_start() {
     let queue = crate::queue::load(&conn).unwrap();
     assert_eq!(queue.current_index(), Some(0));
     assert_eq!(queue.resume_position(), Duration::ZERO);
+}
+
+#[test]
+fn a_v11_database_keeps_its_shuffled_queue_cursor_and_resume_position() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(&format!(
+        "BEGIN; {}; PRAGMA user_version = 11; COMMIT;",
+        MIGRATIONS[..11].join(";")
+    ))
+    .unwrap();
+    crate::test_util::library_with_tracks(&conn, &[1, 2, 3]);
+    conn.execute_batch(
+        "INSERT INTO queue (position, track_id, original_position)
+         VALUES (0, 2, 1), (1, 3, 3), (2, 1, 0), (3, 2, 2);
+         INSERT INTO queue_state (id, cursor, shuffle, resume_ms) VALUES (1, 1, 1, 1234);",
+    )
+    .unwrap();
+    migrate(&conn).unwrap();
+    let mut queue = crate::queue::load(&conn).unwrap();
+    let ids = |queue: &crate::Queue| -> Vec<i64> {
+        queue.items().iter().map(|item| item.track_id).collect()
+    };
+    assert_eq!(ids(&queue), [2, 3, 1, 2]);
+    assert_eq!(queue.current_index(), Some(1));
+    assert!(queue.shuffle());
+    assert_eq!(queue.resume_position(), Duration::from_millis(1234));
+    queue.set_shuffle(false);
+    assert_eq!(ids(&queue), [1, 2, 2, 3]);
+    assert_eq!(queue.current().unwrap().track_id, 3);
 }

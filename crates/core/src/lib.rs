@@ -6,6 +6,7 @@ mod browse;
 mod db;
 mod error;
 mod library;
+mod lists;
 pub mod normalize;
 mod paths;
 mod query;

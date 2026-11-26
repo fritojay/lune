@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use proptest::prelude::*;
 use proptest::sample::select;
+use rusqlite::{Connection, named_params};
 
 use crate::browse::{FilterValue, Grouping, Sort, SortColumn, TrackFilter};
 use crate::normalize;
@@ -190,6 +191,24 @@ const NAMES: [&str; 7] = [
     "Beyonc\u{e9}",
     "BEYONCE\u{301}",
 ];
+
+/// Adds tracks with these ids, at paths `<id>.mp3`, all on one album.
+pub fn library_with_tracks(conn: &Connection, ids: &[i64]) {
+    conn.execute(
+        "INSERT INTO albums (id, album_artist, album_artist_key, title, title_key)
+         VALUES (1, 'A', 'a', 'T', 't')",
+        [],
+    )
+    .unwrap();
+    for id in ids {
+        conn.execute(
+            "INSERT INTO tracks (id, path, mtime_ns, size, album_id, duration_ms, codec)
+             VALUES (:id, :path, 0, 0, 1, 1000, 'mp3')",
+            named_params! { ":id": id, ":path": format!("{id}.mp3") },
+        )
+        .unwrap();
+    }
+}
 
 pub fn arb_grouping() -> impl Strategy<Value = Grouping> {
     select(&Grouping::ALL[..])
