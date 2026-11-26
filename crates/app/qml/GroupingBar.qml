@@ -11,8 +11,7 @@ RowLayout {
         model: SourcesModel {
             id: sources
         }
-        // Not ToolButton: the macOS native style can't be restyled.
-        AbstractButton {
+        ToggleToolButton {
             id: tab
             required property int index
             required property string kind
@@ -22,23 +21,16 @@ RowLayout {
             implicitHeight: 34
             leftPadding: 12
             rightPadding: 12
-            hoverEnabled: true
             text: tab.title
             font.bold: current
-            // Checkable, so assistive tech announces the chosen tab.
-            checkable: true
-            checked: current
-            onClicked: {
+            toggledOn: current
+            onToggleRequested: {
                 sources.choose(index)
-                // A click toggles `checked`, which breaks its binding.
-                checked = Qt.binding(() => tab.current)
                 if (kind === "grouping")
                     Filters.setGrouping(sourceId)
                 else if (kind === "playlists")
                     Filters.showPlaylists()
             }
-            Keys.onReturnPressed: click()
-            Keys.onEnterPressed: click()
             contentItem: Item {
                 implicitWidth: widest.implicitWidth
                 implicitHeight: label.implicitHeight

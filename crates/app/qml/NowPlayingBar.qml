@@ -112,12 +112,10 @@ Pane {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Previous")
                 }
-                // Not RoundButton: the macOS native style can't be restyled.
-                AbstractButton {
+                KeyToolButton {
                     id: playButton
                     implicitWidth: 40
                     implicitHeight: 40
-                    hoverEnabled: true
                     enabled: Player.available
                     contentItem: Item {
                         PathIcon {
@@ -138,8 +136,6 @@ Pane {
                         border.color: playButton.palette.highlightedText
                     }
                     onClicked: Player.togglePause()
-                    Keys.onReturnPressed: click()
-                    Keys.onEnterPressed: click()
                     ToolTip.visible: hovered
                     ToolTip.text: Player.playing ? qsTr("Pause") : qsTr("Play")
                 }

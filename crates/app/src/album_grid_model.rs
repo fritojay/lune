@@ -62,8 +62,6 @@ pub mod qobject {
 
         fn set_active(self: Pin<&mut AlbumGridModel>, active: bool);
 
-        /// The row that now holds the first album of row `row` of a grid
-        /// that was `columns` wide.
         /// Opens album `album_id`, or closes it if it is open.
         #[qinvokable]
         #[cxx_name = "toggleAlbum"]
@@ -73,6 +71,8 @@ pub mod qobject {
         #[cxx_name = "closeAlbum"]
         fn close_album(self: Pin<&mut AlbumGridModel>);
 
+        /// The row that now holds the first album of row `row` of a grid
+        /// that was `columns` wide.
         #[qinvokable]
         #[cxx_name = "relaidRow"]
         fn relaid_row(self: &AlbumGridModel, row: i32, columns: i32) -> i32;
