@@ -2,6 +2,8 @@ use proptest::prelude::*;
 use proptest::sample::select;
 
 use super::*;
+use crate::columns::COLUMNS;
+use crate::test_util::arb_hidden_columns;
 
 #[test]
 fn qml_sizes_round_to_whole_pixels() {
@@ -50,10 +52,6 @@ fn a_wide_row_gives_the_title_what_the_others_leave() {
     assert_eq!(widths(1000.0, &[]), [32.0, 494.0, 220.0, 76.0, 72.0, 56.0]);
 }
 
-fn arb_hidden() -> impl Strategy<Value = BTreeSet<SortColumn>> {
-    prop::collection::btree_set(select(&SortColumn::ALL[..]), 0..=SortColumn::ALL.len())
-}
-
 /// Row widths around where columns start to squeeze, and nonsense ones.
 fn arb_available() -> impl Strategy<Value = f64> {
     prop_oneof![
@@ -68,7 +66,7 @@ fn arb_available() -> impl Strategy<Value = f64> {
 proptest! {
     #[test]
     fn showing_or_hiding_a_column_changes_only_that_column(
-        hidden in arb_hidden(),
+        hidden in arb_hidden_columns(),
         name in prop_oneof![select(&SortColumn::ALL[..]).prop_map(SortColumn::name), Just("nope"), Just("")],
         shown: bool,
     ) {
@@ -89,7 +87,7 @@ proptest! {
     #[test]
     fn columns_squeeze_then_drop_from_the_right_before_the_title_shrinks(
         available in arb_available(),
-        hidden in arb_hidden(),
+        hidden in arb_hidden_columns(),
     ) {
         let widths = column_widths(available, &hidden);
         let row = if available.is_finite() { available.max(0.0) } else { 0.0 };

@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use lune_core::ListTrack;
+use std::collections::BTreeSet;
+
+use lune_core::{ListTrack, SortColumn};
+use proptest::prelude::*;
+use proptest::sample::select;
 
 /// Each test gets a name no earlier one had: Windows can't create a
 /// directory where a dropped one is still pending deletion.
@@ -134,6 +138,10 @@ pub fn list_track(id: i64, album_id: i64, art_id: Option<i64>) -> ListTrack {
         codec: "flac".to_owned(),
         ..Default::default()
     }
+}
+
+pub fn arb_hidden_columns() -> impl Strategy<Value = BTreeSet<SortColumn>> {
+    prop::collection::btree_set(select(&SortColumn::ALL[..]), 0..=SortColumn::ALL.len())
 }
 
 /// What an entry QML reads as an object (a `QVariantMap`) has at `key`.

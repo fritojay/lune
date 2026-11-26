@@ -1,9 +1,9 @@
 use super::*;
-use lune_core::{Grouping, TrackFilter};
+use lune_core::{Grouping, SortColumn, TrackFilter};
 
 use crate::test_util::list_track;
 
-const ALL: [Change; 11] = [
+const ALL: [Change; 12] = [
     Change::Catalog,
     Change::View,
     Change::ViewRefreshed,
@@ -12,6 +12,7 @@ const ALL: [Change; 11] = [
     Change::Queue,
     Change::Played,
     Change::Browse,
+    Change::Columns,
     Change::OutputDevice,
     Change::Folders,
     Change::NowPlaying,
@@ -38,6 +39,8 @@ fn each_setter_sends_its_change() {
     queue_edited();
     set_browse(BrowseState::default());
     set_browse(BrowseState::default());
+    set_hidden_columns(BTreeSet::from([SortColumn::Artist]));
+    set_hidden_columns(BTreeSet::from([SortColumn::Artist]));
     set_has_folders(true);
     set_has_folders(true);
     set_has_folders(false);
@@ -54,6 +57,7 @@ fn each_setter_sends_its_change() {
             Change::Playlists,
             Change::Queue,
             Change::Browse,
+            Change::Columns,
             Change::Folders,
             Change::Folders,
             Change::NowPlaying,

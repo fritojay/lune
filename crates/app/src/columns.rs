@@ -6,6 +6,8 @@
     reason = "the CXX-Qt bridge below generates its FFI glue as unsafe code"
 )]
 
+use std::collections::BTreeSet;
+
 use cxx_qt_lib::{QList, QMap, QMapPair_QString_QVariant, QString, QStringList, QVariant};
 use lune_core::SortColumn;
 
@@ -59,8 +61,7 @@ impl Default for ColumnsRust {
 
 impl qobject::Columns {
     fn shown(&self, hidden: &QStringList) -> QList<QVariant> {
-        let hidden: Vec<String> = hidden.iter().map(QString::to_string).collect();
-        entries(shown(&hidden))
+        entries(shown(&named(hidden)))
     }
 }
 
@@ -149,11 +150,18 @@ pub const COLUMNS: [Column; 6] = [
 
 pub const SPACING: f64 = 10.0;
 
-/// `COLUMNS` without those named in `hidden`.
-fn shown<'a>(hidden: &'a [String]) -> impl Iterator<Item = &'static Column> + 'a {
+pub fn shown(hidden: &BTreeSet<SortColumn>) -> impl Iterator<Item = &'static Column> + '_ {
     COLUMNS
         .iter()
-        .filter(|column| !hidden.iter().any(|name| name == column.column.name()))
+        .filter(|column| !hidden.contains(&column.column))
+}
+
+/// Names of no column are left out.
+pub fn named(names: &QStringList) -> BTreeSet<SortColumn> {
+    names
+        .iter()
+        .filter_map(|name| SortColumn::from_name(&name.to_string()))
+        .collect()
 }
 
 fn entries<'a>(columns: impl Iterator<Item = &'a Column>) -> QList<QVariant> {

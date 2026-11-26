@@ -13,6 +13,7 @@ ColumnLayout {
     readonly property real rowWidth: grid ? albumRows.panelWidth - tracksLeft - tracksRight
                                             - 2 * Theme.cellInset
                                           : headingCells.width
+    readonly property var shownColumns: Columns.shown(WindowLayout.hiddenColumns)
     readonly property var columnWidths: WindowLayout.columnWidths(rowWidth, WindowLayout.hiddenColumns)
     readonly property bool grid: WindowLayout.albumGrid && !Filters.flat
     readonly property bool playlistShown: Filters.sourceKind === "playlists"
@@ -259,7 +260,7 @@ ColumnLayout {
             anchors.rightMargin: trackPane.tracksRight + Theme.cellInset + albumList.gutter
             spacing: Columns.spacing
             Repeater {
-                model: Columns.shown(WindowLayout.hiddenColumns)
+                model: trackPane.shownColumns
                 SortHeading {
                     required property var modelData
                     required property int index
@@ -300,7 +301,7 @@ ColumnLayout {
             tracksLeft: trackPane.tracksLeft
             tracksRight: trackPane.tracksRight
             selection: trackSelection
-            hiddenColumns: WindowLayout.hiddenColumns
+            shownColumns: trackPane.shownColumns
             columnWidths: trackPane.columnWidths
             gutter: albumList.gutter
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
@@ -422,7 +423,7 @@ ColumnLayout {
                                 tracksLeft: trackPane.tracksLeft
                                 tracksRight: trackPane.tracksRight
                                 selection: trackSelection
-                                hiddenColumns: WindowLayout.hiddenColumns
+                                shownColumns: trackPane.shownColumns
                                 columnWidths: trackPane.columnWidths
                                 gutter: 0
                                 onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)

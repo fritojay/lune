@@ -5,6 +5,7 @@
 //! [`Change`]s with [`on_change`].
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Sender};
@@ -14,8 +15,8 @@ use std::time::SystemTime;
 
 use cxx_qt::{CxxQtThread, Threading};
 use lune_core::{
-    BrowseState, Catalog, Library, ListId, MissingTrack, Playlist, Queue, QueueItem, SlotId, View,
-    WindowState,
+    BrowseState, Catalog, Library, ListId, MissingTrack, Playlist, Queue, QueueItem, SlotId,
+    SortColumn, View, WindowState,
 };
 use lune_engine::{EntryId, PlayQueue, QueueEntry};
 
@@ -36,6 +37,8 @@ pub enum Change {
     Played,
     /// [`browse`] changed.
     Browse,
+    /// [`hidden_columns`] changed.
+    Columns,
     /// The user chose another audio output.
     OutputDevice,
     /// [`has_folders`] changed.
@@ -53,6 +56,7 @@ struct UiState {
     /// For the next new playlist; `None` until the playlists have loaded.
     unused_playlist_id: Option<ListId>,
     browse: Option<BrowseState>,
+    hidden_columns: Option<BTreeSet<SortColumn>>,
     has_folders: bool,
     now_playing: Option<i64>,
     listeners: Vec<(Change, Rc<dyn Fn()>)>,
@@ -176,6 +180,20 @@ pub fn set_browse(browse: BrowseState) {
     let changed = UI.with_borrow_mut(|ui| ui.browse.replace(browse.clone()) != Some(browse));
     if changed {
         notify(Change::Browse);
+    }
+}
+
+/// The main pane's hidden columns; until changed, as the last run left them.
+pub fn hidden_columns() -> BTreeSet<SortColumn> {
+    UI.with_borrow(|ui| ui.hidden_columns.clone())
+        .unwrap_or_else(|| saved_window().hidden_columns.clone())
+}
+
+pub fn set_hidden_columns(hidden: BTreeSet<SortColumn>) {
+    let changed =
+        UI.with_borrow_mut(|ui| ui.hidden_columns.replace(hidden.clone()) != Some(hidden));
+    if changed {
+        notify(Change::Columns);
     }
 }
 

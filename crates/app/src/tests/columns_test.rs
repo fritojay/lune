@@ -69,6 +69,7 @@ proptest! {
             .map(|column| column.column.name())
             .filter(|name| !hidden.iter().any(|h| h == name))
             .collect();
-        prop_assert_eq!(ids(&entries(shown(&hidden))), expected);
+        let hidden: QStringList = hidden.iter().map(QString::from).collect();
+        prop_assert_eq!(ids(&entries(shown(&named(&hidden)))), expected);
     }
 }

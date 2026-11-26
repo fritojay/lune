@@ -20,6 +20,7 @@ use cxx_qt_lib::{
 };
 use lune_core::{Catalog, ListTrack, SortColumn, View, file_type};
 
+use crate::columns;
 use crate::covers::{self, CoverRows};
 use crate::format;
 use crate::list_model::{self, text};
@@ -113,6 +114,8 @@ pub struct Album<'a> {
     first: &'a ListTrack,
     /// The track playing, wherever it is.
     playing: Option<i64>,
+    /// The columns `trackColumns` holds.
+    columns: &'a [SortColumn],
 }
 
 impl Album<'_> {
@@ -178,6 +181,7 @@ pub const ROLES: &[Role] = &[
 
 const COVER_ROLE: i32 = list_model::role_id(ROLES, "cover");
 const PLAYING_ROLE: i32 = list_model::role_id(ROLES, "playingIndex");
+const TRACK_COLUMNS_ROLE: i32 = list_model::role_id(ROLES, "trackColumns");
 
 pub struct AlbumListModelRust {
     album_count: i32,
@@ -190,12 +194,14 @@ pub struct AlbumListModelRust {
     cover_rows: CoverRows,
     /// The track the rows mark as playing.
     playing: Option<i64>,
+    shown_columns: Vec<SortColumn>,
 }
 
 impl Default for AlbumListModelRust {
     fn default() -> Self {
         Self {
             playing: session::now_playing(),
+            shown_columns: shown_columns(),
             album_count: 0,
             one_album: false,
             album_id: -1,
@@ -215,6 +221,7 @@ impl cxx_qt::Initialize for qobject::AlbumListModel {
             model.refresh(false);
         });
         session::on_change(self.qt_thread(), Change::NowPlaying, Self::now_playing);
+        session::on_change(self.qt_thread(), Change::Columns, Self::columns_changed);
     }
 }
 
@@ -268,11 +275,25 @@ impl qobject::AlbumListModel {
         list_model::role_changed(self.upcast_pin(), &rows, PLAYING_ROLE);
     }
 
+    fn columns_changed(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().shown_columns = shown_columns();
+        let rows = self.rows.len();
+        list_model::role_changed_everywhere(self.upcast_pin(), rows, TRACK_COLUMNS_ROLE);
+    }
+
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
         let album = usize::try_from(index.row())
             .ok()
             .and_then(|row| self.rows.get(row))
-            .and_then(|row| row_at(self.catalog.as_deref(), &self.view, row, self.playing));
+            .and_then(|row| {
+                row_at(
+                    self.catalog.as_deref(),
+                    &self.view,
+                    row,
+                    self.playing,
+                    &self.shown_columns,
+                )
+            });
         list_model::data(ROLES, album.as_ref(), role)
     }
 
@@ -285,6 +306,7 @@ impl qobject::AlbumListModel {
     }
 }
 
+/// Album `album` of `view` whole, with no `trackColumns`.
 pub fn album_at<'a>(
     catalog: Option<&'a Catalog>,
     view: &'a View,
@@ -300,6 +322,7 @@ pub fn album_at<'a>(
             tracks: range,
         },
         playing,
+        &[],
     )
 }
 
@@ -308,6 +331,7 @@ fn row_at<'a>(
     view: &'a View,
     row: &Row,
     playing: Option<i64>,
+    columns: &'a [SortColumn],
 ) -> Option<Album<'a>> {
     let catalog = catalog?;
     Some(Album {
@@ -317,6 +341,7 @@ fn row_at<'a>(
         part: row.tracks.clone(),
         first: first_track(Some(catalog), view, row.album)?,
         playing,
+        columns,
     })
 }
 
@@ -359,11 +384,11 @@ fn first_track<'a>(catalog: Option<&'a Catalog>, view: &View, row: usize) -> Opt
     catalog?.track(*view.tracks.get(start)?)
 }
 
-/// Each column's text for each track, by column name.
+/// Each shown column's text for each track, by column name.
 fn track_columns(album: &Album<'_>) -> QVariant {
     let tracks = album.shown();
     let mut columns = QMap::<QMapPair_QString_QVariant>::default();
-    for column in SortColumn::ALL {
+    for &column in album.columns {
         let texts: QStringList = tracks
             .iter()
             .map(|t| QString::from(&column_text(column, t, album.catalog)))
@@ -394,6 +419,12 @@ fn track_artist(track: &ListTrack) -> String {
         Some(artist) if !artist.trim().is_empty() => format::artist(artist),
         _ => format::artist(&track.album_artist),
     }
+}
+
+fn shown_columns() -> Vec<SortColumn> {
+    columns::shown(&session::hidden_columns())
+        .map(|column| column.column)
+        .collect()
 }
 
 /// The length of the tracks shown, or empty when none of them has a known

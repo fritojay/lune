@@ -31,7 +31,8 @@ Item {
     required property int dropRow
     required property int lastRow
     required property TrackSelection selection
-    required property var hiddenColumns
+    // Columns.shown's.
+    required property var shownColumns
     required property var columnWidths
     required property real gutter
     required property int tracksLeft
@@ -115,7 +116,8 @@ Item {
                 readonly property bool nowPlaying: index === album.playingIndex
                 // With reuseItems, a recycled album can get its new trackCount
                 // before its new lists, so an index may briefly be past their end.
-                function field(list) { return list[index] ?? "" }
+                // A newly shown column's texts arrive just after it.
+                function field(list) { return list?.[index] ?? "" }
                 readonly property color textColor: selected ? album.palette.highlightedText : album.palette.text
                 width: tracks.width
                 height: Theme.rowHeight
@@ -128,7 +130,7 @@ Item {
                     anchors.rightMargin: Theme.cellInset + album.gutter
                     spacing: Columns.spacing
                     Repeater {
-                        model: Columns.shown(album.hiddenColumns)
+                        model: album.shownColumns
                         Text {
                             id: cell
                             required property var modelData

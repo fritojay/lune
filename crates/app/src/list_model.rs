@@ -42,6 +42,21 @@ pub mod qobject {
     }
 }
 
+/// `role` of each of the model's `rows` rows, as one change.
+pub fn role_changed_everywhere(mut model: Pin<&mut QAbstractListModel>, rows: usize, role: i32) {
+    let Some(last) = rows
+        .checked_sub(1)
+        .and_then(|last| i32::try_from(last).ok())
+    else {
+        return;
+    };
+    let mut roles = QList::<i32>::default();
+    roles.append(role);
+    let first = model.index(0, 0, &QModelIndex::default());
+    let last = model.index(last, 0, &QModelIndex::default());
+    model.as_mut().data_changed(&first, &last, &roles);
+}
+
 pub fn role_changed(mut model: Pin<&mut QAbstractListModel>, rows: &[i32], role: i32) {
     let mut roles = QList::<i32>::default();
     roles.append(role);

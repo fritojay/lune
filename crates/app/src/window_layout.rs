@@ -13,7 +13,7 @@ use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QList, QString, QStringList};
 use lune_core::{SortColumn, WindowState};
 
-use crate::columns::{COLUMNS, Column, SPACING};
+use crate::columns::{self, Column, SPACING};
 use crate::property::set;
 use crate::{format::qml_int, session};
 
@@ -160,7 +160,7 @@ impl qobject::WindowLayout {
             filter_pane_width: pixels(filter_pane_width),
             queue_pane_width: pixels(queue_pane_width),
             queue_shown,
-            hidden_columns: self.hidden(),
+            hidden_columns: session::hidden_columns(),
             album_grid: self.album_grid,
             browse: session::browse(),
         };
@@ -170,27 +170,18 @@ impl qobject::WindowLayout {
     }
 
     fn set_column_shown(mut self: Pin<&mut Self>, column: &QString, shown: bool) {
-        if let Some(hidden) = with_column_shown(self.hidden(), &column.to_string(), shown) {
+        let hidden = session::hidden_columns();
+        if let Some(hidden) = with_column_shown(hidden, &column.to_string(), shown) {
             set!(self, hidden_columns, hidden_columns_changed, names(&hidden));
+            session::set_hidden_columns(hidden);
         }
     }
 
-    fn hidden(&self) -> BTreeSet<SortColumn> {
-        columns_named(&self.hidden_columns)
-    }
-
     fn column_widths(&self, available: f64, hidden: &QStringList) -> QList<f64> {
-        column_widths(available, &columns_named(hidden))
+        column_widths(available, &columns::named(hidden))
             .into_iter()
             .collect()
     }
-}
-
-fn columns_named(names: &QStringList) -> BTreeSet<SortColumn> {
-    names
-        .iter()
-        .filter_map(|name| SortColumn::from_name(&name.to_string()))
-        .collect()
 }
 
 fn names(columns: &BTreeSet<SortColumn>) -> QStringList {
@@ -226,10 +217,7 @@ fn column_widths(available: f64, hidden: &BTreeSet<SortColumn>) -> Vec<f64> {
     } else {
         0.0
     };
-    let shown: Vec<&Column> = COLUMNS
-        .iter()
-        .filter(|size| !hidden.contains(&size.column))
-        .collect();
+    let shown: Vec<&Column> = columns::shown(hidden).collect();
     let natural = |size: &Column| {
         size.max_share
             .map_or(size.width, |share| size.width.min(available * share))

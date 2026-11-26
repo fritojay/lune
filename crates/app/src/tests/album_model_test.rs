@@ -2,7 +2,7 @@ use lune_core::{Grouping, Sort, SortColumn, TrackFilter};
 use proptest::prelude::*;
 
 use super::*;
-use crate::test_util::list_track as track;
+use crate::test_util::{arb_hidden_columns, entry_value, list_track as track};
 
 #[test]
 fn cover_rows_lists_every_album_showing_each_cover() {
@@ -285,7 +285,7 @@ proptest! {
             let expected = view.tracks[row.tracks.clone()]
                 .iter()
                 .position(|&i| Some(catalog.track(i).unwrap().id) == playing);
-            let album = row_at(Some(&catalog), &view, row, playing).unwrap();
+            let album = row_at(Some(&catalog), &view, row, playing, &[]).unwrap();
             prop_assert_eq!(album.playing_index(), expected);
             if expected.is_some() {
                 marked.push(index);
@@ -296,6 +296,29 @@ proptest! {
         prop_assert_eq!(rows_showing(Some(&catalog), &view, &rows, &ids), marked.clone());
         let albums: Vec<usize> = marked.iter().map(|&row| rows[row as usize].album).collect();
         prop_assert_eq!(albums_showing(Some(&catalog), &view, &ids), albums);
+    }
+}
+
+proptest! {
+    #[test]
+    fn track_columns_hold_a_text_per_track_for_the_shown_columns_only(
+        sizes in prop::collection::vec(1..=2 * MAX_ROW_TRACKS, 1..4),
+        hidden in arb_hidden_columns(),
+    ) {
+        let catalog = catalog_of(&sizes);
+        let view = catalog.view(Grouping::AlbumArtist, &TrackFilter::All);
+        let shown: Vec<SortColumn> =
+            SortColumn::ALL.into_iter().filter(|c| !hidden.contains(c)).collect();
+        for row in &shown_rows(Some(&catalog), &view, false, -1) {
+            let album = row_at(Some(&catalog), &view, row, None, &shown).unwrap();
+            let texts = track_columns(&album);
+            for column in SortColumn::ALL {
+                let count = entry_value(&texts, column.name())
+                    .map(|v| v.value::<QStringList>().unwrap().iter().count());
+                let expected = (!hidden.contains(&column)).then_some(row.tracks.len());
+                prop_assert_eq!(count, expected, "{}", column.name());
+            }
+        }
     }
 }
 
