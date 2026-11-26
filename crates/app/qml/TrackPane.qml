@@ -307,7 +307,7 @@ ColumnLayout {
             id: headingCells
             anchors.fill: parent
             anchors.leftMargin: trackPane.tracksLeft + Theme.cellInset
-            anchors.rightMargin: trackPane.tracksRight + Theme.cellInset + albumScroll.gutter
+            anchors.rightMargin: trackPane.tracksRight + Theme.cellInset + albumList.gutter
             spacing: Columns.spacing
             Repeater {
                 model: Columns.shown(trackPane.hiddenColumns)
@@ -333,33 +333,12 @@ ColumnLayout {
         }
     }
 
-    ListView {
+    TrackList {
         id: albumList
         Layout.fillWidth: true
         Layout.fillHeight: true
         visible: !trackPane.grid && !trackPane.hinted && (trackPane.albumCount > 0 || trackPane.hasFolders)
         model: trackPane.model
-        clip: true
-        reuseItems: true
-        boundsBehavior: Flickable.StopAtBounds
-        maximumFlickVelocity: Theme.maxFlickVelocity
-        ScrollBar.vertical: ListScrollBar {
-            id: albumScroll
-        }
-        WheelScroller {
-            view: albumList
-        }
-        // The row a dragged track would land before, or -1.
-        property int dropRow: -1
-
-        function dropTarget(item: Item, y: real): int {
-            const p = item.mapToItem(albumList.contentItem, 0, y)
-            const row = albumList.indexAt(0, p.y)
-            if (row < 0)
-                return p.y < 0 ? 0 : trackPane.trackCount
-            const top = albumList.itemAtIndex(row).y
-            return p.y - top > Theme.rowHeight / 2 ? row + 1 : row
-        }
 
         delegate: AlbumDelegate {
             id: listAlbum
@@ -374,7 +353,7 @@ ColumnLayout {
             currentTrackId: trackPane.currentTrackId
             hiddenColumns: trackPane.hiddenColumns
             columnWidths: trackPane.columnWidths
-            gutter: albumScroll.gutter
+            gutter: albumList.gutter
             onPlayRequested: viewIndex => trackPane.playRequested(viewIndex)
             onMenuRequested: trackMenu.show(trackSelection.rows())
             onDragMoved: y => albumList.dropRow = albumList.dropTarget(listAlbum, y)

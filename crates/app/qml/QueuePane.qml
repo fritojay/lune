@@ -118,7 +118,7 @@ ColumnLayout {
         text: qsTr("The queue is empty.\nDouble-click a track to play it, or right-click to add it here.")
     }
 
-    ListView {
+    TrackList {
         id: queueList
         Layout.fillWidth: true
         Layout.fillHeight: true
@@ -126,26 +126,6 @@ ColumnLayout {
         // No model while hidden: delegates would still be made, and ask for covers.
         model: queuePane.visible ? queuePane.model : null
         onModelChanged: if (model) queuePane.showCurrent()
-        clip: true
-        reuseItems: true
-        boundsBehavior: Flickable.StopAtBounds
-        maximumFlickVelocity: Theme.maxFlickVelocity
-        ScrollBar.vertical: ListScrollBar {
-            id: queueScroll
-        }
-        WheelScroller {
-            view: queueList
-        }
-        property int dropRow: -1
-
-        function dropTarget(item: Item, y: real): int {
-            const p = item.mapToItem(queueList.contentItem, 0, y)
-            const row = queueList.indexAt(0, p.y)
-            if (row < 0)
-                return p.y < 0 ? 0 : queuePane.count
-            const top = queueList.itemAtIndex(row).y
-            return p.y - top > Theme.rowHeight / 2 ? row + 1 : row
-        }
 
         delegate: QueueDelegate {
             id: queueRow
@@ -153,7 +133,7 @@ ColumnLayout {
             currentRow: queuePane.currentRow
             rowCount: queuePane.count
             dropRow: queueList.dropRow
-            gutter: queueScroll.gutter
+            gutter: queueList.gutter
             selection: queueSelection
             onPlayRequested: queuePane.playRequested(queueRow.index)
             onMenuRequested: queueMenu.show(queueSelection.rows())
