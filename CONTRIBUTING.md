@@ -39,6 +39,7 @@ symphonia (no system FFmpeg), cpal, rubato, rtrb, lofty, rusqlite (`bundled`, FT
 - `justfile` targets: `build`, `test`, `run`, `lint`, `fmt`.
 - `cargo fmt` and `cargo clippy -- -D warnings` must pass.
 - The toolchain is pinned in `rust-toolchain.toml`. `rust-version` in `Cargo.toml` (the MSRV) is checked by CI.
+- Dependencies are checked by `cargo deny check` (advisories, yanked versions, licenses, sources; `deny.toml`) and `cargo vet` (`supply-chain/`), on every change and daily. Reviews published by Mozilla, Google, Bytecode Alliance, Embark, ISRG, and Zcash are imported (`supply-chain/config.toml`) and locked in `supply-chain/imports.lock`, which CI uses as is. When a dependency is added or updated, run `cargo vet`, which also fetches their newest reviews: review the diff it names and record it with `cargo vet certify`, or, if you can't review it, exempt it with `cargo vet add-exemption <crate> <version>`.
 
 ## Tests
 
