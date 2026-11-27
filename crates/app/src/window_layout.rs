@@ -11,7 +11,7 @@ use std::pin::Pin;
 
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QList, QString, QStringList};
-use lune_core::{SortColumn, WindowState};
+use lune_core::{MAX_VOLUME_PERCENT, SortColumn, WindowState};
 
 use crate::columns::{self, Column, SPACING};
 use crate::property::set;
@@ -153,6 +153,7 @@ impl qobject::WindowLayout {
         if config.bench {
             return;
         }
+        let (volume, muted) = session::volume();
         let state = WindowState {
             width: pixels(width),
             height: pixels(height),
@@ -163,6 +164,8 @@ impl qobject::WindowLayout {
             hidden_columns: session::hidden_columns(),
             album_grid: self.album_grid,
             browse: session::browse(),
+            volume_percent: percent(volume),
+            muted,
         };
         if let Err(err) = state.save(&config.window_state_path) {
             tracing::warn!(%err, "the window layout was not saved");
@@ -274,6 +277,15 @@ fn column_widths(available: f64, hidden: &BTreeSet<SortColumn>) -> Vec<f64> {
 /// QML sizes are reals. The cast saturates, and NaN becomes 0.
 fn pixels(value: f64) -> u32 {
     value.round() as u32
+}
+
+/// A volume from 0.0 to 1.0 as a whole percentage; full for one that isn't
+/// a number, as the player takes it.
+fn percent(volume: f64) -> u32 {
+    if volume.is_nan() {
+        return MAX_VOLUME_PERCENT;
+    }
+    ((volume * 100.0).round() as u32).min(MAX_VOLUME_PERCENT)
 }
 
 #[cfg(test)]

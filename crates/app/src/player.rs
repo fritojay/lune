@@ -180,6 +180,7 @@ pub struct PlayerControllerRust {
 
 impl Default for PlayerControllerRust {
     fn default() -> Self {
+        let (volume, muted) = session::volume();
         Self {
             available: false,
             playing: false,
@@ -193,8 +194,8 @@ impl Default for PlayerControllerRust {
             current_track_id: -1,
             queue_index: -1,
             shuffle: false,
-            volume: 1.0,
-            muted: false,
+            volume,
+            muted,
             player: None,
             opening: Opening::default(),
             playing_entry: None,
@@ -229,6 +230,10 @@ impl cxx_qt::Initialize for qobject::PlayerController {
             let _ = qt_thread.queue(move |controller| controller.media_command(command));
         });
         self.as_mut().rust_mut().media = media;
+        let output = self.volume_state().output();
+        if let Some(media) = &mut self.as_mut().rust_mut().media {
+            media.set_volume(output);
+        }
         session::on_change(self.qt_thread(), Change::Catalog, Self::refresh);
         session::on_change(self.qt_thread(), Change::OutputDevice, Self::reopen);
     }
@@ -531,6 +536,7 @@ impl qobject::PlayerController {
     fn apply_volume(mut self: Pin<&mut Self>, state: Volume) {
         set!(self, volume, volume_changed, state.level);
         set!(self, muted, muted_changed, state.muted);
+        session::set_volume(state.level, state.muted);
         let output = state.output();
         if let Some(player) = &self.player {
             player.set_volume(output as f32);

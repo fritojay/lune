@@ -42,4 +42,4 @@ pub use settings::{
 };
 pub use tags::{EmbeddedArt, TrackMeta, is_audio_path, read_track_meta};
 pub use watch::{FolderWatcher, collapse_nested};
-pub use window_state::{BrowseState, WindowState};
+pub use window_state::{BrowseState, MAX_VOLUME_PERCENT, WindowState};

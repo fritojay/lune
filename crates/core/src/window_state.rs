@@ -15,6 +15,8 @@ use crate::{CoreError, FilterValue, Grouping, Result, Sort, SortColumn, Source};
 const MIN_WINDOW_WIDTH: u32 = 400;
 const MIN_WINDOW_HEIGHT: u32 = 300;
 
+pub const MAX_VOLUME_PERCENT: u32 = 100;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WindowState {
@@ -32,6 +34,9 @@ pub struct WindowState {
     /// The main pane shows albums as a grid of covers rather than a list.
     pub album_grid: bool,
     pub browse: BrowseState,
+    /// The output volume, up to [`MAX_VOLUME_PERCENT`].
+    pub volume_percent: u32,
+    pub muted: bool,
 }
 
 /// What the main pane shows: the source, the filter value selected in it,
@@ -85,6 +90,8 @@ impl Default for WindowState {
             hidden_columns: BTreeSet::new(),
             album_grid: false,
             browse: BrowseState::default(),
+            volume_percent: MAX_VOLUME_PERCENT,
+            muted: false,
         }
     }
 }
@@ -113,6 +120,7 @@ impl WindowState {
         Ok(Self {
             width: state.width.max(MIN_WINDOW_WIDTH),
             height: state.height.max(MIN_WINDOW_HEIGHT),
+            volume_percent: state.volume_percent.min(MAX_VOLUME_PERCENT),
             ..state
         })
     }

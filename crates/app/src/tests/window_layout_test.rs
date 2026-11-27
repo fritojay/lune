@@ -20,6 +20,22 @@ fn out_of_range_qml_sizes_saturate() {
 }
 
 #[test]
+fn a_volume_saves_as_a_whole_percentage_in_range() {
+    for (volume, saved) in [
+        (0.0, 0),
+        (0.304, 30),
+        (0.305, 31),
+        (1.0, 100),
+        (-0.5, 0),
+        (1.7, 100),
+        (f64::INFINITY, 100),
+        (f64::NAN, 100),
+    ] {
+        assert_eq!(percent(volume), saved, "{volume}");
+    }
+}
+
+#[test]
 fn saved_hidden_columns_reach_qml_by_name() {
     let state = WindowState {
         hidden_columns: [SortColumn::Artist, SortColumn::BitRate].into(),

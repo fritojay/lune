@@ -57,6 +57,8 @@ struct UiState {
     unused_playlist_id: Option<ListId>,
     browse: Option<BrowseState>,
     hidden_columns: Option<BTreeSet<SortColumn>>,
+    /// The level (0.0 to 1.0) and whether it is muted.
+    volume: Option<(f64, bool)>,
     has_folders: bool,
     now_playing: Option<i64>,
     listeners: Vec<(Change, Rc<dyn Fn()>)>,
@@ -195,6 +197,19 @@ pub fn set_hidden_columns(hidden: BTreeSet<SortColumn>) {
     if changed {
         notify(Change::Columns);
     }
+}
+
+/// The player's volume and mute; until changed, as the last run left them.
+pub fn volume() -> (f64, bool) {
+    UI.with_borrow(|ui| ui.volume).unwrap_or_else(|| {
+        let saved = saved_window();
+        let level = f64::from(saved.volume_percent) / f64::from(lune_core::MAX_VOLUME_PERCENT);
+        (level, saved.muted)
+    })
+}
+
+pub fn set_volume(level: f64, muted: bool) {
+    UI.with_borrow_mut(|ui| ui.volume = Some((level, muted)));
 }
 
 /// Whether the library has any folders, as the library thread last said.

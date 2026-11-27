@@ -23,6 +23,8 @@ fn custom() -> WindowState {
             }),
             album_descending: true,
         },
+        volume_percent: 35,
+        muted: true,
     }
 }
 
@@ -306,6 +308,11 @@ fn arb_window_state() -> impl Strategy<Value = WindowState> {
         (any::<bool>(), any::<bool>(), any::<bool>()),
         prop::collection::btree_set(arb_sort_column(), 0..=SortColumn::ALL.len()),
         browse,
+        // Mostly in range, sometimes past it (a hand edit).
+        (
+            prop_oneof![3 => 0..=MAX_VOLUME_PERCENT, 1 => any::<u32>()],
+            any::<bool>(),
+        ),
     )
         .prop_map(
             |(
@@ -313,6 +320,7 @@ fn arb_window_state() -> impl Strategy<Value = WindowState> {
                 (maximized, queue_shown, album_grid),
                 hidden_columns,
                 browse,
+                (volume_percent, muted),
             )| {
                 WindowState {
                     width,
@@ -324,6 +332,8 @@ fn arb_window_state() -> impl Strategy<Value = WindowState> {
                     hidden_columns,
                     album_grid,
                     browse,
+                    volume_percent,
+                    muted,
                 }
             },
         )
@@ -349,7 +359,7 @@ fn arb_screen() -> impl Strategy<Value = u32> {
 
 proptest! {
     #[test]
-    fn the_last_saved_state_loads_with_its_size_grown_to_the_minimum(
+    fn the_last_saved_state_loads_with_its_size_grown_to_the_minimum_and_its_volume_clamped(
         earlier in arb_window_state(),
         state in arb_window_state(),
     ) {
@@ -362,6 +372,7 @@ proptest! {
             WindowState {
                 width: state.width.max(MIN_WINDOW_WIDTH),
                 height: state.height.max(MIN_WINDOW_HEIGHT),
+                volume_percent: state.volume_percent.min(MAX_VOLUME_PERCENT),
                 ..state
             }
         );
