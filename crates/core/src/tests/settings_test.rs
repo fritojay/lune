@@ -50,10 +50,64 @@ fn a_hand_written_file_is_read() {
 }
 
 #[test]
-fn an_empty_file_has_no_folders() {
+fn a_file_without_a_folder_list_lists_none_and_is_saved_without_one_until_one_is_set() {
     let dir = TempDir::new();
-    let path = dir.write("config.toml", b"");
-    assert_eq!(Settings::load(&path).unwrap(), Some(Settings::default()));
+    for text in ["", " \n\n", "scroll_speed = 4\n", "scrol_speed = 9\n"] {
+        let path = dir.write("config.toml", text.as_bytes());
+        let mut settings = Settings::load(&path).unwrap().unwrap();
+        assert!(settings.library_folders.is_empty(), "{text:?}");
+        assert!(!settings.folders_listed, "{text:?}");
+
+        settings.set_scroll_speed(6);
+        settings.save(&path).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(!saved.contains("library_folders"), "{text:?}: {saved}");
+        assert!(!Settings::load(&path).unwrap().unwrap().folders_listed);
+
+        assert!(settings.set_library_folders(&[PathBuf::from("/a")]));
+        settings.save(&path).unwrap();
+        let saved = Settings::load(&path).unwrap().unwrap();
+        assert!(saved.folders_listed, "{text:?}");
+        assert_eq!(folders(&saved), ["/a"], "{text:?}");
+    }
+}
+
+#[test]
+fn an_empty_folder_list_is_listed_and_saved() {
+    let dir = TempDir::new();
+    let path = dir.write("config.toml", b"library_folders = []\n");
+    let mut settings = Settings::load(&path).unwrap().unwrap();
+    assert!(settings.folders_listed);
+    assert!(settings.library_folders.is_empty());
+
+    let mut unlisted = Settings::load(&dir.write("other.toml", b""))
+        .unwrap()
+        .unwrap();
+    assert!(unlisted.set_library_folders(&[PathBuf::from("/a")]));
+    assert!(unlisted.set_library_folders(&[]));
+    for settings in [&mut settings, &mut unlisted] {
+        settings.save(&path).unwrap();
+        assert!(Settings::load(&path).unwrap().unwrap().folders_listed);
+    }
+}
+
+#[test]
+fn setting_the_folders_reports_whether_they_changed() {
+    let mut settings = Settings {
+        library_folders: vec![PathBuf::from("/a")],
+        folders_listed: false,
+        ..Settings::default()
+    };
+    assert!(!settings.set_library_folders(&[PathBuf::from("/a")]));
+    assert!(
+        !settings.folders_listed,
+        "an unchanged list stays as it was"
+    );
+    assert!(settings.set_library_folders(&[PathBuf::from("/b")]));
+    assert_eq!(folders(&settings), ["/b"]);
+    assert!(settings.folders_listed);
+    assert!(settings.set_library_folders(&[]));
+    assert!(settings.library_folders.is_empty());
 }
 
 #[test]

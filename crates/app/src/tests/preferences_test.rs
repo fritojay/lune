@@ -139,3 +139,28 @@ fn the_default_and_every_connected_device_can_be_chosen_and_a_saved_one_stays_li
     let (choices, index) = device_choices(&[], None);
     assert_eq!((ids(&choices), index), (vec![None], 0));
 }
+
+#[test]
+fn a_file_without_a_folder_list_prunes_nothing_until_a_folder_is_set() {
+    let dir = TempDir::new();
+    // As a crash can leave it, or a hand edit.
+    let path = dir.write("config.toml", b"");
+    let mut store = Store::load(path.clone());
+    assert_eq!(store.take_load_error(), None);
+    assert_eq!(store.startup_folders(), None);
+
+    assert_eq!(store.update(|s| s.set_scroll_speed(7)), Ok(()));
+    assert_eq!(Store::load(path.clone()).startup_folders(), None);
+
+    let folders = [PathBuf::from("/a")];
+    assert_eq!(store.update(|s| s.set_library_folders(&folders)), Ok(()));
+    assert_eq!(store.startup_folders(), Some(folders.to_vec()));
+    assert_eq!(Store::load(path).startup_folders(), Some(folders.to_vec()));
+}
+
+#[test]
+fn an_empty_folder_list_in_the_file_prunes_to_no_folders() {
+    let dir = TempDir::new();
+    let path = dir.write("config.toml", b"library_folders = []\n");
+    assert_eq!(Store::load(path).startup_folders(), Some(Vec::new()));
+}

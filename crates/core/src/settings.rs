@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CoreError, Result};
 
+const FOLDERS_KEY: &str = "library_folders";
+
 pub const SCROLL_SPEEDS: RangeInclusive<u32> = 1..=10;
 pub const DEFAULT_SCROLL_SPEED: u32 = 3;
 
@@ -25,6 +27,12 @@ pub struct Settings {
     /// the system default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_device: Option<String>,
+    /// Whether the file lists the library folders. One that doesn't (left
+    /// empty by a crash, or edited by hand) leaves the library as it is
+    /// rather than pruning it to no folders, and is saved without the list
+    /// until a folder is set.
+    #[serde(skip)]
+    pub folders_listed: bool,
     /// Keys this version doesn't know, such as a newer version's settings or
     /// a typo, kept so saving writes them back.
     #[serde(flatten)]
@@ -37,6 +45,7 @@ impl Default for Settings {
             library_folders: Vec::new(),
             scroll_speed: DEFAULT_SCROLL_SPEED,
             output_device: None,
+            folders_listed: true,
             extra: toml::Table::new(),
         }
     }
@@ -61,9 +70,11 @@ impl Settings {
         };
         // An unreadable folder list must block saving, so it can't
         // overwrite the user's folders.
+        let table: toml::Table = toml::from_str(&text).map_err(error)?;
+        let folders_listed = table.contains_key(FOLDERS_KEY);
         let mut settings: Self =
-            crate::lenient::from_table(toml::from_str(&text).map_err(error)?, &["library_folders"])
-                .map_err(error)?;
+            crate::lenient::from_table(table, &[FOLDERS_KEY]).map_err(error)?;
+        settings.folders_listed = folders_listed;
         for key in settings.extra.keys() {
             tracing::warn!(key, "unknown setting is ignored");
         }
@@ -72,11 +83,26 @@ impl Settings {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
-        let text = toml::to_string_pretty(self).map_err(|err| CoreError::Settings {
+        let error = |message: String| CoreError::Settings {
             path: path.to_path_buf(),
-            message: err.to_string(),
-        })?;
+            message,
+        };
+        let mut table = toml::Table::try_from(self).map_err(|err| error(err.to_string()))?;
+        if !self.folders_listed && self.library_folders.is_empty() {
+            table.remove(FOLDERS_KEY);
+        }
+        let text = toml::to_string_pretty(&table).map_err(|err| error(err.to_string()))?;
         crate::paths::write_own_file(path, text.as_bytes())
+    }
+
+    /// Returns whether they changed.
+    pub fn set_library_folders(&mut self, folders: &[PathBuf]) -> bool {
+        if self.library_folders == folders {
+            return false;
+        }
+        folders.clone_into(&mut self.library_folders);
+        self.folders_listed = true;
+        true
     }
 
     /// Clamps `speed` into [`SCROLL_SPEEDS`]. Returns whether it changed.

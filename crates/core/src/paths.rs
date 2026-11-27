@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -189,11 +190,26 @@ pub(crate) fn write_own_file(target: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::create_dir_all(dir).map_err(io_err(dir))?;
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp = dir.join(format!(".tmp-{}-{n}", std::process::id()));
-    std::fs::write(&temp, bytes).map_err(io_err(&temp))?;
+    // Synced before the rename, so a crash or power loss leaves the old file
+    // or the new one, never an empty one (as some filesystems would).
+    let written = std::fs::File::create(&temp).and_then(|mut file| {
+        file.write_all(bytes)?;
+        file.sync_all()
+    });
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&temp);
+        return Err(io_err(&temp)(err));
+    }
     std::fs::rename(&temp, target).map_err(|err| {
         let _ = std::fs::remove_file(&temp);
         io_err(target)(err)
-    })
+    })?;
+    // Makes the rename itself durable where a directory can be synced. On
+    // Windows a directory can't be opened as a file, and this does nothing.
+    if let Ok(dir) = std::fs::File::open(dir) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 #[cfg(test)]

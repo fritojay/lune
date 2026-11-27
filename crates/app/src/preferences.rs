@@ -213,7 +213,7 @@ impl Store {
     /// file to go by: the DB may then hold a library built with lune-cli, and
     /// only a file the user (or the app) wrote decides what to drop.
     pub fn startup_folders(&self) -> Option<Vec<PathBuf>> {
-        self.from_file
+        (self.from_file && self.settings.folders_listed)
             .then(|| self.settings.library_folders.clone())
     }
 

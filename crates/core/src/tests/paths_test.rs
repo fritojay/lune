@@ -138,3 +138,22 @@ fn a_data_file_does_not_make_the_install_portable() {
     let dirs = dirs_for(Some(&install.path().join("lune.exe"))).unwrap();
     assert!(!dirs.db_path().starts_with(install.path()), "{dirs:?}");
 }
+
+#[test]
+fn an_own_file_is_replaced_whole_and_no_temp_file_is_left_even_when_it_fails() {
+    let dir = TempDir::new();
+    let target = dir.path().join("config.toml");
+    write_own_file(&target, b"first").unwrap();
+    write_own_file(&target, b"second").unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), b"second");
+
+    // A folder in the way: the rename fails.
+    dir.touch("busy/inside");
+    assert!(write_own_file(&dir.path().join("busy"), b"x").is_err());
+    let mut names: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["busy", "config.toml"]);
+}

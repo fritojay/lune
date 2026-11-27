@@ -150,8 +150,7 @@ impl qobject::LibraryManager {
                 let list: QList<QVariant> = folders.iter().map(folder_entry).collect();
                 let paths: Vec<PathBuf> = folders.into_iter().map(|f| f.path).collect();
                 session::set_has_folders(!paths.is_empty());
-                let saved =
-                    with_store(|store| store.update(|s| replace(&mut s.library_folders, &paths)));
+                let saved = with_store(|store| store.update(|s| s.set_library_folders(&paths)));
                 self.as_mut().rust_mut().folder_paths = paths;
                 set!(self, folders, folders_changed, list);
                 if let Err(message) = saved {
@@ -210,14 +209,6 @@ impl qobject::LibraryManager {
 }
 
 /// Sets `list` to `new`. Returns whether it changed.
-fn replace(list: &mut Vec<PathBuf>, new: &[PathBuf]) -> bool {
-    if list.as_slice() == new {
-        return false;
-    }
-    new.clone_into(list);
-    true
-}
-
 fn shown_path(path: &Path) -> String {
     path.display().to_string()
 }

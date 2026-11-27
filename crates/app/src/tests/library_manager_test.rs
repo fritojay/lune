@@ -50,16 +50,6 @@ fn a_folder_entry_says_what_its_scan_left_out() {
 }
 
 #[test]
-fn replacing_a_folder_list_reports_whether_it_changed() {
-    let mut list = vec![PathBuf::from("/a")];
-    assert!(!replace(&mut list, &[PathBuf::from("/a")]));
-    assert!(replace(&mut list, &[PathBuf::from("/b")]));
-    assert_eq!(list, [PathBuf::from("/b")]);
-    assert!(replace(&mut list, &[]));
-    assert!(list.is_empty());
-}
-
-#[test]
 fn a_folder_is_found_by_its_shown_path_wherever_it_moved_in_the_list() {
     let before = [PathBuf::from("/m/a"), PathBuf::from("/b")];
     let after = [PathBuf::from("/b"), PathBuf::from("/m")];
