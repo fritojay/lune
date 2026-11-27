@@ -10,14 +10,19 @@
   </developer>
   <description>
     <p>
-      Lune plays a local music library (M4A, MP3, FLAC, and more) with
-      gapless playback. It browses by album artist, artist, album, or year,
-      searches as you type, and keeps a play queue separate from what you browse.
+      Lune is a fast, focused player for the music you already have. It plays
+      MP3, FLAC, AAC and ALAC (M4A), Ogg Vorbis, WAV, and AIFF without gaps
+      between tracks, and only ever reads your files: no tag editing, and no
+      changes to your music.
     </p>
-    <p>
-      Library folders are watched, so new and changed files appear on their own.
-      Music files are only ever read, never modified.
-    </p>
+    <ul>
+      <li>Browse by album artist, artist, album, year, genre, or file type, or see what you added or played recently</li>
+      <li>Search as you type, and show albums as a list or as a grid of covers</li>
+      <li>A play queue kept apart from browsing, with shuffle and repeat, that picks up where you left off</li>
+      <li>Playlists you can build and reorder from anywhere in the library</li>
+      <li>Watched library folders: new and changed files show up on their own, and music on a disconnected drive waits for it to come back</li>
+      <li>Media keys and the system's Now Playing controls</li>
+    </ul>
   </description>
   <launchable type="desktop-id">io.github.fritojay.Lune.desktop</launchable>
   <url type="homepage">https://github.com/fritojay/lune</url>
