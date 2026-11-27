@@ -1,3 +1,5 @@
+use proptest::prelude::*;
+
 use super::*;
 
 #[test]
@@ -74,12 +76,53 @@ fn events_the_player_does_not_support_are_ignored() {
 }
 
 #[test]
-fn cover_urls_are_plain_file_urls() {
-    assert_eq!(
-        cover_url(std::path::Path::new(
-            "/home/u/.cache/lune/thumbnails/ab-320.jpg"
-        ))
-        .as_deref(),
-        Some("file:///home/u/.cache/lune/thumbnails/ab-320.jpg")
-    );
+fn cover_urls_are_encoded_only_where_they_are_uris() {
+    for (path, linux, elsewhere) in [
+        (
+            "/home/u/.cache/lune/thumbnails/ab-320.jpg",
+            "file:///home/u/.cache/lune/thumbnails/ab-320.jpg",
+            "file:///home/u/.cache/lune/thumbnails/ab-320.jpg",
+        ),
+        (
+            "/home/Zoë Smith/c#/100%.jpg",
+            "file:///home/Zo%C3%AB%20Smith/c%23/100%25.jpg",
+            "file:///home/Zoë Smith/c#/100%.jpg",
+        ),
+    ] {
+        let expected = if cfg!(target_os = "linux") {
+            linux
+        } else {
+            elsewhere
+        };
+        assert_eq!(
+            cover_url(std::path::Path::new(path)).as_deref(),
+            Some(expected)
+        );
+    }
+}
+
+fn percent_decoded(encoded: &str) -> Vec<u8> {
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap();
+            decoded.push(u8::from_str_radix(hex, 16).unwrap());
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    decoded
+}
+
+proptest! {
+    #[test]
+    fn an_encoded_path_holds_only_uri_characters_and_decodes_back(path in "\\PC*") {
+        let encoded = percent_encoded(&path);
+        prop_assert!(encoded.bytes().all(|b| b.is_ascii_alphanumeric() || b"-._~/%".contains(&b)));
+        prop_assert_eq!(percent_decoded(&encoded), path.as_bytes());
+    }
 }

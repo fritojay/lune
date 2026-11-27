@@ -168,12 +168,32 @@ impl MediaControls for Souvlaki {
     }
 }
 
-/// A cover image file as the platforms expect it. macOS strips `file://` and
-/// uses the rest as a plain path, so it is not percent-encoded; thumbnail
-/// paths are the app's own (a cache folder and a hex name). `None` for a
-/// path that isn't UTF-8.
+/// A cover image file as the platforms expect it. MPRIS takes a URI, so the
+/// path is percent-encoded there; macOS and Windows strip `file://` and use
+/// the rest as a plain path, so it is not. `None` for a path that isn't UTF-8.
 pub fn cover_url(path: &std::path::Path) -> Option<String> {
-    Some(format!("file://{}", path.to_str()?))
+    let path = path.to_str()?;
+    if cfg!(target_os = "linux") {
+        Some(format!("file://{}", percent_encoded(path)))
+    } else {
+        Some(format!("file://{path}"))
+    }
+}
+
+/// `path` with every byte but `/` and RFC 3986's unreserved characters
+/// written as `%XX`.
+fn percent_encoded(path: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(path.len());
+    for &byte in path.as_bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            // Writing to a String can't fail.
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
 }
 
 /// Windows' media controls belong to a window. This one is never shown, so
