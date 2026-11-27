@@ -20,10 +20,12 @@ fn a_new_database_has_an_empty_queue_list() {
 
 proptest! {
     #[test]
-    fn items_load_as_last_saved_and_keep_their_place_when_tracks_are_forgotten(
+    fn items_load_as_last_saved_and_keep_their_place_when_tracks_are_forgotten_and_others_added(
         earlier in prop::collection::vec(0..8i64, 0..10),
-        track_ids in prop::collection::vec(0..8i64, 0..20),
+        // Ids up to the library's; 0 was never a track's.
+        track_ids in prop::collection::vec(0..=5i64, 0..20),
         forgotten in prop::sample::subsequence(LIBRARY.to_vec(), 0..=LIBRARY.len()),
+        added in 0..4usize,
     ) {
         let mut conn = db::open_in_memory().unwrap();
         library_with_tracks(&conn, &LIBRARY);
@@ -33,6 +35,21 @@ proptest! {
             conn.execute("UPDATE tracks SET missing_ns = 1 WHERE id = ?1", [id]).unwrap();
         }
         crate::scan::forget_missing(&mut conn, None).unwrap();
+        // Tracks found later never take a forgotten track's place.
+        conn.execute(
+            "INSERT INTO albums (id, album_artist, album_artist_key, title, title_key)
+             VALUES (2, 'B', 'b', 'New', 'new')",
+            [],
+        )
+        .unwrap();
+        for n in 0..added {
+            conn.execute(
+                "INSERT INTO tracks (path, mtime_ns, size, album_id, duration_ms, codec)
+                 VALUES (?1, 0, 0, 2, 1000, 'mp3')",
+                [format!("new-{n}.mp3")],
+            )
+            .unwrap();
+        }
 
         let expected: Vec<(i64, Option<PathBuf>)> = track_ids
             .iter()

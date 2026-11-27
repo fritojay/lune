@@ -341,3 +341,65 @@ fn only_changes_to_what_search_holds_rebuild_a_tracks_search_entry() {
         );
     }
 }
+
+#[test]
+fn a_v13_database_keeps_its_tracks_and_search_and_never_reuses_an_id_a_list_holds() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(&format!(
+        "BEGIN; {}; PRAGMA user_version = 13; COMMIT;",
+        MIGRATIONS[..13].join(";")
+    ))
+    .unwrap();
+    library_with_tracks(&conn, &[1, 2, 3]);
+    conn.execute_batch(
+        "UPDATE tracks SET title = 'Song ' || id, played_ns = id, genre = 'Jazz';
+         INSERT INTO lists (id, kind, name, created_ns) VALUES (2, 'playlist', 'P', 0);
+         INSERT INTO list_items (list_id, position, track_id) VALUES (2, 0, 3), (2, 1, 9);",
+    )
+    .unwrap();
+    let rows = |conn: &Connection| -> Vec<Vec<rusqlite::types::Value>> {
+        let mut stmt = conn.prepare("SELECT * FROM tracks ORDER BY id").unwrap();
+        let columns = stmt.column_count();
+        stmt.query_map([], |row| (0..columns).map(|i| row.get(i)).collect())
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    };
+    let columns = |conn: &Connection| -> Vec<(String, String, bool, Option<String>, i64)> {
+        conn.prepare(
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('tracks')",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    };
+    let (rows_before, columns_before) = (rows(&conn), columns(&conn));
+
+    migrate(&conn).unwrap();
+    assert_eq!(rows(&conn), rows_before);
+    assert_eq!(columns(&conn), columns_before);
+    assert_eq!(query::search_ids(&conn, "song").unwrap(), [1, 2, 3].into());
+    conn.execute_batch(
+        "UPDATE tracks SET title = 'Zebra' WHERE id = 1; DELETE FROM tracks WHERE id = 2;",
+    )
+    .unwrap();
+    assert_eq!(query::search_ids(&conn, "zebra").unwrap(), [1].into());
+    assert_eq!(query::search_ids(&conn, "song").unwrap(), [3].into());
+
+    conn.execute(
+        "INSERT INTO tracks (path, mtime_ns, size, album_id, duration_ms, codec, title)
+         VALUES ('new.mp3', 0, 0, 1, 1000, 'mp3', 'New')",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        conn.last_insert_rowid(),
+        10,
+        "past the 9 the playlist holds"
+    );
+    assert_eq!(query::search_ids(&conn, "new").unwrap(), [10].into());
+}

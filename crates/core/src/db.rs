@@ -186,6 +186,72 @@ const MIGRATIONS: &[&str] = &[
         FROM albums a WHERE a.id = new.album_id;
     END;
     "#,
+    // v14: track ids are never reused. Lists keep the ids of deleted tracks
+    // (no foreign key), so a reused id would put another track in their
+    // place. SQLite can't add AUTOINCREMENT to a table, so it is rebuilt with
+    // the same ids, and the sequence starts past every id a list holds.
+    r#"
+    DROP TRIGGER tracks_fts_insert;
+    DROP TRIGGER tracks_fts_delete;
+    DROP TRIGGER tracks_fts_update;
+    CREATE TABLE tracks_new (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        path           TEXT NOT NULL UNIQUE,
+        mtime_ns       INTEGER NOT NULL,
+        size           INTEGER NOT NULL,
+        title          TEXT,
+        artist         TEXT,
+        album_artist   TEXT,
+        album_id       INTEGER NOT NULL REFERENCES albums(id),
+        disc_no        INTEGER,
+        track_no       INTEGER,
+        year           INTEGER,
+        duration_ms    INTEGER NOT NULL,
+        codec          TEXT NOT NULL,
+        sample_rate    INTEGER,
+        art_id         INTEGER REFERENCES art(id) ON DELETE SET NULL,
+        album          TEXT,
+        added_ns       INTEGER,
+        played_ns      INTEGER,
+        missing_ns     INTEGER,
+        bitrate_kbps   INTEGER,
+        reader_version INTEGER NOT NULL DEFAULT 0,
+        genre          TEXT
+    );
+    INSERT INTO tracks_new (
+        id, path, mtime_ns, size, title, artist, album_artist, album_id, disc_no, track_no,
+        year, duration_ms, codec, sample_rate, art_id, album, added_ns, played_ns,
+        missing_ns, bitrate_kbps, reader_version, genre
+    )
+    SELECT
+        id, path, mtime_ns, size, title, artist, album_artist, album_id, disc_no, track_no,
+        year, duration_ms, codec, sample_rate, art_id, album, added_ns, played_ns,
+        missing_ns, bitrate_kbps, reader_version, genre
+    FROM tracks;
+    DROP TABLE tracks;
+    ALTER TABLE tracks_new RENAME TO tracks;
+    CREATE INDEX tracks_album ON tracks(album_id, disc_no, track_no);
+    CREATE INDEX tracks_art ON tracks(art_id);
+    DELETE FROM sqlite_sequence WHERE name = 'tracks';
+    INSERT INTO sqlite_sequence (name, seq) VALUES ('tracks', MAX(
+        COALESCE((SELECT MAX(id) FROM tracks), 0),
+        COALESCE((SELECT MAX(track_id) FROM list_items), 0)
+    ));
+    CREATE TRIGGER tracks_fts_insert AFTER INSERT ON tracks BEGIN
+        INSERT INTO tracks_fts(rowid, title, artist, album_artist, album)
+        SELECT new.id, new.title, new.artist, a.album_artist, a.title
+        FROM albums a WHERE a.id = new.album_id;
+    END;
+    CREATE TRIGGER tracks_fts_delete AFTER DELETE ON tracks BEGIN
+        DELETE FROM tracks_fts WHERE rowid = old.id;
+    END;
+    CREATE TRIGGER tracks_fts_update AFTER UPDATE OF title, artist, album_id ON tracks BEGIN
+        DELETE FROM tracks_fts WHERE rowid = old.id;
+        INSERT INTO tracks_fts(rowid, title, artist, album_artist, album)
+        SELECT new.id, new.title, new.artist, a.album_artist, a.title
+        FROM albums a WHERE a.id = new.album_id;
+    END;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
