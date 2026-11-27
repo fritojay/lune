@@ -52,6 +52,8 @@ pub mod qobject {
         #[qproperty(i64, current_track_id, cxx_name = "currentTrackId", READ, NOTIFY)]
         #[qproperty(i32, queue_index, cxx_name = "queueIndex", READ, NOTIFY)]
         #[qproperty(bool, shuffle, READ, NOTIFY)]
+        /// `Repeat::index`: 0 off, 1 all, 2 one.
+        #[qproperty(i32, repeat, READ, NOTIFY)]
         #[qproperty(f64, volume, READ, NOTIFY)]
         #[qproperty(bool, muted, READ, NOTIFY)]
         type PlayerController = super::PlayerControllerRust;
@@ -112,6 +114,11 @@ pub mod qobject {
         #[cxx_name = "setShuffle"]
         fn set_shuffle_from_qml(self: Pin<&mut PlayerController>, on: bool);
 
+        /// Steps to the next repeat mode: off, all, one, and off again.
+        #[qinvokable]
+        #[cxx_name = "cycleRepeat"]
+        fn cycle_repeat(self: Pin<&mut PlayerController>);
+
         #[qinvokable]
         #[cxx_name = "togglePause"]
         fn toggle_pause(self: Pin<&mut PlayerController>);
@@ -162,12 +169,14 @@ pub struct PlayerControllerRust {
     current_track_id: i64,
     queue_index: i32,
     shuffle: bool,
+    repeat: i32,
     volume: f64,
     muted: bool,
     player: Option<Player>,
     opening: Opening,
-    /// The entry the engine last reported playing.
+    /// The entry the engine last reported playing, and its playthrough.
     playing_entry: Option<EntryId>,
+    playthrough: u64,
     cover_id: Option<i64>,
     /// Media keys and the OS Now Playing display.
     media: Option<Box<dyn MediaControls>>,
@@ -194,11 +203,13 @@ impl Default for PlayerControllerRust {
             current_track_id: -1,
             queue_index: -1,
             shuffle: false,
+            repeat: 0,
             volume,
             muted,
             player: None,
             opening: Opening::default(),
             playing_entry: None,
+            playthrough: 0,
             cover_id: None,
             media: None,
             media_now: NowPlaying::default(),
@@ -455,6 +466,16 @@ impl qobject::PlayerController {
         self.as_mut().edited(Save::Cursor);
     }
 
+    fn cycle_repeat(mut self: Pin<&mut Self>) {
+        {
+            let mut queue = session::lock_queue();
+            let repeat = queue.repeat().next();
+            queue.set_repeat(repeat);
+        }
+        // What plays next may change, so the engine re-checks it.
+        self.as_mut().edited(Save::Cursor);
+    }
+
     fn toggle_pause(mut self: Pin<&mut Self>) {
         let Some(player) = &self.player else {
             if let Some(playing) = self.as_mut().rust_mut().opening.toggle_resume() {
@@ -599,11 +620,13 @@ impl qobject::PlayerController {
         let Some(status) = status else {
             return;
         };
-        if status.entry != self.playing_entry {
+        // A new playthrough of the same entry is it repeated.
+        if status.entry != self.playing_entry || status.playthrough != self.playthrough {
             if let (Some(stopped), None) = (self.playing_entry, status.entry) {
                 session::lock_queue().set_resume_position(SlotId(stopped.0), Duration::ZERO);
             }
             self.as_mut().rust_mut().playing_entry = status.entry;
+            self.as_mut().rust_mut().playthrough = status.playthrough;
             if let Some(entry) = status.entry {
                 let track_id = {
                     let mut queue = session::lock_queue();
@@ -704,6 +727,7 @@ impl qobject::PlayerController {
         // The new output starts with nothing heard, which isn't the end of
         // the track that was playing.
         self.as_mut().rust_mut().playing_entry = None;
+        self.as_mut().rust_mut().playthrough = 0;
         set!(self, available, available_changed, false);
         self.open_output(resume);
     }
@@ -734,9 +758,18 @@ impl qobject::PlayerController {
     /// Re-reads the queue and now playing (after the library loads or
     /// changes).
     fn refresh(mut self: Pin<&mut Self>) {
-        let shuffle = session::lock_queue().shuffle();
-        set!(self, shuffle, shuffle_changed, shuffle);
+        self.as_mut().show_modes();
         self.update_now_playing();
+    }
+
+    fn show_modes(mut self: Pin<&mut Self>) {
+        let (shuffle, repeat) = {
+            let queue = session::lock_queue();
+            (queue.shuffle(), queue.repeat())
+        };
+        set!(self, shuffle, shuffle_changed, shuffle);
+        let repeat = i32::try_from(repeat.index()).unwrap_or(0);
+        set!(self, repeat, repeat_changed, repeat);
     }
 
     /// After a queue edit: the engine re-checks what's next, and `save` is saved.
@@ -745,8 +778,7 @@ impl qobject::PlayerController {
             log_err(player.queue_changed());
         }
         session::save(save);
-        let shuffle = session::lock_queue().shuffle();
-        set!(self, shuffle, shuffle_changed, shuffle);
+        self.as_mut().show_modes();
         self.as_mut().update_now_playing();
         session::queue_edited();
     }

@@ -252,6 +252,10 @@ const MIGRATIONS: &[&str] = &[
         FROM albums a WHERE a.id = new.album_id;
     END;
     "#,
+    // v15: repeat (`Repeat::index`: 0 off, 1 all, 2 one).
+    r#"
+    ALTER TABLE queue_state ADD COLUMN repeat INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

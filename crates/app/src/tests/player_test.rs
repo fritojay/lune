@@ -136,6 +136,7 @@ fn status(
     Status {
         state,
         entry: entry.map(EntryId),
+        playthrough: 1,
         position: Duration::from_secs(42),
         duration: None,
         underruns: 0,

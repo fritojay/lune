@@ -334,11 +334,15 @@ pub fn entry(item: &QueueItem) -> QueueEntry {
 
 impl PlayQueue for EngineQueue {
     fn next_after(&self, id: EntryId) -> Option<QueueEntry> {
-        lock_queue().next_after(SlotId(id.0)).map(entry)
+        lock_queue().follow_after(SlotId(id.0)).map(entry)
     }
 
     fn previous_before(&self, id: EntryId) -> Option<QueueEntry> {
-        lock_queue().previous_before(SlotId(id.0)).map(entry)
+        lock_queue().skip_before(SlotId(id.0)).map(entry)
+    }
+
+    fn skip_after(&self, id: EntryId) -> Option<QueueEntry> {
+        lock_queue().skip_after(SlotId(id.0)).map(entry)
     }
 }
 

@@ -75,6 +75,15 @@ ColumnLayout {
             ToolTip.visible: hovered
             ToolTip.text: checked ? qsTr("Shuffle is on") : qsTr("Shuffle is off")
         }
+        // Steps through off, all, and one; checked while either repeat is on.
+        ToggleToolButton {
+            icon.source: Player.repeat === 2 ? "icons/repeat-one.svg" : "icons/repeat.svg"
+            icon.color: checked ? palette.highlight : palette.buttonText
+            toggledOn: Player.repeat !== 0
+            onToggleRequested: Player.cycleRepeat()
+            ToolTip.visible: hovered
+            ToolTip.text: [qsTr("Repeat is off"), qsTr("Repeating the queue"), qsTr("Repeating this track")][Player.repeat]
+        }
         KeyToolButton {
             text: qsTr("Clear")
             enabled: queueModel.count > 0

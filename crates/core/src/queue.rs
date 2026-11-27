@@ -22,6 +22,47 @@ pub struct TrackRef {
     pub path: PathBuf,
 }
 
+/// What plays after the end of a track.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Repeat {
+    /// The next item; playback stops after the last.
+    #[default]
+    Off,
+    /// The next item; after the last, the first.
+    All,
+    /// The same item again. Skipping goes on as with [`Repeat::All`].
+    One,
+}
+
+impl Repeat {
+    pub const ALL: [Self; 3] = [Self::Off, Self::All, Self::One];
+
+    /// The one after this, for a button that steps through them.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::All,
+            Self::All => Self::One,
+            Self::One => Self::Off,
+        }
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Off => 0,
+            Self::All => 1,
+            Self::One => 2,
+        }
+    }
+
+    /// [`Repeat::Off`] for one this version doesn't have.
+    pub fn from_index(index: i64) -> Self {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| Self::ALL.get(i).copied())
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueItem {
     pub slot: SlotId,
@@ -43,6 +84,7 @@ pub struct Queue {
     cursor: usize,
     /// How far into this slot playback had got, to continue from there.
     resume: Option<(SlotId, Duration)>,
+    repeat: Repeat,
     next_slot: u64,
     rng: u64,
 }
@@ -55,6 +97,7 @@ impl Default for Queue {
             current: None,
             cursor: 0,
             resume: None,
+            repeat: Repeat::Off,
             next_slot: 0,
             // Odd and nonzero, as xorshift needs.
             rng: RandomState::new().hash_one(0u8) | 1,
@@ -77,6 +120,14 @@ impl Queue {
 
     pub fn shuffle(&self) -> bool {
         self.original.is_some()
+    }
+
+    pub fn repeat(&self) -> Repeat {
+        self.repeat
+    }
+
+    pub fn set_repeat(&mut self, repeat: Repeat) {
+        self.repeat = repeat;
     }
 
     pub fn current(&self) -> Option<&QueueItem> {
@@ -219,12 +270,56 @@ impl Queue {
     }
 
     pub fn previous_before(&self, slot: SlotId) -> Option<&QueueItem> {
-        let i = match self.index_of(slot) {
-            Some(i) => i,
-            None if self.current == Some(slot) => self.cursor,
-            None => return None,
-        };
+        let i = self.place_of(slot)?;
         i.checked_sub(1).and_then(|i| self.items.get(i))
+    }
+
+    /// What plays when `slot` ends, as [`Queue::repeat`] has it.
+    pub fn follow_after(&self, slot: SlotId) -> Option<&QueueItem> {
+        match self.repeat {
+            Repeat::Off => self.next_after(slot),
+            Repeat::All => self.wrapping_after(slot),
+            Repeat::One => match self.index_of(slot) {
+                Some(i) => self.items.get(i),
+                // Removed while playing: whatever took its place repeats.
+                None => self.wrapping_after(slot),
+            },
+        }
+    }
+
+    /// Where skipping forward from `slot` goes: past the last item to the
+    /// first while any repeat is on.
+    pub fn skip_after(&self, slot: SlotId) -> Option<&QueueItem> {
+        match self.repeat {
+            Repeat::Off => self.next_after(slot),
+            Repeat::All | Repeat::One => self.wrapping_after(slot),
+        }
+    }
+
+    /// Where skipping back from `slot` goes: before the first item to the
+    /// last while any repeat is on.
+    pub fn skip_before(&self, slot: SlotId) -> Option<&QueueItem> {
+        match self.repeat {
+            Repeat::Off => self.previous_before(slot),
+            Repeat::All | Repeat::One => {
+                self.place_of(slot)?;
+                self.previous_before(slot).or_else(|| self.items.last())
+            }
+        }
+    }
+
+    fn wrapping_after(&self, slot: SlotId) -> Option<&QueueItem> {
+        self.place_of(slot)?;
+        self.next_after(slot).or_else(|| self.items.first())
+    }
+
+    /// Where `slot` is, or for the current item since removed, where it was.
+    fn place_of(&self, slot: SlotId) -> Option<usize> {
+        match self.index_of(slot) {
+            Some(i) => Some(i),
+            None if self.current == Some(slot) => Some(self.cursor),
+            None => None,
+        }
     }
 
     pub fn index_of(&self, slot: SlotId) -> Option<usize> {
@@ -240,10 +335,14 @@ impl Queue {
     pub(crate) fn restore(
         tracks: Vec<TrackRef>,
         shuffle: bool,
+        repeat: Repeat,
         cursor: Option<usize>,
         resume: Duration,
     ) -> Self {
-        let mut queue = Self::default();
+        let mut queue = Self {
+            repeat,
+            ..Self::default()
+        };
         queue.items = queue.new_items(tracks);
         if let Some(item) = cursor.and_then(|c| queue.items.get(c)) {
             queue.current = Some(item.slot);
@@ -358,12 +457,14 @@ pub(crate) fn save_cursor(conn: &Connection, queue: &Queue) -> Result<()> {
 
 fn save_state(conn: &Connection, queue: &Queue) -> Result<()> {
     conn.execute(
-        "INSERT INTO queue_state (id, cursor, shuffle, resume_ms) VALUES (1, :cursor, :shuffle, :resume_ms)
+        "INSERT INTO queue_state (id, cursor, shuffle, repeat, resume_ms)
+             VALUES (1, :cursor, :shuffle, :repeat, :resume_ms)
          ON CONFLICT (id) DO UPDATE SET cursor = excluded.cursor, shuffle = excluded.shuffle,
-             resume_ms = excluded.resume_ms",
+             repeat = excluded.repeat, resume_ms = excluded.resume_ms",
         named_params! {
             ":cursor": queue.unshuffled_current_index().map(|i| i as i64),
             ":shuffle": queue.shuffle(),
+            ":repeat": queue.repeat().index() as i64,
             ":resume_ms": i64::try_from(queue.resume_position().as_millis()).unwrap_or(i64::MAX),
         },
     )?;
@@ -373,20 +474,21 @@ fn save_state(conn: &Connection, queue: &Queue) -> Result<()> {
 /// Loads the saved queue. Tracks deleted from the library since are dropped;
 /// missing ones stay, as their files may come back (playback skips them).
 pub(crate) fn load(conn: &Connection) -> Result<Queue> {
-    let (cursor, shuffle, resume_ms): (Option<i64>, bool, i64) = conn
+    let (cursor, shuffle, repeat, resume_ms): (Option<i64>, bool, i64, i64) = conn
         .query_row(
-            "SELECT cursor, shuffle, resume_ms FROM queue_state WHERE id = 1",
+            "SELECT cursor, shuffle, repeat, resume_ms FROM queue_state WHERE id = 1",
             [],
             |row| {
                 Ok((
                     row.get("cursor")?,
                     row.get("shuffle")?,
+                    row.get("repeat")?,
                     row.get("resume_ms")?,
                 ))
             },
         )
         .optional()?
-        .unwrap_or((None, false, 0));
+        .unwrap_or((None, false, 0, 0));
     let mut tracks = Vec::new();
     let mut new_cursor = None;
     for (position, (track_id, path)) in lists::load_items(conn, ListId::QUEUE)?
@@ -400,7 +502,13 @@ pub(crate) fn load(conn: &Connection) -> Result<Queue> {
         tracks.push(TrackRef { id: track_id, path });
     }
     let resume = Duration::from_millis(u64::try_from(resume_ms).unwrap_or(0));
-    Ok(Queue::restore(tracks, shuffle, new_cursor, resume))
+    Ok(Queue::restore(
+        tracks,
+        shuffle,
+        Repeat::from_index(repeat),
+        new_cursor,
+        resume,
+    ))
 }
 
 #[cfg(test)]

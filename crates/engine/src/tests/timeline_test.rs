@@ -11,6 +11,7 @@ fn boundary(start: u64, id: u64) -> Boundary {
         entry: QueueEntry::new(EntryId(id), PathBuf::from("x")),
         offset: Duration::ZERO,
         duration: None,
+        playthrough: 0,
     }
 }
 

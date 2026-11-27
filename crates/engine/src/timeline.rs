@@ -11,6 +11,8 @@ pub(crate) struct Boundary {
     /// Track position at `start` (non-zero after a seek).
     pub(crate) offset: Duration,
     pub(crate) duration: Option<Duration>,
+    /// Which playthrough of its entry this is (see `Status::playthrough`).
+    pub(crate) playthrough: u64,
 }
 
 #[derive(Debug)]

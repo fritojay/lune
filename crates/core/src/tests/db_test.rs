@@ -185,6 +185,7 @@ fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
          ALTER TABLE tracks DROP COLUMN genre;
          ALTER TABLE albums DROP COLUMN genre;
          ALTER TABLE queue_state DROP COLUMN resume_ms;
+         ALTER TABLE queue_state DROP COLUMN repeat;
          {UNDO_V12}
          PRAGMA user_version = 7;"
     ))
@@ -218,6 +219,7 @@ fn a_v8_database_rereads_every_file_once() {
          ALTER TABLE tracks DROP COLUMN genre;
          ALTER TABLE albums DROP COLUMN genre;
          ALTER TABLE queue_state DROP COLUMN resume_ms;
+         ALTER TABLE queue_state DROP COLUMN repeat;
          {UNDO_V12}
          PRAGMA user_version = 8;"
     ))
@@ -252,6 +254,7 @@ fn a_v9_database_rereads_every_file_once_to_fill_in_genres() {
          ALTER TABLE albums DROP COLUMN genre;
          UPDATE tracks SET reader_version = 1;
          ALTER TABLE queue_state DROP COLUMN resume_ms;
+         ALTER TABLE queue_state DROP COLUMN repeat;
          {UNDO_V12}
          PRAGMA user_version = 9;"
     ))

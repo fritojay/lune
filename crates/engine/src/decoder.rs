@@ -42,6 +42,13 @@ struct Current {
     started: bool,
     /// Track position of its first frame (non-zero after a seek).
     offset: Duration,
+    playthrough: u64,
+}
+
+struct Playing {
+    entry: QueueEntry,
+    position: Duration,
+    playthrough: u64,
 }
 
 pub(crate) struct Decoder {
@@ -71,6 +78,11 @@ pub(crate) struct Decoder {
     /// so it is not counted as an underrun.
     refilling: bool,
     resume_skip: Option<QueueEntry>,
+    /// Playthroughs started so far; each new one gets the next number.
+    playthroughs: u64,
+    /// The first of the unplayable entries skipped in a row, so a repeating
+    /// queue of them stops after one lap instead of going round forever.
+    failed_since: Option<EntryId>,
 }
 
 impl Decoder {
@@ -106,6 +118,8 @@ impl Decoder {
             out_pos: 0,
             refilling: false,
             resume_skip: None,
+            playthroughs: 0,
+            failed_since: None,
         }
     }
 
@@ -176,7 +190,8 @@ impl Decoder {
                 if position.is_zero() {
                     self.start_entry(Some(entry), Duration::ZERO);
                 } else {
-                    self.seek(entry, position);
+                    let playthrough = self.new_playthrough();
+                    self.seek(entry, position, playthrough);
                 }
                 self.shared.starting.store(false, Ordering::Release);
             }
@@ -186,13 +201,13 @@ impl Decoder {
                 lock(&self.timeline).end = Some(self.written);
             }
             Command::Seek(position) => {
-                if let Some((entry, _)) = self.playing() {
-                    self.seek(entry, position);
+                if let Some(playing) = self.playing() {
+                    self.seek(playing.entry, position, playing.playthrough);
                 }
             }
             Command::Next => {
-                if let Some((entry, _)) = self.playing() {
-                    match self.queue.next_after(entry.id) {
+                if let Some(Playing { entry, .. }) = self.playing() {
+                    match self.queue.skip_after(entry.id) {
                         Some(next) => {
                             self.discard_all();
                             self.start_entry(Some(next), Duration::ZERO);
@@ -205,16 +220,16 @@ impl Decoder {
                 }
             }
             Command::Previous => {
-                if let Some((entry, position)) = self.playing() {
-                    let previous = (position <= PREVIOUS_RESTART_AFTER)
-                        .then(|| self.open_previous(entry.id))
+                if let Some(playing) = self.playing() {
+                    let previous = (playing.position <= PREVIOUS_RESTART_AFTER)
+                        .then(|| self.open_previous(playing.entry.id))
                         .flatten();
                     match previous {
                         Some((prev, source)) => {
                             self.discard_all();
                             self.begin(prev, source, Duration::ZERO);
                         }
-                        None => self.seek(entry, Duration::ZERO),
+                        None => self.seek(playing.entry, Duration::ZERO, playing.playthrough),
                     }
                 }
             }
@@ -223,8 +238,8 @@ impl Decoder {
         true
     }
 
-    /// The entry being heard and its position.
-    fn playing(&self) -> Option<(QueueEntry, Duration)> {
+    /// The entry being heard, its position, and its playthrough.
+    fn playing(&self) -> Option<Playing> {
         let consumed = self.shared.consumed.load(Ordering::Acquire);
         let timeline = lock(&self.timeline);
         if timeline.end.is_some_and(|end| consumed >= end) {
@@ -234,16 +249,28 @@ impl Decoder {
             .playing(consumed)
             .and_then(|i| timeline.boundaries.get(i))
         {
-            Some(b) => Some((
-                b.entry.clone(),
-                b.offset + frames_to_duration(consumed.saturating_sub(b.start), self.spec.rate),
-            )),
+            Some(b) => Some(Playing {
+                entry: b.entry.clone(),
+                position: b.offset
+                    + frames_to_duration(consumed.saturating_sub(b.start), self.spec.rate),
+                playthrough: b.playthrough,
+            }),
             // Started but no audio yet (e.g. just after Play).
-            None => self.current.as_ref().map(|c| (c.entry.clone(), c.offset)),
+            None => self.current.as_ref().map(|c| Playing {
+                entry: c.entry.clone(),
+                position: c.offset,
+                playthrough: c.playthrough,
+            }),
         }
     }
 
-    fn seek(&mut self, entry: QueueEntry, position: Duration) {
+    fn new_playthrough(&mut self) -> u64 {
+        self.playthroughs += 1;
+        self.playthroughs
+    }
+
+    /// A seek stays in `playthrough`, unless it is the start of a new one.
+    fn seek(&mut self, entry: QueueEntry, position: Duration, playthrough: u64) {
         let reuse = self
             .current
             .take()
@@ -261,11 +288,12 @@ impl Decoder {
                     source,
                     started: false,
                     offset,
+                    playthrough,
                 });
             }
             Err(err) => {
                 tracing::warn!(err = %err, "seek failed; skipping to the next track");
-                let next = self.queue.next_after(entry.id);
+                let next = self.queue.skip_after(entry.id);
                 self.start_entry(next, Duration::ZERO);
             }
         }
@@ -283,17 +311,20 @@ impl Decoder {
         self.converter_base = self.written;
         self.current = None;
         self.resume_skip = None;
+        self.failed_since = None;
         let mut timeline = lock(&self.timeline);
         timeline.boundaries.clear();
         timeline.end = None;
     }
 
     fn begin(&mut self, entry: QueueEntry, source: Source, offset: Duration) {
+        let playthrough = self.new_playthrough();
         self.current = Some(Current {
             entry,
             source,
             started: false,
             offset,
+            playthrough,
         });
         lock(&self.timeline).end = None;
     }
@@ -317,8 +348,10 @@ impl Decoder {
 
     /// Gives up after [`MAX_OPEN_ATTEMPTS`] unplayable entries and leaves the
     /// rest to the next loop iteration, so a queue of missing files (e.g. on
-    /// an unmounted drive) can't stall command handling. With no entry left,
-    /// finishes the stream.
+    /// an unmounted drive) can't stall command handling. Unplayable entries
+    /// are skipped past as a skip forward would, so a repeated one isn't
+    /// tried again. With no entry left, or every one unplayable, finishes the
+    /// stream.
     fn start_entry(&mut self, mut entry: Option<QueueEntry>, offset: Duration) {
         self.resume_skip = None;
         let mut attempts = 0;
@@ -330,15 +363,18 @@ impl Decoder {
             attempts += 1;
             match Source::open(&e.path) {
                 Ok(source) => {
+                    self.failed_since = None;
                     self.begin(e, source, offset);
                     return;
                 }
                 Err(err) => {
                     tracing::warn!(err = %err, "skipping unplayable track");
-                    entry = self.queue.next_after(e.id);
+                    let first = *self.failed_since.get_or_insert(e.id);
+                    entry = self.queue.skip_after(e.id).filter(|next| next.id != first);
                 }
             }
         }
+        self.failed_since = None;
         // End of the queue: flush the resampler tail and mark where playback ends.
         if let Err(err) = self.converter.finish(&mut self.out) {
             tracing::warn!(err = %err, "resampler flush failed");
@@ -381,6 +417,7 @@ impl Decoder {
                         entry: current.entry.clone(),
                         offset: current.offset,
                         duration,
+                        playthrough: current.playthrough,
                     });
                     timeline.end = None;
                 }

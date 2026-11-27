@@ -99,6 +99,7 @@ enum Op {
     SetResume(Index, Duration),
     Clear,
     Shuffle(bool),
+    SetRepeat(Repeat),
 }
 
 fn arb_track_ids() -> impl Strategy<Value = Vec<i64>> {
@@ -118,6 +119,7 @@ fn arb_op() -> impl Strategy<Value = Op> {
             .prop_map(|(pick, ms)| Op::SetResume(pick, Duration::from_millis(ms.into()))),
         Just(Op::Clear),
         any::<bool>().prop_map(Op::Shuffle),
+        prop::sample::select(&Repeat::ALL[..]).prop_map(Op::SetRepeat),
     ]
 }
 
@@ -130,6 +132,7 @@ struct Model {
     current: Option<SlotId>,
     place: usize,
     resume: Option<(SlotId, Duration)>,
+    repeat: Repeat,
 }
 
 impl Model {
@@ -273,8 +276,13 @@ impl Model {
                 queue.clear();
                 *self = Model {
                     original: self.original.as_ref().map(|_| Vec::new()),
+                    repeat: self.repeat,
                     ..Model::default()
                 };
+            }
+            Op::SetRepeat(repeat) => {
+                queue.set_repeat(*repeat);
+                self.repeat = *repeat;
             }
             Op::Shuffle(on) => {
                 queue.set_shuffle(*on);
@@ -319,6 +327,11 @@ impl Model {
         let never_handed_out = SlotId(u64::MAX);
         assert!(queue.next_after(never_handed_out).is_none());
         assert!(queue.previous_before(never_handed_out).is_none());
+        assert!(queue.follow_after(never_handed_out).is_none());
+        assert!(queue.skip_after(never_handed_out).is_none());
+        assert!(queue.skip_before(never_handed_out).is_none());
+        assert_eq!(queue.repeat(), self.repeat);
+        self.check_repeat(queue);
         let Some(current) = self.current else { return };
         let (next, previous) = match self.current_index() {
             Some(i) => (i + 1, i.checked_sub(1)),
@@ -334,6 +347,81 @@ impl Model {
             track(previous)
         );
     }
+}
+
+impl Model {
+    /// What follows and what a skip reaches from each item, and from the
+    /// current one once removed, as the repeat mode has it.
+    fn check_repeat(&self, queue: &Queue) {
+        let removed_current = self
+            .current
+            .filter(|_| self.current_index().is_none())
+            .map(|slot| (slot, None));
+        let present = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(i, &(s, _))| (s, Some(i)));
+        for (slot, index) in present.chain(removed_current) {
+            let at = |i: Option<usize>| i.and_then(|i| self.items.get(i)).map(|&(s, _)| s);
+            // A removed current item's neighbours are those around its place.
+            let (next, previous) = match index {
+                Some(i) => (at(Some(i + 1)), at(i.checked_sub(1))),
+                None => (at(Some(self.place)), at(self.place.checked_sub(1))),
+            };
+            let first = self.items.first().map(|&(s, _)| s);
+            let last = self.items.last().map(|&(s, _)| s);
+            let (follow, skip_after, skip_before) = match self.repeat {
+                Repeat::Off => (next, next, previous),
+                Repeat::All => (next.or(first), next.or(first), previous.or(last)),
+                Repeat::One => (
+                    index.map_or(next.or(first), |_| Some(slot)),
+                    next.or(first),
+                    previous.or(last),
+                ),
+            };
+            let slot_of = |item: Option<&QueueItem>| item.map(|item| item.slot);
+            assert_eq!(slot_of(queue.follow_after(slot)), follow, "follow {slot:?}");
+            assert_eq!(
+                slot_of(queue.skip_after(slot)),
+                skip_after,
+                "skip after {slot:?}"
+            );
+            assert_eq!(
+                slot_of(queue.skip_before(slot)),
+                skip_before,
+                "skip before {slot:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_repeat_mode_this_version_lacks_reads_as_off() {
+    for (index, repeat) in [
+        (0, Repeat::Off),
+        (1, Repeat::All),
+        (2, Repeat::One),
+        (3, Repeat::Off),
+        (-1, Repeat::Off),
+    ] {
+        assert_eq!(Repeat::from_index(index), repeat, "{index}");
+    }
+    for repeat in Repeat::ALL {
+        assert_eq!(Repeat::from_index(repeat.index() as i64), repeat);
+    }
+}
+
+#[test]
+fn the_repeat_button_steps_through_every_mode() {
+    let mut repeat = Repeat::Off;
+    let mut seen = Vec::new();
+    for _ in Repeat::ALL {
+        seen.push(repeat);
+        repeat = repeat.next();
+    }
+    assert_eq!(repeat, Repeat::Off);
+    assert_eq!(seen, Repeat::ALL);
 }
 
 proptest! {
@@ -353,6 +441,7 @@ proptest! {
     fn the_queue_and_its_cursor_survive_a_save_and_load(
         ops in prop::collection::vec(arb_op(), 0..30),
         shuffle: Option<bool>,
+        repeat in prop::sample::select(&Repeat::ALL[..]),
         cursor: Index,
         resume_ms: u32,
     ) {
@@ -369,6 +458,7 @@ proptest! {
         }
         model.apply(&Op::SetCurrent(cursor), &mut queue);
         model.apply(&Op::SetResume(cursor, Duration::from_millis(resume_ms.into())), &mut queue);
+        model.apply(&Op::SetRepeat(repeat), &mut queue);
         save_cursor(&conn, &queue).unwrap();
         let mut loaded = load(&conn).unwrap();
         let entries = |queue: &Queue| -> Vec<(i64, PathBuf)> {
@@ -377,6 +467,7 @@ proptest! {
         let current = |queue: &Queue| queue.current().map(|item| item.track_id);
         prop_assert_eq!(current(&loaded), current(&queue));
         prop_assert_eq!(loaded.shuffle(), queue.shuffle());
+        prop_assert_eq!(loaded.repeat(), queue.repeat());
         prop_assert_eq!(loaded.resume_position(), queue.resume_position());
         if queue.shuffle() && queue.current().is_some() {
             prop_assert_eq!(loaded.current_index(), Some(0));

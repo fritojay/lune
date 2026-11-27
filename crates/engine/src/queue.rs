@@ -30,10 +30,16 @@ impl QueueEntry {
 }
 
 pub trait PlayQueue: Send + Sync {
-    /// The entry that plays after `id`, or `None` at the end of the queue
-    /// (or if `id` is no longer in the queue).
+    /// The entry that plays when `id` ends (`id` itself to repeat it), or
+    /// `None` at the end of the queue (or if `id` is no longer in the queue).
     fn next_after(&self, id: EntryId) -> Option<QueueEntry>;
     fn previous_before(&self, id: EntryId) -> Option<QueueEntry>;
+
+    /// The entry skipping forward from `id` goes to, which is never `id`
+    /// repeated.
+    fn skip_after(&self, id: EntryId) -> Option<QueueEntry> {
+        self.next_after(id)
+    }
 }
 
 #[derive(Debug, Default)]

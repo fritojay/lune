@@ -51,6 +51,10 @@ pub struct Status {
     pub state: PlaybackState,
     /// The entry whose audio is being played (not decoded).
     pub entry: Option<EntryId>,
+    /// Goes up each time playback of an entry starts, not when it seeks, so
+    /// an entry played again (repeated) is told apart from its last
+    /// playthrough. 0 while stopped.
+    pub playthrough: u64,
     pub position: Duration,
     pub duration: Option<Duration>,
     /// Callbacks that ran out of audio while more was expected.
@@ -203,6 +207,7 @@ impl Player {
         let stopped = Status {
             state: PlaybackState::Stopped,
             entry: None,
+            playthrough: 0,
             position: Duration::ZERO,
             duration: None,
             underruns,
@@ -235,6 +240,7 @@ impl Player {
         Status {
             state,
             entry: Some(b.entry.id),
+            playthrough: b.playthrough,
             position,
             duration: b.duration,
             underruns,
