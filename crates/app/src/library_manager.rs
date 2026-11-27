@@ -122,7 +122,14 @@ impl cxx_qt::Initialize for qobject::LibraryManager {
                 qt_thread.queue(move |mut manager| set!(manager, error, error_changed, message));
         });
         self.as_mut().rust_mut().busy = true;
-        self.as_mut().rust_mut().error = QString::from(&load_error.unwrap_or_default());
+        let errors: Vec<&str> = [
+            load_error.as_deref(),
+            crate::config().lock_warning.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        self.as_mut().rust_mut().error = QString::from(&errors.join("\n\n"));
         self.as_mut().rust_mut().native_folder_dialog = !in_flatpak(Path::new("/.flatpak-info"));
     }
 }

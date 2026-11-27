@@ -49,6 +49,9 @@ pub struct Config {
     pub window_state_path: PathBuf,
     pub bench: bool,
     pub started: Instant,
+    /// Why the library couldn't be locked, when it couldn't, for the window
+    /// to show.
+    pub lock_warning: Option<String>,
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -62,6 +65,7 @@ pub fn config() -> &'static Config {
         window_state_path: PathBuf::new(),
         bench: false,
         started: Instant::now(),
+        lock_warning: None,
     })
 }
 
@@ -100,7 +104,42 @@ fn config_from(args: Args, started: Instant) -> anyhow::Result<Config> {
         config_path,
         bench,
         started,
+        lock_warning: None,
     })
+}
+
+/// How the app starts, from its attempt to lock the library.
+#[derive(Debug, PartialEq, Eq)]
+enum Startup {
+    Normal,
+    /// Another Lune has the library: say so instead of opening it.
+    InUse,
+    /// The lock couldn't be taken (e.g. a filesystem without locks), so a
+    /// second Lune would go unnoticed. The app runs anyway, and warns.
+    Unlocked(String),
+}
+
+fn startup(
+    locked: lune_core::Result<lune_core::LibraryLock>,
+) -> (Option<lune_core::LibraryLock>, Startup) {
+    match locked {
+        Ok(lock) => (Some(lock), Startup::Normal),
+        Err(err @ lune_core::CoreError::LibraryInUse(_)) => {
+            tracing::warn!("{err}");
+            (None, Startup::InUse)
+        }
+        Err(err) => {
+            tracing::warn!(%err, "running without the library lock");
+            (
+                None,
+                Startup::Unlocked(format!(
+                    "Lune couldn't lock its library ({err}), so it can't tell whether another \
+                     Lune is open. Don't run two at once: they would overwrite each other's \
+                     queue and playlists."
+                )),
+            )
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -121,23 +160,15 @@ fn run(started: Instant) -> anyhow::Result<()> {
         Err(err) if !logging::HAS_CONSOLE => bail!("{err}"),
         Err(err) => err.exit(),
     };
-    if CONFIG.set(config_from(args, started)?).is_err() {
+    let mut config = config_from(args, started)?;
+    let (_lock, startup) = startup(lune_core::lock_library(&config.db_path));
+    let in_use = startup == Startup::InUse;
+    if let Startup::Unlocked(warning) = startup {
+        config.lock_warning = Some(warning);
+    }
+    if CONFIG.set(config).is_err() {
         bail!("configuration was read before it was set");
     }
-
-    let (_lock, in_use) = match lune_core::lock_library(&config().db_path) {
-        Ok(lock) => (Some(lock), false),
-        Err(err @ lune_core::CoreError::LibraryInUse(_)) => {
-            tracing::warn!("{err}");
-            (None, true)
-        }
-        // Run anyway: opening the library reports what is wrong with its
-        // folder, in the window.
-        Err(err) => {
-            tracing::warn!(%err, "running without the library lock");
-            (None, false)
-        }
-    };
 
     let mut app = QGuiApplication::new();
     let Some(app_ref) = app.as_mut() else {

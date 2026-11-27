@@ -55,3 +55,22 @@ proptest! {
         );
     }
 }
+
+#[test]
+fn a_held_library_says_so_and_one_that_cant_be_locked_runs_with_a_warning() {
+    let dir = crate::test_util::TempDir::new();
+    let db = dir.path().join("library.sqlite3");
+    let (lock, normal) = startup(lune_core::lock_library(&db));
+    assert!(lock.is_some());
+    assert_eq!(normal, Startup::Normal);
+    assert_eq!(startup(lune_core::lock_library(&db)).1, Startup::InUse);
+
+    // A file where the library's folder should be: no lock file can be made.
+    let blocked = dir.write("not-a-folder", b"").join("library.sqlite3");
+    let (lock, unlocked) = startup(lune_core::lock_library(&blocked));
+    assert!(lock.is_none());
+    assert!(
+        matches!(&unlocked, Startup::Unlocked(warning) if warning.contains("two at once")),
+        "{unlocked:?}"
+    );
+}
