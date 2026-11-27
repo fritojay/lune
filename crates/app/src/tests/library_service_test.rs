@@ -881,3 +881,31 @@ fn a_watched_change_waits_for_the_running_scan_instead_of_stopping_it() {
     });
     assert_eq!(size, Some(4));
 }
+
+#[test]
+fn tracks_a_stopped_scan_marked_missing_show_up_as_missing() {
+    let (dir, a, _) = two_configured_folders();
+    prescanned(&dir, &["a", "b"]);
+    dir.remove_dir("a/Artist");
+    // Its only file to read fails, so the stopped scan adds nothing.
+    dir.write("a/unreadable.wav", b"not audio");
+    let held = a.clone();
+    let (h, release) = start_holding(dir, move |status| {
+        scanning(status, &held) && status.contains("reading tags")
+    });
+    assert_eq!(h.loaded_size(), 4);
+    let a_shown = a.clone();
+    h.wait_for(|u| {
+        matches!(&u, Update::Status(Some(s)) if scanning(s, &a_shown) && s.contains("reading tags"))
+            .then_some(())
+    });
+    h.service.send(Job::ForgetMissing(Vec::new()));
+    drop(release);
+
+    let size = h.wait_for(|u| match u {
+        Update::Library(catalog) => Some(catalog.len()),
+        Update::Status(None) => panic!("idle with the missing tracks still shown"),
+        _ => None,
+    });
+    assert_eq!(size, 1, "only b's track");
+}

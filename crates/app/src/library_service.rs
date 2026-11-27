@@ -15,6 +15,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use lune_core::{
     Catalog, FolderWatcher, Library, ListId, MissingTrack, Playlist, Queue, ScanMode, ScanProgress,
+    ScanReport,
 };
 
 /// How long changes must settle before a watched folder is rescanned.
@@ -126,10 +127,13 @@ impl LibraryService {
     pub fn send(&self, job: Job) {
         // The watcher's rescans wait their turn, so changes on disk can't
         // keep a scan from finishing.
-        if !matches!(job, Job::Rescan(_)) {
+        let interrupts = !matches!(job, Job::Rescan(_));
+        let _ = self.jobs.send(job);
+        // Set after sending: set before, the worker could clear it while
+        // this job isn't in the channel yet, and the scan wouldn't stop.
+        if interrupts {
             self.interrupt.store(true, Ordering::Relaxed);
         }
-        let _ = self.jobs.send(job);
     }
 }
 
@@ -437,7 +441,7 @@ impl Worker {
             );
             match scanned {
                 Ok(report) if report.stopped => {
-                    changed |= report.added + report.updated > 0;
+                    changed |= library_changed(&report);
                     let rest = std::iter::once(dir).chain(dirs.by_ref());
                     let unfinished = self.unfinished.get_or_insert((Vec::new(), mode));
                     unfinished.0.extend(rest);
@@ -447,12 +451,7 @@ impl Worker {
                     break;
                 }
                 Ok(report) => {
-                    changed |= report.added
-                        + report.updated
-                        + report.missing
-                        + report.restored
-                        + report.dated
-                        > 0;
+                    changed |= library_changed(&report);
                     // A quick scan doesn't list every directory, so only a
                     // thorough one counts all that it skips.
                     if mode == ScanMode::Thorough && self.folders.contains(&dir) {
@@ -551,6 +550,10 @@ fn left_out(links: usize, non_utf8: usize) -> Option<String> {
     })
     .collect();
     (!parts.is_empty()).then(|| format!("Not added: {}.", parts.join(" and ")))
+}
+
+fn library_changed(report: &ScanReport) -> bool {
+    report.added + report.updated + report.missing + report.restored + report.dated > 0
 }
 
 fn progress_status(folder: &str, progress: ScanProgress) -> String {

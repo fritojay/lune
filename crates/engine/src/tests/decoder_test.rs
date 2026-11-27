@@ -317,7 +317,7 @@ fn play_from_a_position_plays_only_the_rest_of_the_track() {
 /// (repeat one); after that, by the next one, wrapping past the last when
 /// `wrap` (repeat all). Skips never repeat.
 struct Repeating {
-    entries: Vec<QueueEntry>,
+    entries: Mutex<Vec<QueueEntry>>,
     repeats: Mutex<usize>,
     wrap: bool,
 }
@@ -329,20 +329,29 @@ impl Repeating {
             .map(|(i, p)| QueueEntry::new(EntryId(i), p))
             .collect();
         Arc::new(Self {
-            entries,
+            entries: Mutex::new(entries),
             repeats: Mutex::new(repeats),
             wrap,
         })
     }
 
+    fn entry(&self, index: usize) -> QueueEntry {
+        self.entries.lock().unwrap()[index].clone()
+    }
+
+    fn remove(&self, id: EntryId) {
+        self.entries.lock().unwrap().retain(|e| e.id != id);
+    }
+
     fn neighbour(&self, id: EntryId, step: isize) -> Option<QueueEntry> {
-        let i = self.entries.iter().position(|e| e.id == id)?;
-        let len = self.entries.len() as isize;
+        let entries = self.entries.lock().unwrap();
+        let i = entries.iter().position(|e| e.id == id)?;
+        let len = entries.len() as isize;
         let j = i as isize + step;
         let j = if self.wrap { j.rem_euclid(len) } else { j };
         usize::try_from(j)
             .ok()
-            .and_then(|j| self.entries.get(j))
+            .and_then(|j| entries.get(j))
             .cloned()
     }
 }
@@ -352,7 +361,13 @@ impl PlayQueue for Repeating {
         let mut repeats = self.repeats.lock().unwrap();
         if *repeats > 0 {
             *repeats -= 1;
-            return self.entries.iter().find(|e| e.id == id).cloned();
+            return self
+                .entries
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|e| e.id == id)
+                .cloned();
         }
         drop(repeats);
         self.neighbour(id, 1)
@@ -400,7 +415,7 @@ fn a_repeated_track_plays_again_whole_as_a_new_playthrough() {
     let mut sim = Sim::new(queue.clone(), 4096);
     assert!(
         sim.decoder
-            .handle(Command::Play(queue.entries[0].clone(), Duration::ZERO))
+            .handle(Command::Play(queue.entry(0), Duration::ZERO))
     );
     assert_eq!(heard(&mut sim), [(EntryId(0), 1), (EntryId(0), 2)]);
     assert_eq!(
@@ -419,7 +434,7 @@ fn next_moves_on_from_a_repeated_track() {
     let mut sim = Sim::new(queue.clone(), 4096);
     assert!(
         sim.decoder
-            .handle(Command::Play(queue.entries[0].clone(), Duration::ZERO))
+            .handle(Command::Play(queue.entry(0), Duration::ZERO))
     );
     assert!(sim.decoder.handle(Command::Next));
     let current = sim.decoder.current.as_ref().map(|c| c.entry.id);
@@ -436,9 +451,34 @@ fn a_repeating_queue_of_unplayable_tracks_stops_after_one_lap() {
     let mut sim = Sim::new(queue.clone(), 4096);
     assert!(
         sim.decoder
-            .handle(Command::Play(queue.entries[0].clone(), Duration::ZERO))
+            .handle(Command::Play(queue.entry(0), Duration::ZERO))
     );
     for _ in 0..4 {
+        sim.pump();
+    }
+    assert!(sim.finished());
+}
+
+#[test]
+fn a_repeating_queue_of_unplayable_tracks_stops_after_one_lap_when_its_first_is_removed_midway() {
+    let dir = TempDir::new();
+    let missing = (0..MAX_OPEN_ATTEMPTS * 2)
+        .map(|i| dir.join(&format!("missing-{i}.wav")))
+        .collect();
+    let queue = Repeating::new(missing, 0, true);
+    let mut sim = Sim::new(queue.clone(), 4096);
+    let first = queue.entry(0);
+    assert!(
+        sim.decoder
+            .handle(Command::Play(first.clone(), Duration::ZERO))
+    );
+    assert!(
+        !sim.finished(),
+        "the lap is longer than one round of attempts"
+    );
+    queue.remove(first.id);
+    assert!(sim.decoder.handle(Command::QueueChanged));
+    for _ in 0..10 {
         sim.pump();
     }
     assert!(sim.finished());
@@ -463,7 +503,7 @@ fn a_seek_stays_in_its_playthrough_and_a_play_from_a_position_starts_one() {
             .map(|b| b.playthrough)
             .collect::<Vec<_>>()
     };
-    let entry = queue.entries[0].clone();
+    let entry = queue.entry(0);
     assert!(
         sim.decoder
             .handle(Command::Play(entry.clone(), Duration::ZERO))

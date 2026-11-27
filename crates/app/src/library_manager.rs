@@ -215,7 +215,6 @@ impl qobject::LibraryManager {
     }
 }
 
-/// Sets `list` to `new`. Returns whether it changed.
 fn shown_path(path: &Path) -> String {
     path.display().to_string()
 }

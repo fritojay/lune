@@ -233,7 +233,12 @@ impl Decoder {
                     }
                 }
             }
-            Command::QueueChanged => self.revalidate_next(),
+            Command::QueueChanged => {
+                // The lap's first entry may have been removed, and a lap that
+                // waits for it would never end.
+                self.failed_since = None;
+                self.revalidate_next();
+            }
         }
         true
     }
