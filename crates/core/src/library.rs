@@ -42,6 +42,25 @@ impl Library {
         scan::scan(&mut self.conn, root, mode, &mut progress)
     }
 
+    /// [`Library::scan`] that stops soon after `stop` returns true; see
+    /// [`ScanReport::stopped`].
+    pub fn scan_until(
+        &mut self,
+        root: &Path,
+        mode: ScanMode,
+        mut progress: impl FnMut(ScanProgress),
+        stop: impl Fn() -> bool,
+    ) -> Result<ScanReport> {
+        scan::scan_until(
+            &mut self.conn,
+            root,
+            mode,
+            crate::tags::read_track_meta,
+            &mut progress,
+            &stop,
+        )
+    }
+
     /// Removes tracks under none of `folders` (see [`crate::Settings`]).
     /// Returns how many, or `None` when a folder is unavailable and nothing
     /// was removed.

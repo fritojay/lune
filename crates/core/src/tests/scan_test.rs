@@ -1520,3 +1520,81 @@ fn a_forgotten_track_whose_file_returns_is_added_anew() {
     assert_eq!((report.added, report.restored), (1, 0), "{report:?}");
     assert_eq!(present_titles(&conn), ["song"]);
 }
+
+fn titled(path: &Path) -> Result<TrackMeta> {
+    let mut m = meta("A", "Album", 1);
+    m.title = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+    Ok(m)
+}
+
+fn stored_dir_rows(conn: &Connection) -> Vec<(String, i64)> {
+    conn.prepare("SELECT path, mtime_ns FROM dirs ORDER BY path")
+        .unwrap()
+        .query_map([], |r| Ok((r.get("path")?, r.get("mtime_ns")?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
+#[test]
+fn a_scan_stopped_while_listing_changes_nothing_and_marks_nothing_missing() {
+    let dir = TempDir::new();
+    dir.touch("a/1.mp3");
+    dir.touch("b/2.mp3");
+    let mut conn = db::open_in_memory().unwrap();
+    scan_with(&mut conn, dir.path(), ScanMode::Thorough, titled).unwrap();
+    let (tracks, dirs) = (query::track_list(&conn).unwrap(), stored_dir_rows(&conn));
+    dir.remove("b/2.mp3");
+    dir.touch("c/3.mp3");
+
+    let report = scan_until(
+        &mut conn,
+        dir.path(),
+        ScanMode::Thorough,
+        titled,
+        &mut |_| {},
+        &|| true,
+    )
+    .unwrap();
+    assert!(report.stopped);
+    assert_eq!(query::track_list(&conn).unwrap(), tracks);
+    assert!(missing_titles(&conn).is_empty());
+    assert_eq!(stored_dir_rows(&conn), dirs);
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(48))]
+
+    /// Wherever a rescan stops, listing or reading, a quick scan after it
+    /// leaves the library as a rescan that ran to the end.
+    #[test]
+    fn a_stopped_rescan_and_a_quick_one_after_it_end_as_one_full_rescan(
+        before in proptest::collection::btree_set((0..4u8, 0..5u8), 0..12),
+        after in proptest::collection::btree_set((0..4u8, 0..5u8), 0..12),
+        stop_after in 0..30usize,
+    ) {
+        let rescanned = |stop_after: Option<usize>| {
+            let dir = TempDir::new();
+            let name = |(d, f): &(u8, u8)| format!("d{d}/{f}.mp3");
+            before.iter().for_each(|file| { dir.touch(&name(file)); });
+            let mut conn = db::open_in_memory().unwrap();
+            scan_with(&mut conn, dir.path(), ScanMode::Thorough, titled).unwrap();
+            before.difference(&after).for_each(|file| dir.remove(&name(file)));
+            after.difference(&before).for_each(|file| { dir.touch(&name(file)); });
+            match stop_after {
+                Some(stop_after) => {
+                    let asked = AtomicUsize::new(0);
+                    let stop = || asked.fetch_add(1, Ordering::Relaxed) >= stop_after;
+                    scan_until(&mut conn, dir.path(), ScanMode::Thorough, titled, &mut |_| {}, &stop)
+                        .unwrap();
+                    scan_with(&mut conn, dir.path(), ScanMode::Quick, titled).unwrap();
+                }
+                None => {
+                    scan_with(&mut conn, dir.path(), ScanMode::Thorough, titled).unwrap();
+                }
+            }
+            (present_titles(&conn), missing_titles(&conn))
+        };
+        proptest::prop_assert_eq!(rescanned(Some(stop_after)), rescanned(None));
+    }
+}

@@ -765,3 +765,119 @@ fn what_a_full_scan_left_out_is_listed_with_its_folder_not_reported_as_an_error(
     });
     assert_eq!(left_out, None);
 }
+
+/// Starts the service on `dir`, holding the library thread at the first
+/// status that `hold` accepts until the returned sender sends (or drops).
+fn start_holding(
+    dir: TempDir,
+    hold: impl Fn(&str) -> bool + Send + 'static,
+) -> (Harness, Sender<()>) {
+    let (tx, updates) = mpsc::channel();
+    let (release, released) = mpsc::channel::<()>();
+    let released = Mutex::new(Some(released));
+    let service = LibraryService::start(
+        Harness::db(&dir),
+        Store::load(Harness::config(&dir)).startup_folders(),
+        None,
+        RESCAN_EVERY,
+        SystemTime::now,
+        move |u| {
+            let held = matches!(&u, Update::Status(Some(status)) if hold(status));
+            let _ = tx.send(u);
+            if held && let Some(released) = released.lock().unwrap().take() {
+                let _ = released.recv();
+            }
+        },
+    );
+    let harness = Harness {
+        dir,
+        service,
+        updates,
+    };
+    (harness, release)
+}
+
+/// A library of folders `a` (three tracks) and `b` (one), both configured.
+fn two_configured_folders() -> (TempDir, PathBuf, PathBuf) {
+    let dir = two_folders();
+    dir.wav("a/Artist/3.wav");
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    Settings {
+        library_folders: vec![a.clone(), b.clone()],
+        ..Settings::default()
+    }
+    .save(&Harness::config(&dir))
+    .unwrap();
+    (dir, a, b)
+}
+
+fn scanning(status: &str, folder: &Path) -> bool {
+    status.starts_with(&format!("Scanning {}:", folder.display()))
+}
+
+#[test]
+fn removing_a_folder_stops_its_scan_and_the_other_folders_are_scanned_after() {
+    let (dir, a, b) = two_configured_folders();
+    let held = a.clone();
+    let (h, release) = start_holding(dir, move |status| {
+        scanning(status, &held) && status.contains("reading tags")
+    });
+    let (a_shown, b_shown) = (a.clone(), b.clone());
+    h.wait_for(|u| {
+        matches!(&u, Update::Status(Some(s)) if scanning(s, &a_shown) && s.contains("reading tags"))
+            .then_some(())
+    });
+    h.service.send(Job::RemoveFolder(a.clone()));
+    drop(release);
+
+    let folders = h.wait_for(|u| match u {
+        Update::Status(Some(s)) if scanning(&s, &b_shown) => {
+            panic!("{} was scanned before the removal: {s}", b_shown.display())
+        }
+        Update::Folders(folders) => Some(folders.into_iter().map(|f| f.path).collect::<Vec<_>>()),
+        _ => None,
+    });
+    assert_eq!(folders, std::slice::from_ref(&b));
+    h.wait_for(|u| match u {
+        Update::Status(Some(s)) if scanning(&s, &a) => panic!("the removed folder resumed: {s}"),
+        Update::Status(Some(s)) => scanning(&s, &b).then_some(()),
+        _ => None,
+    });
+    let size = h.wait_for(|u| match u {
+        Update::Library(catalog) => Some(catalog.len()),
+        Update::Status(Some(s)) if scanning(&s, &a) => panic!("the removed folder resumed: {s}"),
+        _ => None,
+    });
+    assert_eq!(size, 1, "only b's track");
+    h.idle();
+}
+
+#[test]
+fn a_watched_change_waits_for_the_running_scan_instead_of_stopping_it() {
+    let (dir, a, b) = two_configured_folders();
+    let held = a.clone();
+    let (h, release) = start_holding(dir, move |status| {
+        scanning(status, &held) && status.contains("reading tags")
+    });
+    let a_shown = a.clone();
+    h.wait_for(|u| {
+        matches!(&u, Update::Status(Some(s)) if scanning(s, &a_shown) && s.contains("reading tags"))
+            .then_some(())
+    });
+    h.service.send(Job::Rescan(vec![b.clone()]));
+    drop(release);
+
+    let mut size = None;
+    h.wait_for(|u| match u {
+        Update::Status(Some(s)) if scanning(&s, &a) && s.contains("listing files") => {
+            panic!("the scan of a was stopped and started over: {s}")
+        }
+        Update::Library(catalog) => {
+            size = Some(catalog.len());
+            None
+        }
+        Update::Status(None) => Some(()),
+        _ => None,
+    });
+    assert_eq!(size, Some(4));
+}

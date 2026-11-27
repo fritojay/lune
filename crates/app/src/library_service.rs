@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::mem::{self, Discriminant};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -72,6 +74,9 @@ pub struct Folder {
 
 pub struct LibraryService {
     jobs: Sender<Job>,
+    /// Set with each job the user asked for, so a running scan stops for it
+    /// and goes on afterwards.
+    interrupt: Arc<AtomicBool>,
 }
 
 impl LibraryService {
@@ -91,6 +96,8 @@ impl LibraryService {
     ) -> Self {
         let (jobs, rx) = mpsc::channel();
         let watcher_jobs = jobs.clone();
+        let interrupt = Arc::new(AtomicBool::new(false));
+        let worker_interrupt = Arc::clone(&interrupt);
         let spawned = std::thread::Builder::new()
             .name("lune-library".into())
             .spawn(move || {
@@ -105,16 +112,23 @@ impl LibraryService {
                     jobs: watcher_jobs,
                     notify: Box::new(notify),
                     skipped: HashMap::new(),
+                    interrupt: worker_interrupt,
+                    unfinished: None,
                 };
                 worker.run(folders, rx);
             });
         if let Err(err) = spawned {
             tracing::error!(%err, "could not start the library thread");
         }
-        Self { jobs }
+        Self { jobs, interrupt }
     }
 
     pub fn send(&self, job: Job) {
+        // The watcher's rescans wait their turn, so changes on disk can't
+        // keep a scan from finishing.
+        if !matches!(job, Job::Rescan(_)) {
+            self.interrupt.store(true, Ordering::Relaxed);
+        }
         let _ = self.jobs.send(job);
     }
 }
@@ -131,6 +145,9 @@ struct Worker {
     notify: Box<dyn Fn(Update) + Send>,
     /// Per folder, the (links, non-UTF-8 names) its last full scan skipped.
     skipped: HashMap<PathBuf, (usize, usize)>,
+    interrupt: Arc<AtomicBool>,
+    /// What a scan stopped for a job left to do, resumed once jobs are done.
+    unfinished: Option<(Vec<PathBuf>, ScanMode)>,
 }
 
 impl Worker {
@@ -144,15 +161,23 @@ impl Worker {
                 if self.scan(folders, ScanMode::Quick) {
                     self.publish_library();
                 }
-                (self.notify)(Update::Status(None));
+                self.status_idle();
                 continue;
             };
-            let first = match jobs.recv_timeout(wait) {
-                Ok(job) => job,
+            let wait = if self.unfinished.is_some() {
+                Duration::ZERO
+            } else {
+                wait
+            };
+            let mut batch = match jobs.recv_timeout(wait) {
+                Ok(job) => vec![job],
+                Err(RecvTimeoutError::Timeout) if self.unfinished.is_some() => Vec::new(),
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return,
             };
-            let mut batch = vec![first];
+            // Cleared before the jobs run, so a job sent meanwhile stops
+            // their scans in turn.
+            self.interrupt.store(false, Ordering::Relaxed);
             batch.extend(jobs.try_iter());
             let mut changed = false;
             let mut forgot = false;
@@ -172,12 +197,25 @@ impl Worker {
             }
             // Both are thorough: a watched change may be a file rewritten in
             // place, which leaves its directory's mtime alone.
-            changed |= self.scan(rescan, ScanMode::Thorough);
+            if let Some((mut dirs, mode)) = self.unfinished.take() {
+                dirs.retain(|dir| !rescan.contains(dir));
+                changed |= self.scan(rescan, ScanMode::Thorough);
+                changed |= self.scan(dirs, mode);
+            } else {
+                changed |= self.scan(rescan, ScanMode::Thorough);
+            }
             if changed {
                 self.publish_library();
             } else if forgot {
                 self.publish_missing();
             }
+            self.status_idle();
+        }
+    }
+
+    /// Says the thread is idle, unless a stopped scan is still to go on.
+    fn status_idle(&self) {
+        if self.unfinished.is_none() {
             (self.notify)(Update::Status(None));
         }
     }
@@ -235,7 +273,7 @@ impl Worker {
             self.publish_library();
         }
         self.prune_thumbnails();
-        (self.notify)(Update::Status(None));
+        self.status_idle();
     }
 
     fn prune_thumbnails(&self) {
@@ -356,7 +394,8 @@ impl Worker {
     }
 
     /// Scans `dirs` (each limited to a configured folder). Returns whether
-    /// the library changed.
+    /// the library changed. Stopped for a job, it leaves the rest to
+    /// `unfinished`.
     fn scan(&mut self, dirs: Vec<PathBuf>, mode: ScanMode) -> bool {
         let dirs = lune_core::collapse_nested(
             dirs.into_iter()
@@ -366,29 +405,47 @@ impl Worker {
         let mut changed = false;
         let mut recorded = false;
         let mut skipped = Vec::new();
-        for dir in dirs {
+        let mut dirs = dirs.into_iter();
+        while let Some(dir) = dirs.next() {
             let Some(library) = &mut self.library else {
                 return false;
             };
             let name = dir.display().to_string();
             let notify = &self.notify;
+            let interrupt = &self.interrupt;
             notify(Update::Status(Some(format!(
                 "Scanning {name}: listing files"
             ))));
             let mut last_sent: Option<(Instant, Discriminant<ScanProgress>)> = None;
-            let scanned = library.scan(&dir, mode, |progress| {
-                let now = Instant::now();
-                let phase = mem::discriminant(&progress);
-                // A new phase is sent at once, so the total to read shows up.
-                if last_sent.is_some_and(|(sent, last_phase)| {
-                    last_phase == phase && now.duration_since(sent) < PROGRESS_EVERY
-                }) {
-                    return;
-                }
-                last_sent = Some((now, phase));
-                notify(Update::Status(Some(progress_status(&name, progress))));
-            });
+            let stop = || interrupt.load(Ordering::Relaxed);
+            let scanned = library.scan_until(
+                &dir,
+                mode,
+                |progress| {
+                    let now = Instant::now();
+                    let phase = mem::discriminant(&progress);
+                    // A new phase is sent at once, so the total to read shows up.
+                    if last_sent.is_some_and(|(sent, last_phase)| {
+                        last_phase == phase && now.duration_since(sent) < PROGRESS_EVERY
+                    }) {
+                        return;
+                    }
+                    last_sent = Some((now, phase));
+                    notify(Update::Status(Some(progress_status(&name, progress))));
+                },
+                stop,
+            );
             match scanned {
+                Ok(report) if report.stopped => {
+                    changed |= report.added + report.updated > 0;
+                    let rest = std::iter::once(dir).chain(dirs.by_ref());
+                    let unfinished = self.unfinished.get_or_insert((Vec::new(), mode));
+                    unfinished.0.extend(rest);
+                    if mode == ScanMode::Thorough {
+                        unfinished.1 = ScanMode::Thorough;
+                    }
+                    break;
+                }
                 Ok(report) => {
                     changed |= report.added
                         + report.updated

@@ -65,6 +65,10 @@ pub struct ScanReport {
     pub walk_errors: usize,
     /// Directories a quick scan skipped as unchanged.
     pub dirs_skipped: usize,
+    /// The scan was asked to stop before it finished. A stop while listing
+    /// changes nothing; one while reading tags keeps what was read, and the
+    /// next scan lists the unfinished directories again.
+    pub stopped: bool,
     pub walk_time: Duration,
     pub total_time: Duration,
 }
@@ -111,6 +115,19 @@ pub(crate) fn scan_using(
     reader: impl Fn(&Path) -> Result<TrackMeta> + Sync,
     progress: &mut dyn FnMut(ScanProgress),
 ) -> Result<ScanReport> {
+    scan_until(conn, root, mode, reader, progress, &|| false)
+}
+
+/// [`scan_using`] that stops soon after `stop` returns true (see
+/// [`ScanReport::stopped`]).
+pub(crate) fn scan_until(
+    conn: &mut Connection,
+    root: &Path,
+    mode: ScanMode,
+    reader: impl Fn(&Path) -> Result<TrackMeta> + Sync,
+    progress: &mut dyn FnMut(ScanProgress),
+    stop: &dyn Fn() -> bool,
+) -> Result<ScanReport> {
     let started = Instant::now();
     let now = SystemTime::now();
     let root = std::fs::canonicalize(root).map_err(|source| CoreError::Io {
@@ -136,8 +153,15 @@ pub(crate) fn scan_using(
             *mtime = 0;
         }
     }
-    let walked = walk(&root, &stored_dirs, mode, now, &mut report, progress);
+    let walked = walk(&root, &stored_dirs, mode, now, &mut report, progress, stop);
     report.walk_time = started.elapsed();
+    // A walk cut short didn't see every file, so it can't tell which are missing.
+    if walked.stopped {
+        report.stopped = true;
+        report.total_time = started.elapsed();
+        tracing::info!(?report, "scan stopped while listing");
+        return Ok(report);
+    }
     report.dirs_skipped = walked.skipped.len();
 
     let mut to_read = Vec::new();
@@ -258,6 +282,7 @@ pub(crate) fn scan_using(
         &mut checkpoints,
         &mut report,
         progress,
+        stop,
     )?;
 
     report.total_time = started.elapsed();
@@ -425,6 +450,8 @@ struct Walked {
     listed: Vec<(String, i64)>,
     /// The newest mtime of anything stat'ed.
     newest: Option<SystemTime>,
+    /// Asked to stop before every directory was reached.
+    stopped: bool,
 }
 
 /// Paths the walk failed to read, so their DB rows must be left alone.
@@ -450,6 +477,7 @@ fn walk(
     now: SystemTime,
     report: &mut ScanReport,
     progress: &mut dyn FnMut(ScanProgress),
+    stop: &dyn Fn() -> bool,
 ) -> Walked {
     let mut children: HashMap<&Path, Vec<&Path>> = HashMap::new();
     for dir in stored.keys() {
@@ -464,6 +492,10 @@ fn walk(
     let mut reached: Vec<(String, Option<SystemTime>)> = Vec::new();
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
+        if stop() {
+            walked.stopped = true;
+            break;
+        }
         let meta = match std::fs::symlink_metadata(&dir) {
             Ok(meta) => meta,
             // A stored subdirectory that is gone: its tracks are missing.
@@ -727,6 +759,7 @@ fn read_and_write(
     checkpoints: &mut Checkpoints,
     report: &mut ScanReport,
     progress: &mut dyn FnMut(ScanProgress),
+    stop: &dyn Fn() -> bool,
 ) -> Result<()> {
     let total = files.len();
     if total == 0 {
@@ -757,6 +790,11 @@ fn read_and_write(
             });
             if batch.len() >= BATCH_SIZE {
                 write_batch(conn, &mut batch, checkpoints, report)?;
+            }
+            // Dropping the receiver stops the reader. What it read is saved.
+            if stop() {
+                report.stopped = true;
+                break;
             }
         }
         write_batch(conn, &mut batch, checkpoints, report)
