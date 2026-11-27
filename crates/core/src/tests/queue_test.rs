@@ -459,16 +459,14 @@ proptest! {
         model.apply(&Op::SetCurrent(cursor), &mut queue);
         model.apply(&Op::SetResume(cursor, Duration::from_millis(resume_ms.into())), &mut queue);
         model.apply(&Op::SetRepeat(repeat), &mut queue);
-        save_cursor(&conn, &queue).unwrap();
+        save_cursor(&conn, &queue.cursor_state()).unwrap();
         let mut loaded = load(&conn).unwrap();
         let entries = |queue: &Queue| -> Vec<(i64, PathBuf)> {
             queue.items().iter().map(|i| (i.track_id, i.path.clone())).collect()
         };
         let current = |queue: &Queue| queue.current().map(|item| item.track_id);
         prop_assert_eq!(current(&loaded), current(&queue));
-        prop_assert_eq!(loaded.shuffle(), queue.shuffle());
-        prop_assert_eq!(loaded.repeat(), queue.repeat());
-        prop_assert_eq!(loaded.resume_position(), queue.resume_position());
+        prop_assert_eq!(loaded.cursor_state(), queue.cursor_state());
         if queue.shuffle() && queue.current().is_some() {
             prop_assert_eq!(loaded.current_index(), Some(0));
         }

@@ -1,5 +1,5 @@
 use super::*;
-use lune_core::{Grouping, SortColumn, TrackFilter};
+use lune_core::{Grouping, Repeat, SortColumn, TrackFilter};
 
 use crate::test_util::list_track;
 
@@ -191,4 +191,58 @@ fn an_error_reported_on_any_thread_reaches_every_error_listener() {
         .join()
         .unwrap();
     assert_eq!(rx.try_iter().collect::<Vec<_>>(), [0, 1]);
+}
+
+#[test]
+fn the_queue_is_unlocked_while_a_save_writes_what_it_copied() {
+    let queue = Mutex::new(Queue::default());
+    lock(&queue).set_repeat(Repeat::All);
+    let expected = lock(&queue).cursor_state();
+    let mut written = None;
+    save_from_queue(&queue, Queue::cursor_state, |cursor| {
+        assert!(
+            queue.try_lock().is_ok(),
+            "the queue is locked during the write"
+        );
+        written = Some(*cursor);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(written, Some(expected));
+    save_from_queue(&queue, Queue::clone, |_| {
+        assert!(
+            queue.try_lock().is_ok(),
+            "the queue is locked during the write"
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn only_a_first_busy_save_at_a_track_change_fails_quietly() {
+    // (save, busy, quiet): each row follows the ones before it.
+    let rows = [
+        (Save::TrackChanged, true, true),
+        (Save::TrackChanged, true, false),
+        (Save::TrackChanged, true, false),
+        (Save::TrackChanged, false, false),
+    ];
+    let mut failures = QueueSaveFailures::default();
+    for (i, (save, busy, quiet)) in rows.into_iter().enumerate() {
+        assert_eq!(failures.is_quiet(&save, busy), quiet, "row {i}");
+    }
+    failures.saved();
+    assert!(failures.is_quiet(&Save::TrackChanged, true));
+
+    for save in [Save::Cursor, Save::Queue] {
+        let mut failures = QueueSaveFailures::default();
+        assert!(!failures.is_quiet(&save, true));
+    }
+    let mut failures = QueueSaveFailures::default();
+    assert!(!failures.is_quiet(&Save::Cursor, true));
+    assert!(
+        !failures.is_quiet(&Save::TrackChanged, true),
+        "after another failure"
+    );
 }

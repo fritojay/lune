@@ -255,8 +255,12 @@ pub fn queue() -> &'static Arc<Mutex<Queue>> {
 }
 
 pub fn lock_queue() -> MutexGuard<'static, Queue> {
+    lock(queue())
+}
+
+fn lock(queue: &Mutex<Queue>) -> MutexGuard<'_, Queue> {
     // Every edit leaves the queue consistent before it can panic.
-    queue().lock().unwrap_or_else(PoisonError::into_inner)
+    queue.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 pub fn output_device_changed() {
@@ -350,8 +354,11 @@ impl PlayQueue for EngineQueue {
 pub enum Save {
     /// The queue's contents changed.
     Queue,
-    /// Only the current item or shuffle changed.
+    /// Only the current item, shuffle, or repeat changed.
     Cursor,
+    /// Playback moved to another item: a cursor save that the next track
+    /// change repeats.
+    TrackChanged,
     /// Playback of a track (by id) started.
     Play(i64, SystemTime),
     /// All of them, as they are now.
@@ -383,6 +390,7 @@ fn saver() -> &'static Mutex<Option<Saver>> {
                     tracing::warn!(%err, "the first playlist save rewrites them all");
                     Vec::new()
                 });
+                let mut failures = QueueSaveFailures::default();
                 while let Ok(first) = rx.recv() {
                     let batch: Vec<Save> = std::iter::once(first).chain(rx.try_iter()).collect();
                     for save in &batch {
@@ -404,18 +412,28 @@ fn saver() -> &'static Mutex<Option<Saver>> {
                             }
                         }
                     }
-                    let result = if batch.contains(&Save::Queue) {
-                        // Saving 100k rows takes a while; don't hold the
-                        // lock the decoder needs meanwhile.
-                        let snapshot = lock_queue().clone();
-                        library.save_queue(&snapshot)
-                    } else if batch.contains(&Save::Cursor) {
-                        library.save_queue_cursor(&lock_queue())
-                    } else {
-                        Ok(())
+                    // The most a save in the batch asks for covers the others.
+                    let Some(save) = [Save::Queue, Save::Cursor, Save::TrackChanged]
+                        .into_iter()
+                        .find(|save| batch.contains(save))
+                    else {
+                        continue;
                     };
-                    if let Err(err) = result {
-                        report_error(&format!("The queue could not be saved: {err}"));
+                    let result = if save == Save::Queue {
+                        save_from_queue(queue(), Queue::clone, |snapshot| {
+                            library.save_queue(snapshot)
+                        })
+                    } else {
+                        save_from_queue(queue(), Queue::cursor_state, |cursor| {
+                            library.save_queue_cursor(cursor)
+                        })
+                    };
+                    match result {
+                        Ok(()) => failures.saved(),
+                        Err(err) if failures.is_quiet(&save, err.is_busy()) => {
+                            tracing::warn!(%err, "could not save the queue position");
+                        }
+                        Err(err) => report_error(&format!("The queue could not be saved: {err}")),
                     }
                 }
             });
@@ -425,6 +443,40 @@ fn saver() -> &'static Mutex<Option<Saver>> {
             .map(|thread| Saver { requests, thread });
         Mutex::new(saver)
     })
+}
+
+/// Which failed queue saves are only logged: a busy [`Save::TrackChanged`]
+/// is repeated at the next track change, so only a second one in a row is
+/// shown. Any other failure is shown, such as the save on quitting, which
+/// nothing repeats.
+#[derive(Default)]
+struct QueueSaveFailures {
+    failed_before: bool,
+}
+
+impl QueueSaveFailures {
+    fn saved(&mut self) {
+        self.failed_before = false;
+    }
+
+    fn is_quiet(&mut self, save: &Save, busy: bool) -> bool {
+        let quiet = *save == Save::TrackChanged && busy && !self.failed_before;
+        self.failed_before = true;
+        quiet
+    }
+}
+
+/// Copies what `write` needs out of the queue, then writes it with the lock
+/// released: the database can be busy for seconds (a scan), and the decoder
+/// and the UI need the lock meanwhile.
+fn save_from_queue<T>(
+    queue: &Mutex<Queue>,
+    copy: impl FnOnce(&Queue) -> T,
+    write: impl FnOnce(&T) -> lune_core::Result<()>,
+) -> lune_core::Result<()> {
+    // A statement of its own: a temporary guard lives to the end of its statement.
+    let copied = copy(&lock(queue));
+    write(&copied)
 }
 
 /// Saves the queue, a play, or the playlists on a background thread; bursts

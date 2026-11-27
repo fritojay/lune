@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use crate::art;
 use crate::lists::{self, ListId, Playlist};
 use crate::query::{self, AlbumRow, LibraryStats, ListTrack, MissingTrack};
-use crate::queue::{self, Queue};
+use crate::queue::{self, Queue, QueueCursor};
 use crate::scan::{self, ScanMode, ScanProgress, ScanReport};
 use crate::{Result, db};
 
@@ -162,8 +162,8 @@ impl Library {
         queue::save(&mut self.conn, queue)
     }
 
-    pub fn save_queue_cursor(&self, queue: &Queue) -> Result<()> {
-        queue::save_cursor(&self.conn, queue)
+    pub fn save_queue_cursor(&self, cursor: &QueueCursor) -> Result<()> {
+        queue::save_cursor(&self.conn, cursor)
     }
 
     /// Records that playback of track `track_id` started at `at`, for Recently

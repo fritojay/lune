@@ -89,6 +89,17 @@ pub struct Queue {
     rng: u64,
 }
 
+/// What a cursor save stores, copied out of a [`Queue`] so that the lock
+/// around it isn't held while the database is busy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueCursor {
+    /// In the unshuffled order, as the queue is saved.
+    current: Option<usize>,
+    shuffle: bool,
+    repeat: Repeat,
+    resume: Duration,
+}
+
 impl Default for Queue {
     fn default() -> Self {
         Self {
@@ -162,6 +173,15 @@ impl Queue {
 
     pub fn set_resume_position(&mut self, slot: SlotId, position: Duration) {
         self.resume = Some((slot, position));
+    }
+
+    pub fn cursor_state(&self) -> QueueCursor {
+        QueueCursor {
+            current: self.unshuffled_current_index(),
+            shuffle: self.shuffle(),
+            repeat: self.repeat,
+            resume: self.resume_position(),
+        }
     }
 
     /// Replaces the whole queue with `tracks` and makes `tracks[start]`
@@ -444,28 +464,24 @@ impl Queue {
 pub(crate) fn save(conn: &mut Connection, queue: &Queue) -> Result<()> {
     let tx = conn.transaction()?;
     lists::save_items(&tx, ListId::QUEUE, &queue.unshuffled_track_ids())?;
-    save_state(&tx, queue)?;
+    save_cursor(&tx, &queue.cursor_state())?;
     tx.commit()?;
     Ok(())
 }
 
-/// Saves only which item is current, where to resume it, and the shuffle
-/// flag: cheap enough to run on every track change.
-pub(crate) fn save_cursor(conn: &Connection, queue: &Queue) -> Result<()> {
-    save_state(conn, queue)
-}
-
-fn save_state(conn: &Connection, queue: &Queue) -> Result<()> {
+/// Saves only which item is current, where to resume it, and the shuffle and
+/// repeat modes: cheap enough to run on every track change.
+pub(crate) fn save_cursor(conn: &Connection, cursor: &QueueCursor) -> Result<()> {
     conn.execute(
         "INSERT INTO queue_state (id, cursor, shuffle, repeat, resume_ms)
              VALUES (1, :cursor, :shuffle, :repeat, :resume_ms)
          ON CONFLICT (id) DO UPDATE SET cursor = excluded.cursor, shuffle = excluded.shuffle,
              repeat = excluded.repeat, resume_ms = excluded.resume_ms",
         named_params! {
-            ":cursor": queue.unshuffled_current_index().map(|i| i as i64),
-            ":shuffle": queue.shuffle(),
-            ":repeat": queue.repeat().index() as i64,
-            ":resume_ms": i64::try_from(queue.resume_position().as_millis()).unwrap_or(i64::MAX),
+            ":cursor": cursor.current.map(|i| i as i64),
+            ":shuffle": cursor.shuffle,
+            ":repeat": cursor.repeat.index() as i64,
+            ":resume_ms": i64::try_from(cursor.resume.as_millis()).unwrap_or(i64::MAX),
         },
     )?;
     Ok(())

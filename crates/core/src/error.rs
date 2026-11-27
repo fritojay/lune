@@ -64,3 +64,11 @@ pub enum CoreError {
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
+
+impl CoreError {
+    /// Another connection held the database for longer than the busy timeout.
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Db(rusqlite::Error::SqliteFailure(err, _))
+            if err.code == rusqlite::ErrorCode::DatabaseBusy)
+    }
+}

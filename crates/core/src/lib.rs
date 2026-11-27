@@ -35,7 +35,7 @@ pub use paths::{
     lock_library, window_state_path,
 };
 pub use query::{AlbumRow, LibraryStats, ListTrack, MissingTrack};
-pub use queue::{Queue, QueueItem, Repeat, SlotId, TrackRef};
+pub use queue::{Queue, QueueCursor, QueueItem, Repeat, SlotId, TrackRef};
 pub use scan::{ScanMode, ScanProgress, ScanReport};
 pub use settings::{
     DEFAULT_SCROLL_SPEED, SCROLL_SPEEDS, Settings, add_folder, clamp_scroll_speed, remove_folder,

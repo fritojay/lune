@@ -633,7 +633,7 @@ impl qobject::PlayerController {
                     queue.set_current(SlotId(entry.0));
                     queue.current().map(|item| item.track_id)
                 };
-                session::save(Save::Cursor);
+                session::save(Save::TrackChanged);
                 if let Some(track_id) = track_id {
                     session::record_play(track_id);
                 }

@@ -139,6 +139,19 @@ fn many_connections_can_open_a_new_database_at_once() {
 }
 
 #[test]
+fn a_write_while_another_connection_writes_is_busy_and_other_errors_are_not() {
+    let dir = crate::test_util::TempDir::new();
+    let path = dir.path().join("lib.sqlite3");
+    let writer = open(&path).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let other = open(&path).unwrap();
+    other.busy_timeout(Duration::ZERO).unwrap();
+    let write = |sql| other.execute_batch(sql).map_err(CoreError::from);
+    assert!(write("DELETE FROM queue_state").unwrap_err().is_busy());
+    assert!(!write("DELETE FROM no_such_table").unwrap_err().is_busy());
+}
+
+#[test]
 fn a_v5_database_keeps_its_tracks_present() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(&format!(
