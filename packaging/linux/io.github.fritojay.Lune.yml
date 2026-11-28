@@ -11,7 +11,7 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --device=dri
-  # cpal plays through ALSA, which the runtime routes to PulseAudio/PipeWire.
+  # cpal lists and plays the outputs of PulseAudio (or PipeWire's pipewire-pulse).
   - --socket=pulseaudio
   # Music is only ever read. Other folders: `flatpak override` (DEVELOPMENT.md).
   - --filesystem=xdg-music:ro

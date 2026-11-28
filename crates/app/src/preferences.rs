@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::pin::Pin;
 
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
 use lune_core::{SCROLL_SPEEDS, Settings, clamp_scroll_speed};
 use lune_engine::OutputDevice;
@@ -46,6 +46,9 @@ pub mod qobject {
         type Preferences = super::PreferencesRust;
     }
 
+    impl cxx_qt::Threading for Preferences {}
+    impl cxx_qt::Initialize for Preferences {}
+
     unsafe extern "RustQt" {
         #[cxx_name = "setScrollSpeed"]
         fn set_scroll_speed(self: Pin<&mut Preferences>, speed: i32);
@@ -53,7 +56,8 @@ pub mod qobject {
         #[cxx_name = "setOutputDevice"]
         fn set_output_device(self: Pin<&mut Preferences>, index: i32);
 
-        /// Lists the connected devices again (slow on some systems).
+        /// Lists the connected devices again, in the background (slow on
+        /// some systems).
         #[qinvokable]
         #[cxx_name = "refreshOutputDevices"]
         fn refresh_output_devices(self: Pin<&mut Preferences>);
@@ -74,6 +78,9 @@ pub struct PreferencesRust {
     output_device: i32,
     /// The device each of `output_devices` names; `None` is the default.
     output_ids: Vec<Option<String>>,
+    /// Only one listing runs at a time, so a sound server that never answers
+    /// holds one thread rather than one per refresh.
+    listing_outputs: bool,
 }
 
 impl Default for PreferencesRust {
@@ -89,7 +96,15 @@ impl Default for PreferencesRust {
             output_devices: QStringList::default(),
             output_device: 0,
             output_ids: Vec::new(),
+            listing_outputs: false,
         }
+    }
+}
+
+impl cxx_qt::Initialize for qobject::Preferences {
+    /// Lists the devices now, so the list is there when the dialog opens.
+    fn initialize(self: Pin<&mut Self>) {
+        self.refresh_output_devices();
     }
 }
 
@@ -128,8 +143,36 @@ impl qobject::Preferences {
     }
 
     fn refresh_output_devices(mut self: Pin<&mut Self>) {
+        if self.listing_outputs {
+            return;
+        }
+        let qt_thread = self.qt_thread();
+        let spawned = std::thread::Builder::new()
+            .name("lune-output-devices".into())
+            .spawn(move || {
+                // The sound server's replies are parsed here, so a panic
+                // mustn't keep `listing_outputs` set for good.
+                let devices = std::panic::catch_unwind(lune_engine::output_devices)
+                    .inspect_err(|_| tracing::error!("listing the audio outputs panicked"))
+                    .ok();
+                // An error means the object is gone (the app is quitting).
+                let _ = qt_thread
+                    .queue(move |preferences| preferences.show_output_devices(devices.as_deref()));
+            });
+        match spawned {
+            Ok(_) => self.as_mut().rust_mut().listing_outputs = true,
+            Err(err) => tracing::warn!(%err, "could not list the audio outputs"),
+        }
+    }
+
+    /// `None` if the listing panicked: the devices shown stay.
+    fn show_output_devices(mut self: Pin<&mut Self>, devices: Option<&[OutputDevice]>) {
+        self.as_mut().rust_mut().listing_outputs = false;
+        let Some(devices) = devices else {
+            return;
+        };
         let saved = with_store(|store| store.settings().output_device.clone());
-        let (choices, chosen) = device_choices(&lune_engine::output_devices(), saved.as_deref());
+        let (choices, chosen) = device_choices(devices, saved.as_deref());
         let labels: QStringList = choices
             .iter()
             .map(|(_, label)| QString::from(label))

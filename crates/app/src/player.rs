@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use cxx_qt::{CxxQtType, Threading};
@@ -173,6 +174,7 @@ pub struct PlayerControllerRust {
     volume: f64,
     muted: bool,
     player: Option<Player>,
+    closing: Vec<JoinHandle<()>>,
     opening: Opening,
     /// The entry the engine last reported playing, and its playthrough.
     playing_entry: Option<EntryId>,
@@ -207,6 +209,7 @@ impl Default for PlayerControllerRust {
             volume,
             muted,
             player: None,
+            closing: Vec::new(),
             opening: Opening::default(),
             playing_entry: None,
             playthrough: 0,
@@ -217,6 +220,35 @@ impl Default for PlayerControllerRust {
             poll_fast: Arc::default(),
         }
     }
+}
+
+impl PlayerControllerRust {
+    /// If it can't close in the background, it closes here.
+    fn close(&mut self, player: Player) {
+        self.closing.extend(close(player));
+    }
+}
+
+impl Drop for PlayerControllerRust {
+    /// The app is quitting: it doesn't wait for the output to close.
+    fn drop(&mut self) {
+        if let Some(player) = self.player.take() {
+            drop(close(player));
+        }
+    }
+}
+
+/// Drops `player` on its own thread, never on the UI thread: dropping one
+/// waits for its output thread, which waits for the sound server, and that
+/// may have stopped answering.
+fn close(player: Player) -> Option<JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("lune-output-close".into())
+        .spawn(move || drop(player))
+        .inspect_err(
+            |err| tracing::warn!(%err, "could not close the audio output in the background"),
+        )
+        .ok()
 }
 
 impl cxx_qt::Initialize for qobject::PlayerController {
@@ -680,10 +712,16 @@ impl qobject::PlayerController {
             output: OutputKind::Device { preferred },
             ..PlayerConfig::default()
         };
+        let closing = std::mem::take(&mut self.as_mut().rust_mut().closing);
         let qt_thread = self.qt_thread();
         let spawned = std::thread::Builder::new()
             .name("lune-output-open".into())
             .spawn(move || {
+                // Some devices take one stream at a time, so the old ones go
+                // first.
+                for handle in closing {
+                    let _ = handle.join();
+                }
                 let opened = Player::new(config, Arc::new(session::EngineQueue));
                 // An error means the object is gone (the app is quitting).
                 let _ = qt_thread.queue(move |controller| controller.opened(opened));
@@ -695,7 +733,12 @@ impl qobject::PlayerController {
 
     fn opened(mut self: Pin<&mut Self>, opened: lune_engine::Result<Player>) {
         match self.as_mut().rust_mut().opening.finish(opened) {
-            Finished::Again => self.open_output(None),
+            Finished::Again(opened) => {
+                if let Some(player) = opened {
+                    self.as_mut().rust_mut().close(player);
+                }
+                self.open_output(None);
+            }
             Finished::Opened(player, resume) => {
                 player.set_volume(self.volume_state().output() as f32);
                 self.as_mut().rust_mut().player = Some(player);
@@ -722,8 +765,9 @@ impl qobject::PlayerController {
             .player
             .as_ref()
             .and_then(|player| resume_from(&player.status()));
-        // Some devices take one stream at a time, so the old one goes first.
-        drop(self.as_mut().rust_mut().player.take());
+        if let Some(player) = self.as_mut().rust_mut().player.take() {
+            self.as_mut().rust_mut().close(player);
+        }
         // The new output starts with nothing heard, which isn't the end of
         // the track that was playing.
         self.as_mut().rust_mut().playing_entry = None;
@@ -892,7 +936,8 @@ struct Opening {
 
 #[derive(Debug, PartialEq)]
 enum Finished<T, E> {
-    Again,
+    /// With what opened, if it did, to close.
+    Again(Option<T>),
     /// With what to go on from.
     Opened(T, Option<Resume>),
     /// And whether it's the first failure in a row.
@@ -918,7 +963,7 @@ impl Opening {
     fn finish<T, E>(&mut self, opened: Result<T, E>) -> Finished<T, E> {
         self.running = false;
         if std::mem::take(&mut self.again) {
-            return Finished::Again;
+            return Finished::Again(opened.ok());
         }
         match opened {
             Ok(opened) => {

@@ -260,13 +260,21 @@ fn the_preferred_device_plays_when_it_opens_and_else_the_default_in_its_place() 
         "busy" => Err(EngineError::OutputConfig("held by another app".into())),
         device => Ok(device.to_owned()),
     };
-    // (preferred, default, the device that plays and whether to watch for
-    // the preferred one)
+    // (preferred, default, the device that plays and what to watch the
+    // preferred one for)
     for (preferred, default, chosen) in [
-        (Some("usb"), Some("default"), Some(("usb", false))),
-        (Some("gone"), Some("default"), Some(("default", true))),
-        (Some("busy"), Some("default"), Some(("default", false))),
-        (None, Some("default"), Some(("default", false))),
+        (Some("usb"), Some("default"), Some(("usb", Watch::Removal))),
+        (
+            Some("gone"),
+            Some("default"),
+            Some(("default", Watch::Return)),
+        ),
+        (
+            Some("busy"),
+            Some("default"),
+            Some(("default", Watch::Nothing)),
+        ),
+        (None, Some("default"), Some(("default", Watch::Nothing))),
         (Some("gone"), None, None),
         (Some("busy"), None, None),
         (Some("busy"), Some("busy"), None),
@@ -279,4 +287,36 @@ fn the_preferred_device_plays_when_it_opens_and_else_the_default_in_its_place() 
             "{preferred:?}, {default:?}"
         );
     }
+}
+
+#[test]
+fn a_preferred_device_that_goes_away_is_watched_until_it_is_back() {
+    // (watch, connected, next watch, whether the player hears it's back)
+    for (watch, connected, next) in [
+        (Watch::Removal, true, (Watch::Removal, false)),
+        (Watch::Removal, false, (Watch::Return, false)),
+        (Watch::Return, false, (Watch::Return, false)),
+        (Watch::Return, true, (Watch::Nothing, true)),
+        (Watch::Nothing, true, (Watch::Nothing, false)),
+        (Watch::Nothing, false, (Watch::Nothing, false)),
+    ] {
+        assert_eq!(watch.next(connected), next, "{watch:?}, {connected}");
+    }
+}
+
+#[test]
+fn a_listing_that_fails_says_nothing_about_whether_a_device_is_connected() {
+    let ok = |ids: &'static [&'static str]| Ok::<_, ()>(ids.iter());
+    assert_eq!(listed(ok(&["hdmi", "usb"]), "usb"), Some(true));
+    assert_eq!(listed(ok(&["hdmi"]), "usb"), Some(false));
+    assert_eq!(listed(ok(&[]), "usb"), Some(false));
+    assert_eq!(listed(Err::<std::slice::Iter<&str>, _>(()), "usb"), None);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn the_linux_build_includes_the_pulseaudio_host_whose_streams_move() {
+    assert!(cpal::ALL_HOSTS.contains(&cpal::HostId::PulseAudio));
+    assert!(moves_streams(cpal::HostId::PulseAudio));
+    assert!(!moves_streams(cpal::HostId::Alsa));
 }

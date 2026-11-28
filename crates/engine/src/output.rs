@@ -32,8 +32,8 @@ const SLEEP_AFTER: Duration = Duration::from_secs(2);
 /// A restart can fail for a moment, e.g. while the system resumes from
 /// suspend, so only this many failures in a row fail the output.
 const RESTART_ATTEMPTS: u32 = 3;
-/// How often an output opened in place of its preferred device checks
-/// whether that one is connected again.
+/// How often an output checks whether the preferred device it watches is
+/// connected.
 const PREFERRED_CHECK: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,8 +59,9 @@ pub struct OutputDevice {
     pub name: String,
 }
 
-/// The connected output devices. Slow on some systems (it asks the sound
-/// server), so call it when needed rather than often.
+/// The connected output devices. Slow on some systems, and it blocks for as
+/// long as the sound server doesn't answer, so call it off the UI thread and
+/// only when needed.
 pub fn output_devices() -> Vec<OutputDevice> {
     match cpal::default_host().output_devices() {
         Ok(devices) => devices
@@ -209,10 +210,13 @@ fn run_device(
         || host.default_output_device(),
         |device| build_device_stream(device, &mut make_renderer),
     );
-    let (stream, fell_back) = match opened {
-        Ok(((stream, spec), fell_back)) => {
+    let (stream, mut watch) = match opened {
+        Ok(((stream, spec), watch)) => {
             let _ = ready.send(Ok(spec));
-            (stream, fell_back)
+            match watch {
+                Watch::Removal if !moves_streams(host.id()) => (stream, Watch::Nothing),
+                watch => (stream, watch),
+            }
         }
         Err(err) => {
             let _ = ready.send(Err(err));
@@ -227,14 +231,28 @@ fn run_device(
             Err(RecvTimeoutError::Timeout) => {
                 let now = Instant::now();
                 sleeper.check(&stream, shared, now);
-                if let Some(preferred) = preferred.filter(|_| fell_back)
+                if let Some(preferred) = preferred.filter(|_| watch != Watch::Nothing)
                     && now.duration_since(checked) >= PREFERRED_CHECK
-                    && !shared.preferred_back.load(Ordering::Relaxed)
                 {
                     checked = now;
-                    if find(preferred).is_some() {
-                        tracing::info!(preferred, "the preferred audio output is connected again");
-                        shared.preferred_back.store(true, Ordering::Release);
+                    let ids = host
+                        .output_devices()
+                        .map(|devices| devices.filter_map(|device| device.id().ok()));
+                    if let Some(connected) = listed(ids, preferred) {
+                        let (next, back) = watch.next(connected);
+                        if back {
+                            tracing::info!(
+                                preferred,
+                                "the preferred audio output is connected again"
+                            );
+                            shared.preferred_back.store(true, Ordering::Release);
+                        } else if next != watch {
+                            tracing::info!(
+                                preferred,
+                                "the preferred audio output went away; the sound server plays the stream elsewhere"
+                            );
+                        }
+                        watch = next;
                     }
                 }
             }
@@ -326,28 +344,71 @@ impl Sleeper {
     }
 }
 
-/// Opens `preferred` if it is connected and opens, else the default. The
-/// flag says the default plays in place of a preferred device that isn't
-/// connected, so it is worth watching for. One that is connected but won't
-/// open (e.g. held by another app) isn't watched: it would be found at once,
-/// and fail again.
+/// What an output watches its preferred device for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Watch {
+    /// None is preferred, or it is connected but won't open (e.g. held by
+    /// another app): it would be found at once, and fail again.
+    Nothing,
+    /// The default plays in its place, until it is connected again.
+    Return,
+    /// It plays, until it goes away. Only on hosts that [`moves_streams`].
+    Removal,
+}
+
+impl Watch {
+    /// The watch after a check that found the preferred device `connected`,
+    /// and whether to tell the player that it is back.
+    fn next(self, connected: bool) -> (Self, bool) {
+        match (self, connected) {
+            (Self::Return, true) => (Self::Nothing, true),
+            (Self::Removal, false) => (Self::Return, false),
+            (watch, _) => (watch, false),
+        }
+    }
+}
+
+/// Whether `id` is among the listed devices, or `None` if the listing
+/// failed, which says nothing about whether it is connected.
+fn listed<E>(
+    ids: std::result::Result<impl Iterator<Item = impl std::fmt::Display>, E>,
+    id: &str,
+) -> Option<bool> {
+    Some(ids.ok()?.any(|listed| listed.to_string() == id))
+}
+
+/// Whether the host moves a stream whose device goes away to another device
+/// instead of failing it, so the output has to notice that itself to move
+/// back when the device returns.
+fn moves_streams(host: cpal::HostId) -> bool {
+    #[cfg(target_os = "linux")]
+    return host == cpal::HostId::PulseAudio;
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = host;
+        false
+    }
+}
+
+/// Opens `preferred` if it is connected and opens, else the default, and
+/// says what to watch the preferred device for.
 fn open_device<D, T>(
     preferred: Option<&str>,
     find: impl Fn(&str) -> Option<D>,
     default: impl FnOnce() -> Option<D>,
     mut open: impl FnMut(&D) -> Result<T>,
-) -> Result<(T, bool)> {
+) -> Result<(T, Watch)> {
     let watch = match preferred.map(|id| (id, find(id))) {
-        None => false,
+        None => Watch::Nothing,
         Some((_, Some(device))) => match open(&device) {
-            Ok(opened) => return Ok((opened, false)),
+            Ok(opened) => return Ok((opened, Watch::Removal)),
             Err(err) => {
                 tracing::warn!(
                     preferred,
                     %err,
                     "could not open the preferred audio output; using the default"
                 );
-                false
+                Watch::Nothing
             }
         },
         Some((_, None)) => {
@@ -355,7 +416,7 @@ fn open_device<D, T>(
                 preferred,
                 "the preferred audio output isn't connected; using the default"
             );
-            true
+            Watch::Return
         }
     };
     let device = default().ok_or(EngineError::NoOutputDevice)?;

@@ -201,7 +201,7 @@ fn no_open_starts_while_one_is_running() {
     assert!(!opening.due(None, now + REOPEN_AT_MOST_EVERY));
     assert!(!opening.start(None, now));
     // Asked for again while running, so its result is out of date.
-    assert_eq!(opening.finish(Ok::<_, ()>(())), Finished::Again);
+    assert_eq!(opening.finish(Ok::<_, ()>(())), Finished::Again(Some(())));
     assert!(opening.start(None, now));
     assert_eq!(opening.finish(Ok::<_, ()>(())), Finished::Opened((), None));
 }

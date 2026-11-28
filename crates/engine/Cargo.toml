@@ -9,7 +9,12 @@ publish.workspace = true
 
 
 [dependencies]
-cpal = "0.18.2"
+# ALSA lists every PCM of every card (hw:, plughw:, front:, surround..., dmix:)
+# and none of the sound server's outputs, such as Bluetooth. On Linux, cpal
+# plays through PulseAudio (PipeWire's pipewire-pulse on Fedora) when its
+# socket is there, and through ALSA otherwise; the feature does nothing on
+# other platforms.
+cpal = { version = "0.18.2", features = ["pulseaudio"] }
 rtrb = "0.4.1"
 rubato = "5.0.1"
 # Only the formats in scope: every extra demuxer/decoder is more
