@@ -80,6 +80,16 @@ fn causes(err: &dyn std::error::Error) -> String {
 pub type Result<T> = std::result::Result<T, CoreError>;
 
 impl CoreError {
+    /// Why reading a file failed, without the path the message also names.
+    pub fn file_cause(&self) -> String {
+        match self {
+            Self::Tags { cause, .. } => causes(cause),
+            Self::Io { source, .. } => source.to_string(),
+            Self::TagPanic(_) => "the tag parser panicked".to_owned(),
+            other => other.to_string(),
+        }
+    }
+
     /// Another connection held the database for longer than the busy timeout.
     pub fn is_busy(&self) -> bool {
         matches!(self, Self::Db(rusqlite::Error::SqliteFailure(err, _))

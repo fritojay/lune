@@ -15,7 +15,7 @@ use std::time::SystemTime;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{QList, QMap, QMapPair_QString_QVariant, QString, QUrl, QVariant};
 
-use crate::library_service::{Folder, Job, LibraryService, RESCAN_EVERY, Update};
+use crate::library_service::{Folder, Job, LibraryService, RESCAN_EVERY, Update, left_out_summary};
 use crate::preferences::with_store;
 use crate::property::set;
 use crate::{covers, format, session};
@@ -35,14 +35,17 @@ pub mod qobject {
         #[qobject]
         #[qml_element = "Library"]
         #[qml_singleton]
-        /// `{ path, lastScanned, leftOut }` per folder; `lastScanned` is
-        /// epoch ms, absent if never scanned, and `leftOut` says what a full
-        /// scan didn't add, absent if nothing.
+        /// `{ path, lastScanned }` per folder; `lastScanned` is epoch ms,
+        /// absent if never scanned.
         #[qproperty(QList_QVariant, folders, READ, NOTIFY)]
         #[qproperty(bool, busy, READ, NOTIFY)]
         #[qproperty(QString, status, READ, NOTIFY)]
         #[qproperty(QString, error, READ, NOTIFY)]
         #[qproperty(i32, missing_count, cxx_name = "missingCount", READ, NOTIFY)]
+        /// How many files the scans didn't add (listed by `LeftOutModel`).
+        #[qproperty(i32, left_out_count, cxx_name = "leftOutCount", READ, NOTIFY)]
+        /// Those files counted by why, or empty if there are none.
+        #[qproperty(QString, left_out, cxx_name = "leftOut", READ, NOTIFY)]
         #[qproperty(
             bool,
             native_folder_dialog,
@@ -92,6 +95,8 @@ pub struct LibraryManagerRust {
     status: QString,
     error: QString,
     missing_count: i32,
+    left_out_count: i32,
+    left_out: QString,
     native_folder_dialog: bool,
     folder_paths: Vec<PathBuf>,
     service: Option<LibraryService>,
@@ -152,6 +157,13 @@ impl qobject::LibraryManager {
                 let count = i32::try_from(tracks.len()).unwrap_or(i32::MAX);
                 session::set_missing(tracks);
                 set!(self, missing_count, missing_count_changed, count);
+            }
+            Update::LeftOut(files) => {
+                let count = i32::try_from(files.len()).unwrap_or(i32::MAX);
+                let summary = QString::from(&left_out_summary(&files).unwrap_or_default());
+                session::set_left_out(files);
+                set!(self, left_out_count, left_out_count_changed, count);
+                set!(self, left_out, left_out_changed, summary);
             }
             Update::Folders(folders) => {
                 let list: QList<QVariant> = folders.iter().map(folder_entry).collect();
@@ -241,12 +253,6 @@ fn folder_entry(folder: &Folder) -> QVariant {
         entry.insert(
             QString::from("lastScanned"),
             QVariant::from(&format::epoch_ms(ns)),
-        );
-    }
-    if let Some(left_out) = &folder.left_out {
-        entry.insert(
-            QString::from("leftOut"),
-            QVariant::from(&QString::from(left_out)),
         );
     }
     QVariant::from(&entry)

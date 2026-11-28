@@ -55,22 +55,97 @@ pub struct ScanReport {
     pub restored: usize,
     /// Unchanged tracks that got a date added (rows from before schema v5).
     pub dated: usize,
-    /// Files whose tags could not be read. They are retried on the next scan.
-    pub failed: usize,
-    pub skipped_non_utf8: usize,
-    /// Audio files that are links, which the walk doesn't follow.
-    pub skipped_links: usize,
-    /// Directories or entries the walk could not read. Tracks under them are
-    /// kept as they are rather than marked missing.
-    pub walk_errors: usize,
-    /// Directories a quick scan skipped as unchanged.
-    pub dirs_skipped: usize,
+    /// What the scan saw but didn't add, in no particular order.
+    pub left_out: Vec<LeftOut>,
+    /// Directories a quick scan skipped as unchanged. None held a file whose
+    /// tags failed or that couldn't be read when it was last listed, as such a
+    /// directory is listed again, so only links and non-UTF-8 names can be
+    /// left out unseen in one.
+    pub dirs_skipped: HashSet<PathBuf>,
     /// The scan was asked to stop before it finished. A stop while listing
     /// changes nothing; one while reading tags keeps what was read, and the
     /// next scan lists the unfinished directories again.
     pub stopped: bool,
+    /// Every directory reached was listed (it wasn't stopped while listing),
+    /// so the links, names, and unreadable entries in `left_out`, and
+    /// `dirs_skipped`, are all there. Tags failures are all there only if it
+    /// wasn't stopped at all.
+    pub listed: bool,
     pub walk_time: Duration,
     pub total_time: Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeftOut {
+    pub path: PathBuf,
+    pub reason: LeftOutReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeftOutReason {
+    /// The file was opened but its tags couldn't be read, for this reason.
+    /// It is retried by every scan.
+    Tags(String),
+    /// An audio file that is a link, which the walk doesn't follow.
+    Link,
+    /// An audio file whose name isn't valid UTF-8.
+    NonUtf8Name,
+    /// A file, directory, or entry that couldn't be opened or read, for this
+    /// reason. Tracks in or under it are kept as they are rather than marked
+    /// missing, and it is retried by every scan.
+    Unreadable(String),
+}
+
+/// How many of a list of [`LeftOut`] there are for each reason.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LeftOutCounts {
+    pub tags: usize,
+    pub links: usize,
+    pub non_utf8_names: usize,
+    pub unreadable: usize,
+}
+
+impl LeftOutCounts {
+    pub fn of(files: &[LeftOut]) -> Self {
+        let mut counts = Self::default();
+        for file in files {
+            *match file.reason {
+                LeftOutReason::Tags(_) => &mut counts.tags,
+                LeftOutReason::Link => &mut counts.links,
+                LeftOutReason::NonUtf8Name => &mut counts.non_utf8_names,
+                LeftOutReason::Unreadable(_) => &mut counts.unreadable,
+            } += 1;
+        }
+        counts
+    }
+}
+
+impl ScanReport {
+    fn left_out(&mut self, path: PathBuf, reason: LeftOutReason) {
+        self.left_out.push(LeftOut { path, reason });
+    }
+
+    /// Logs the counts: the lists can be long, and each entry was logged as
+    /// it was found.
+    fn log(&self, message: &str) {
+        tracing::info!(
+            root = %self.root.display(),
+            found = self.files_found,
+            added = self.added,
+            updated = self.updated,
+            unchanged = self.unchanged,
+            missing = self.missing,
+            restored = self.restored,
+            dated = self.dated,
+            left_out = self.left_out.len(),
+            dirs_skipped = self.dirs_skipped.len(),
+            stopped = self.stopped,
+            listed = self.listed,
+            walk_time = ?self.walk_time,
+            total_time = ?self.total_time,
+            "{message}"
+        );
+    }
 }
 
 /// Rows a scan changed, for [`refresh_albums`] to bring up to date.
@@ -159,10 +234,10 @@ pub(crate) fn scan_until(
     if walked.stopped {
         report.stopped = true;
         report.total_time = started.elapsed();
-        tracing::info!(?report, "scan stopped while listing");
+        report.log("scan stopped while listing");
         return Ok(report);
     }
-    report.dirs_skipped = walked.skipped.len();
+    report.listed = true;
 
     let mut to_read = Vec::new();
     let mut undated = Vec::new();
@@ -261,6 +336,7 @@ pub(crate) fn scan_until(
         }
     }
     drop(forget);
+    report.dirs_skipped = walked.skipped;
     // Every directory reached gets a row now, as a quick scan finds the
     // subdirectories of a skipped one by their rows. Unfinished ones are
     // stored as 0 (list again) until their files are saved.
@@ -286,7 +362,7 @@ pub(crate) fn scan_until(
     )?;
 
     report.total_time = started.elapsed();
-    tracing::info!(?report, "scan finished");
+    report.log("scan finished");
     Ok(report)
 }
 
@@ -557,10 +633,13 @@ fn list_dir(
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
+            // Stops at the first error: on Unix the listing ends there
+            // anyway, and on Windows the next call can fail the same way
+            // again and again. The directory is left out once.
             Err(err) => {
                 walk_error(report, &mut walked.unreadable, dir, &err);
                 complete = false;
-                continue;
+                break;
             }
         };
         let path = entry.path();
@@ -578,7 +657,8 @@ fn list_dir(
         }
         if !file_type.is_file() || !is_audio_path(&path) {
             if file_type.is_symlink() && is_audio_path(&path) {
-                report.skipped_links += 1;
+                tracing::info!(path = %path.display(), "skipping linked file");
+                report.left_out(path, LeftOutReason::Link);
             }
             continue;
         }
@@ -595,8 +675,9 @@ fn list_dir(
         let path = match path.into_os_string().into_string() {
             Ok(path) => path,
             Err(path) => {
-                tracing::warn!(path = %PathBuf::from(path).display(), "skipping non-UTF-8 path");
-                report.skipped_non_utf8 += 1;
+                let path = PathBuf::from(path);
+                tracing::warn!(path = %path.display(), "skipping non-UTF-8 path");
+                report.left_out(path, LeftOutReason::NonUtf8Name);
                 continue;
             }
         };
@@ -613,7 +694,10 @@ fn list_dir(
 
 fn walk_error(report: &mut ScanReport, unreadable: &mut Unreadable, path: &Path, err: &io::Error) {
     tracing::warn!(%err, path = %path.display(), "could not read");
-    report.walk_errors += 1;
+    report.left_out(
+        path.to_path_buf(),
+        LeftOutReason::Unreadable(err.to_string()),
+    );
     unreadable.paths.push(path.to_path_buf());
 }
 
@@ -833,10 +917,15 @@ fn write_batch(
             }
             Err(err) => {
                 tracing::warn!(%err, "skipping unreadable file");
-                report.failed += 1;
                 checkpoints
                     .failed
                     .extend(parent_str(&file.path).map(str::to_owned));
+                let cause = err.file_cause();
+                let reason = match err {
+                    CoreError::Io { .. } => LeftOutReason::Unreadable(cause),
+                    _ => LeftOutReason::Tags(cause),
+                };
+                report.left_out(PathBuf::from(&file.path), reason);
             }
         }
         if let Some((dir, mtime)) = checkpoints.read(&file.path) {

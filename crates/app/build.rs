@@ -37,6 +37,7 @@ fn main() -> std::io::Result<()> {
             "src/columns.rs",
             "src/desktop_entry.rs",
             "src/filter_model.rs",
+            "src/left_out_model.rs",
             "src/library_manager.rs",
             "src/list_model.rs",
             "src/missing_model.rs",

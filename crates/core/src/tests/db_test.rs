@@ -210,7 +210,11 @@ fn a_v7_database_rereads_every_file_once_to_fill_in_bit_rates() {
         None
     );
     let report = quick(&mut conn);
-    assert_eq!((report.updated, report.dirs_skipped), (1, 0), "{report:?}");
+    assert_eq!(
+        (report.updated, report.dirs_skipped.len()),
+        (1, 0),
+        "{report:?}"
+    );
     let after = crate::query::track_list(&conn).unwrap()[0].clone();
     assert_eq!(after, before);
 

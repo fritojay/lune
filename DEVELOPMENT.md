@@ -193,7 +193,7 @@ cargo run -p lune-cli -- play --null --fast a.flac b.flac       # decode only, a
 
 ## Scan and query a library
 
-Music files are only ever read. The app writes only its own database. Links inside a library folder aren't followed (a folder that is itself a link is), and files whose names aren't valid UTF-8 are skipped; a full scan in the app says how many it left out.
+Music files are only ever read. The app writes only its own database. Links inside a library folder aren't followed (a folder that is itself a link is), and files whose names aren't valid UTF-8 are skipped. In the app, **File → Files Not Added** lists what the scans left out (these, files whose tags couldn't be read, and anything that couldn't be opened), each with the reason, and Preferences says how many there are.
 
 ```sh
 cargo run -p lune-cli -- scan ~/Music          # incremental; re-run to pick up changes

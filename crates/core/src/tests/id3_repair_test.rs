@@ -135,6 +135,11 @@ fn a_tag_that_cannot_be_repaired_fails_with_its_cause_shown_once() {
             1,
             "flags {flags:#x}: {chain}"
         );
+        let cause = err.file_cause();
+        assert!(
+            cause.contains("UTF-16 string has an odd length") && !cause.contains("unrepairable"),
+            "flags {flags:#x}: {cause}"
+        );
     }
 }
 

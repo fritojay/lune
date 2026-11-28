@@ -5,7 +5,6 @@
 //! list each [`Update::Folders`] carries. No Qt here, so it is tested
 //! directly.
 
-use std::collections::HashMap;
 use std::mem::{self, Discriminant};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,8 +13,8 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant, SystemTime};
 
 use lune_core::{
-    Catalog, FolderWatcher, Library, ListId, MissingTrack, Playlist, Queue, ScanMode, ScanProgress,
-    ScanReport,
+    Catalog, FolderWatcher, LeftOut, LeftOutCounts, LeftOutReason, Library, ListId, MissingTrack,
+    Playlist, Queue, ScanMode, ScanProgress, ScanReport,
 };
 
 /// How long changes must settle before a watched folder is rescanned.
@@ -61,6 +60,9 @@ pub enum Update {
     /// The tracks whose files are missing; sent with every `Loaded` and `Library`.
     Missing(Vec<MissingTrack>),
     Folders(Vec<Folder>),
+    /// What the scans this run saw but didn't add, by resolved path and in
+    /// path order; sent when it changes.
+    LeftOut(Arc<Vec<LeftOut>>),
     /// What the thread is doing, or `None` when idle.
     Status(Option<String>),
     Error(String),
@@ -69,8 +71,6 @@ pub enum Update {
 pub struct Folder {
     pub path: PathBuf,
     pub last_scanned_ns: Option<i64>,
-    /// What its last full scan this run left out of the library, and why.
-    pub left_out: Option<String>,
 }
 
 pub struct LibraryService {
@@ -112,7 +112,7 @@ impl LibraryService {
                     watcher: None,
                     jobs: watcher_jobs,
                     notify: Box::new(notify),
-                    skipped: HashMap::new(),
+                    left_out: Arc::default(),
                     interrupt: worker_interrupt,
                     unfinished: None,
                 };
@@ -147,8 +147,8 @@ struct Worker {
     watcher: Option<FolderWatcher>,
     jobs: Sender<Job>,
     notify: Box<dyn Fn(Update) + Send>,
-    /// Per folder, the (links, non-UTF-8 names) its last full scan skipped.
-    skipped: HashMap<PathBuf, (usize, usize)>,
+    /// What the scans saw but didn't add, as [`Update::LeftOut`] sends it.
+    left_out: Arc<Vec<LeftOut>>,
     interrupt: Arc<AtomicBool>,
     /// What a scan stopped for a job left to do, resumed once jobs are done.
     unfinished: Option<(Vec<PathBuf>, ScanMode)>,
@@ -309,8 +309,19 @@ impl Worker {
         if !lune_core::remove_folder(&mut self.folders, folder) {
             return false;
         }
-        // Added back, it is scanned quickly, which doesn't count what it skips.
-        self.skipped.remove(folder);
+        // By resolved path, as a folder that is a link can lead into another
+        // folder, whose files stay listed.
+        let roots: Vec<PathBuf> = self.folders.iter().map(|f| resolved(f)).collect();
+        let kept: Vec<LeftOut> = self
+            .left_out
+            .iter()
+            .filter(|file| roots.iter().any(|root| file.path.starts_with(root)))
+            .cloned()
+            .collect();
+        if kept.len() != self.left_out.len() {
+            self.left_out = Arc::new(kept);
+            self.publish_left_out();
+        }
         self.publish_folders();
         self.watch();
         self.prune()
@@ -350,13 +361,13 @@ impl Worker {
             .map(|(path, last_scanned_ns)| Folder {
                 path: path.clone(),
                 last_scanned_ns,
-                left_out: self
-                    .skipped
-                    .get(path)
-                    .and_then(|&(links, non_utf8)| left_out(links, non_utf8)),
             })
             .collect();
         (self.notify)(Update::Folders(folders));
+    }
+
+    fn publish_left_out(&self) {
+        (self.notify)(Update::LeftOut(Arc::clone(&self.left_out)));
     }
 
     fn prune(&mut self) -> bool {
@@ -408,7 +419,7 @@ impl Worker {
         );
         let mut changed = false;
         let mut recorded = false;
-        let mut skipped = Vec::new();
+        let mut left_out_changed = false;
         let mut dirs = dirs.into_iter();
         while let Some(dir) = dirs.next() {
             let Some(library) = &mut self.library else {
@@ -442,6 +453,11 @@ impl Worker {
             match scanned {
                 Ok(report) if report.stopped => {
                     changed |= library_changed(&report);
+                    // Directories it finished are skipped by a quick scan
+                    // resuming it, so their links and names count from here.
+                    if report.listed {
+                        left_out_changed |= merge_left_out(&mut self.left_out, report);
+                    }
                     let rest = std::iter::once(dir).chain(dirs.by_ref());
                     let unfinished = self.unfinished.get_or_insert((Vec::new(), mode));
                     unfinished.0.extend(rest);
@@ -452,12 +468,7 @@ impl Worker {
                 }
                 Ok(report) => {
                     changed |= library_changed(&report);
-                    // A quick scan doesn't list every directory, so only a
-                    // thorough one counts all that it skips.
-                    if mode == ScanMode::Thorough && self.folders.contains(&dir) {
-                        skipped
-                            .push((dir.clone(), (report.skipped_links, report.skipped_non_utf8)));
-                    }
+                    left_out_changed |= merge_left_out(&mut self.left_out, report);
                     if self.folders.contains(&dir) {
                         match library.record_folder_scan(&dir, (self.now)()) {
                             Ok(()) => recorded = true,
@@ -472,11 +483,11 @@ impl Worker {
                 Err(err) => tracing::warn!(%err, dir = %dir.display(), "could not scan"),
             }
         }
-        for (folder, counts) in skipped {
-            recorded |= self.skipped.insert(folder, counts) != Some(counts);
-        }
         if recorded {
             self.publish_folders();
+        }
+        if left_out_changed {
+            self.publish_left_out();
         }
         changed
     }
@@ -526,30 +537,84 @@ pub fn existing_ancestor(dir: &Path, folders: &[PathBuf]) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// What a full scan of `folder` left out, if anything.
-fn left_out(links: usize, non_utf8: usize) -> Option<String> {
+/// `folder` with links resolved, as scans report paths, or as it is if it
+/// can't be (e.g. an unmounted drive).
+fn resolved(folder: &Path) -> PathBuf {
+    std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf())
+}
+
+/// Replaces what `left_out` has under the report's root with what the scan
+/// found, keeping it in path order. Returns whether that changed it; if not,
+/// it is left as it was, still shared.
+///
+/// Links, non-UTF-8 names, and anything under a non-UTF-8 directory stand if
+/// a quick scan didn't reach them. It reaches the subdirectories of one it
+/// skips by their rows, and only a directory whose path is valid UTF-8 has
+/// one, so they stand if the nearest such directory above them was skipped.
+/// Other files are always reached (see [`ScanReport::dirs_skipped`]).
+fn merge_left_out(left_out: &mut Arc<Vec<LeftOut>>, report: ScanReport) -> bool {
+    let stands = |file: &LeftOut| {
+        if !file.path.starts_with(&report.root) {
+            return true;
+        }
+        let skippable = matches!(
+            file.reason,
+            LeftOutReason::Link | LeftOutReason::NonUtf8Name
+        ) || file.path.to_str().is_none();
+        skippable
+            && file
+                .path
+                .ancestors()
+                .skip(1)
+                .find(|dir| dir.to_str().is_some())
+                .is_some_and(|dir| report.dirs_skipped.contains(dir))
+    };
+    let mut merged: Vec<LeftOut> = left_out.iter().filter(|f| stands(f)).cloned().collect();
+    merged.extend(report.left_out);
+    merged.sort_by(|a, b| a.path.cmp(&b.path));
+    let changed = merged != **left_out;
+    if changed {
+        *left_out = Arc::new(merged);
+    }
+    changed
+}
+
+/// What `files` are, counted by why they weren't added, if any.
+pub fn left_out_summary(files: &[LeftOut]) -> Option<String> {
+    let counts = LeftOutCounts::of(files);
     let parts: Vec<String> = [
         (
-            links,
-            "linked file",
-            "linked files",
-            " (links aren't followed)",
+            counts.tags,
+            "file whose tags couldn't be read",
+            "files whose tags couldn't be read",
         ),
-        (non_utf8, "file", "files", " whose name isn't valid UTF-8"),
+        (
+            counts.links,
+            "linked file (links aren't followed)",
+            "linked files (links aren't followed)",
+        ),
+        (
+            counts.non_utf8_names,
+            "file whose name isn't valid UTF-8",
+            "files whose names aren't valid UTF-8",
+        ),
+        (
+            counts.unreadable,
+            "file or folder that couldn't be opened",
+            "files or folders that couldn't be opened",
+        ),
     ]
     .into_iter()
     .filter(|&(count, ..)| count > 0)
-    .map(|(count, one, many, why)| {
-        let what = if count == 1 { one } else { many };
-        let why = if count == 1 {
-            why.to_owned()
-        } else {
-            why.replace("name isn't", "names aren't")
-        };
-        format!("{count} {what}{why}")
-    })
+    .map(|(count, one, many)| format!("{count} {}", if count == 1 { one } else { many }))
     .collect();
-    (!parts.is_empty()).then(|| format!("Not added: {}.", parts.join(" and ")))
+    let list = match parts.as_slice() {
+        [] => return None,
+        [one] => one.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    };
+    Some(format!("Not added: {list}."))
 }
 
 fn library_changed(report: &ScanReport) -> bool {

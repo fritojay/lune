@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use lune_core::{Library, ListTrack, ScanMode};
+use lune_core::{LeftOutCounts, Library, ListTrack, ScanMode};
 
 /// Headless harness for the engine and library.
 #[derive(Parser, Debug)]
@@ -80,15 +80,15 @@ fn main() -> anyhow::Result<()> {
                 report.missing,
                 report.restored
             );
-            if report.failed + report.skipped_non_utf8 + report.skipped_links + report.walk_errors
-                > 0
-            {
+            if !report.left_out.is_empty() {
+                let LeftOutCounts {
+                    tags,
+                    links,
+                    non_utf8_names,
+                    unreadable,
+                } = LeftOutCounts::of(&report.left_out);
                 println!(
-                    "  problems: {} unreadable, {} non-UTF-8 paths, {} linked files, {} walk errors (see log)",
-                    report.failed,
-                    report.skipped_non_utf8,
-                    report.skipped_links,
-                    report.walk_errors
+                    "  problems: {tags} unreadable, {non_utf8_names} non-UTF-8 paths, {links} linked files, {unreadable} walk errors (see log)"
                 );
             }
             println!(

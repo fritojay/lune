@@ -10,6 +10,7 @@ mod covers;
 mod desktop_entry;
 mod filter_model;
 mod format;
+mod left_out_model;
 mod library_manager;
 mod library_service;
 mod list_model;

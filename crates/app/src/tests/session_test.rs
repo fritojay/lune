@@ -3,11 +3,12 @@ use lune_core::{Grouping, Repeat, SortColumn, TrackFilter};
 
 use crate::test_util::list_track;
 
-const ALL: [Change; 12] = [
+const ALL: [Change; 13] = [
     Change::Catalog,
     Change::View,
     Change::ViewRefreshed,
     Change::Missing,
+    Change::LeftOut,
     Change::Playlists,
     Change::Queue,
     Change::Played,
@@ -35,6 +36,7 @@ fn each_setter_sends_its_change() {
     set_view(View::default(), false);
     set_view(View::default(), true);
     set_missing(Vec::new());
+    set_left_out(Arc::default());
     load_playlists(Vec::new(), id("2"));
     queue_edited();
     set_browse(BrowseState::default());
@@ -54,6 +56,7 @@ fn each_setter_sends_its_change() {
             Change::ViewRefreshed,
             Change::View,
             Change::Missing,
+            Change::LeftOut,
             Change::Playlists,
             Change::Queue,
             Change::Browse,
@@ -115,7 +118,7 @@ fn a_play_updates_the_catalog_the_list_models_hold_rather_than_a_copy() {
 #[test]
 fn nothing_is_sent_without_a_change() {
     let changes = recorded();
-    let _ = (catalog(), view(), missing());
+    let _ = (catalog(), view(), missing(), left_out());
     assert!(changes.borrow().is_empty());
 }
 

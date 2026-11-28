@@ -699,71 +699,280 @@ fn the_periodic_rescan_updates_the_folder_times() {
     });
 }
 
+fn left(path: &str, reason: LeftOutReason) -> LeftOut {
+    LeftOut {
+        path: PathBuf::from(path),
+        reason,
+    }
+}
+
 #[test]
-fn a_full_scan_says_what_it_left_out() {
-    for (links, non_utf8, message) in [
-        (0, 0, None),
+fn what_was_left_out_is_summed_up_by_why() {
+    let tags = || left("t.mp3", LeftOutReason::Tags("bad".into()));
+    let link = || left("l.mp3", LeftOutReason::Link);
+    let name = || left("n.mp3", LeftOutReason::NonUtf8Name);
+    let unreadable = || left("u", LeftOutReason::Unreadable("denied".into()));
+    for (files, message) in [
+        (vec![], None),
         (
-            2,
-            0,
+            vec![link(), link()],
             Some("Not added: 2 linked files (links aren't followed)."),
         ),
         (
-            0,
-            1,
+            vec![name()],
             Some("Not added: 1 file whose name isn't valid UTF-8."),
         ),
         (
-            1,
-            3,
+            vec![name(), link(), name(), name()],
             Some(
                 "Not added: 1 linked file (links aren't followed) and 3 files whose names aren't valid UTF-8.",
             ),
         ),
+        (
+            vec![unreadable(), tags(), tags(), link()],
+            Some(
+                "Not added: 2 files whose tags couldn't be read, 1 linked file (links aren't followed), and 1 file or folder that couldn't be opened.",
+            ),
+        ),
+        (
+            vec![tags(), link(), name(), unreadable(), unreadable()],
+            Some(
+                "Not added: 1 file whose tags couldn't be read, 1 linked file (links aren't followed), 1 file whose name isn't valid UTF-8, and 2 files or folders that couldn't be opened.",
+            ),
+        ),
     ] {
-        assert_eq!(left_out(links, non_utf8).as_deref(), message);
+        assert_eq!(left_out_summary(&files).as_deref(), message);
     }
+}
+
+fn report(root: &str, left_out: Vec<LeftOut>, dirs_skipped: &[&str]) -> ScanReport {
+    ScanReport {
+        root: PathBuf::from(root),
+        left_out,
+        dirs_skipped: dirs_skipped.iter().map(PathBuf::from).collect(),
+        ..ScanReport::default()
+    }
+}
+
+#[test]
+fn a_scan_replaces_what_was_left_out_under_its_root_only() {
+    let mut left_out = Arc::new(vec![
+        left("/m/a/x.mp3", LeftOutReason::Link),
+        left("/m/b/y.mp3", LeftOutReason::Tags("bad".into())),
+    ]);
+    let found = vec![left("/m/a/z.mp3", LeftOutReason::NonUtf8Name)];
+    assert!(merge_left_out(&mut left_out, report("/m/a", found, &[])));
+    assert_eq!(
+        *left_out,
+        [
+            left("/m/a/z.mp3", LeftOutReason::NonUtf8Name),
+            left("/m/b/y.mp3", LeftOutReason::Tags("bad".into())),
+        ]
+    );
+    // Found again as it was, nothing changed, and the list is still shared.
+    let shared = Arc::clone(&left_out);
+    let found = vec![left("/m/a/z.mp3", LeftOutReason::NonUtf8Name)];
+    assert!(!merge_left_out(&mut left_out, report("/m/a", found, &[])));
+    assert!(Arc::ptr_eq(&left_out, &shared));
+    // `/m/ab` only shares a prefix with `/m/a`.
+    let mut left_out = Arc::new(vec![left("/m/ab/x.mp3", LeftOutReason::Link)]);
+    assert!(!merge_left_out(&mut left_out, report("/m/a", vec![], &[])));
+}
+
+#[test]
+fn a_quick_scan_keeps_the_links_and_names_of_directories_it_skipped() {
+    let tags = || LeftOutReason::Tags("bad".into());
+    let mut left_out = Arc::new(vec![
+        left("/m/kept/link.mp3", LeftOutReason::Link),
+        left("/m/kept/name.mp3", LeftOutReason::NonUtf8Name),
+        left("/m/kept/sub/link.mp3", LeftOutReason::Link),
+        left("/m/listed/link.mp3", LeftOutReason::Link),
+        // Such directories are never skipped, so these were found again or are gone.
+        left("/m/kept/bad.mp3", tags()),
+        left("/m/kept/locked", LeftOutReason::Unreadable("denied".into())),
+    ]);
+    let found = vec![left("/m/listed/new.mp3", LeftOutReason::Link)];
+    merge_left_out(&mut left_out, report("/m", found, &["/m/kept"]));
+    assert_eq!(
+        *left_out,
+        [
+            left("/m/kept/link.mp3", LeftOutReason::Link),
+            left("/m/kept/name.mp3", LeftOutReason::NonUtf8Name),
+            left("/m/listed/new.mp3", LeftOutReason::Link),
+        ]
+    );
+}
+
+// Linux takes any bytes in a name; macOS refuses ones that aren't UTF-8.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_quick_scan_keeps_what_is_in_non_utf8_directories_under_one_it_skipped() {
+    use std::os::unix::ffi::OsStrExt;
+    let path = |bytes: &[u8]| PathBuf::from(std::ffi::OsStr::from_bytes(bytes));
+    let left = |bytes: &[u8], reason| LeftOut {
+        path: path(bytes),
+        reason,
+    };
+    let unreadable = || LeftOutReason::Unreadable("denied".into());
+    let mut left_out = Arc::new(vec![
+        left(b"/m/kept/\xff/1.mp3", LeftOutReason::NonUtf8Name),
+        left(b"/m/kept/\xff/locked", unreadable()),
+        left(b"/m/kept/\xff/sub/link.mp3", LeftOutReason::Link),
+        left(b"/m/listed/\xff/2.mp3", LeftOutReason::NonUtf8Name),
+    ]);
+    let kept = left_out[..3].to_vec();
+    merge_left_out(&mut left_out, report("/m", vec![], &["/m/kept"]));
+    assert_eq!(*left_out, kept);
+}
+
+// A thorough scan then a quick one, as at launch and a day later. Creating
+// the link needs `std::os::unix`.
+#[cfg(unix)]
+#[test]
+fn a_quick_scan_keeps_what_a_full_scan_left_out() {
+    let dir = TempDir::new();
+    let song = dir.wav("music/kept/1.wav");
+    std::os::unix::fs::symlink(&song, dir.path().join("music/kept/link.wav")).unwrap();
+    dir.write("music/failed/bad.mp3", b"not an mp3");
+    for rel in ["music", "music/kept", "music/failed"] {
+        dir.age(rel);
+    }
+    let music = std::fs::canonicalize(dir.path().join("music")).unwrap();
+    let mut library = Library::open_in_memory().unwrap();
+    let mut scan = |mode| library.scan_until(&music, mode, |_| {}, || false).unwrap();
+    let mut left_out = Arc::default();
+    assert!(merge_left_out(&mut left_out, scan(ScanMode::Thorough)));
+    let found: Vec<(PathBuf, bool)> = left_out
+        .iter()
+        .map(|f| (f.path.clone(), f.reason == LeftOutReason::Link))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (music.join("failed/bad.mp3"), false),
+            (music.join("kept/link.wav"), true),
+        ]
+    );
+
+    let report = scan(ScanMode::Quick);
+    assert!(
+        report.dirs_skipped.contains(&music.join("kept"))
+            && !report.dirs_skipped.contains(&music.join("failed")),
+        "{report:?}"
+    );
+    assert!(!merge_left_out(&mut left_out, report), "{left_out:?}");
+}
+
+fn left_out_of(h: &Harness, wanted: usize) -> Vec<LeftOut> {
+    h.wait_for(|u| match u {
+        Update::Error(message) => panic!("reported as an error: {message}"),
+        Update::LeftOut(files) => (files.len() == wanted).then(|| files.to_vec()),
+        _ => None,
+    })
 }
 
 #[cfg(unix)]
 #[test]
-fn what_a_full_scan_left_out_is_listed_with_its_folder_not_reported_as_an_error() {
+fn what_a_scan_left_out_is_listed_not_reported_as_an_error() {
     let dir = TempDir::new();
     let song = dir.wav("a/1.wav");
     std::os::unix::fs::symlink(&song, dir.path().join("a/link.wav")).unwrap();
+    dir.write("a/sub/bad.mp3", b"not an mp3");
     let a = dir.path().join("a");
+    let resolved_a = std::fs::canonicalize(&a).unwrap();
     let h = Harness::start(dir);
     h.idle();
     h.service.send(Job::AddFolder(a.clone()));
-    // Like the launch scan: only a full scan counts what it skips.
-    h.service.send(Job::RescanAll);
-    let left_out = h.wait_for(|u| match u {
-        Update::Error(message) => panic!("reported as an error: {message}"),
-        Update::Folders(folders) => folders
-            .into_iter()
-            .find(|f| f.path == a && f.left_out.is_some())
-            .and_then(|f| f.left_out),
-        _ => None,
-    });
+    let left_out = left_out_of(&h, 2);
     assert_eq!(
-        left_out,
-        "Not added: 1 linked file (links aren't followed)."
+        left_out[0],
+        LeftOut {
+            path: resolved_a.join("link.wav"),
+            reason: LeftOutReason::Link,
+        }
     );
-    // Added back, it has had no full scan since, so nothing is said yet.
+    assert_eq!(left_out[1].path, resolved_a.join("sub/bad.mp3"));
+    assert!(
+        matches!(left_out[1].reason, LeftOutReason::Tags(_)),
+        "{left_out:?}"
+    );
+
+    // Gone from disk, a rescan takes it off the list.
+    h.dir.remove_dir("a/sub");
+    h.service.send(Job::RescanAll);
+    assert_eq!(left_out_of(&h, 1)[0].path, resolved_a.join("link.wav"));
+
+    // Removed, the folder takes what it left out with it; added back, it
+    // lists it again.
     h.service.send(Job::RemoveFolder(a.clone()));
-    h.wait_for(|u| match u {
-        Update::Folders(folders) => folders.iter().all(|f| f.path != a).then_some(()),
-        _ => None,
-    });
+    left_out_of(&h, 0);
     h.service.send(Job::AddFolder(a.clone()));
-    let left_out = h.wait_for(|u| match u {
-        Update::Folders(folders) => folders
-            .into_iter()
-            .find(|f| f.path == a)
-            .map(|f| f.left_out),
+    assert_eq!(left_out_of(&h, 1)[0].path, resolved_a.join("link.wav"));
+}
+
+#[cfg(unix)]
+#[test]
+fn removing_a_folder_that_links_into_another_keeps_what_the_other_left_out() {
+    let dir = TempDir::new();
+    let song = dir.wav("a/sub/1.wav");
+    std::os::unix::fs::symlink(&song, dir.path().join("a/sub/link.wav")).unwrap();
+    dir.wav("c/2.wav");
+    std::os::unix::fs::symlink(&song, dir.path().join("c/link.wav")).unwrap();
+    let a = dir.path().join("a");
+    let b = dir.path().join("b");
+    let c = dir.path().join("c");
+    std::os::unix::fs::symlink(a.join("sub"), &b).unwrap();
+    let linked = std::fs::canonicalize(&a).unwrap().join("sub/link.wav");
+    let h = Harness::start(dir);
+    h.idle();
+    h.service.send(Job::AddFolder(a));
+    left_out_of(&h, 1);
+    h.service.send(Job::AddFolder(b.clone()));
+    h.service.send(Job::RemoveFolder(b));
+    // Neither changes the list, so the next one sent is what `c` adds to it.
+    h.service.send(Job::AddFolder(c));
+    let left_out = left_out_of(&h, 2);
+    assert_eq!(left_out[0].path, linked, "{left_out:?}");
+}
+
+// Creating the link needs `std::os::unix`.
+#[cfg(unix)]
+#[test]
+fn what_a_scan_stopped_while_reading_tags_listed_stays_listed_after_it_resumes() {
+    let dir = TempDir::new();
+    let song = dir.wav("a/songs/1.wav");
+    dir.wav("a/songs/2.wav");
+    dir.write("a/links/notes.txt", b"");
+    std::os::unix::fs::symlink(&song, dir.path().join("a/links/link.wav")).unwrap();
+    dir.wav("b/3.wav");
+    // Settled, so the quick scan that resumes skips what the stopped one finished.
+    for rel in ["a", "a/links", "a/songs"] {
+        dir.age(rel);
+    }
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    let link = LeftOut {
+        path: std::fs::canonicalize(&a).unwrap().join("links/link.wav"),
+        reason: LeftOutReason::Link,
+    };
+    let held = a.clone();
+    let (h, release) = start_holding(dir, move |status| {
+        scanning(status, &held) && status.contains("reading tags")
+    });
+    h.idle();
+    h.service.send(Job::AddFolder(a.clone()));
+    h.wait_for(|u| {
+        matches!(&u, Update::Status(Some(s)) if scanning(s, &a) && s.contains("reading tags"))
+            .then_some(())
+    });
+    // Any job but a watched change stops the running scan.
+    h.service.send(Job::AddFolder(b));
+    drop(release);
+    assert_eq!(left_out_of(&h, 1), std::slice::from_ref(&link));
+    h.wait_for(|u| match u {
+        Update::LeftOut(files) => panic!("changed after the scan resumed: {files:?}"),
+        Update::Library(catalog) => (catalog.len() == 3).then_some(()),
         _ => None,
     });
-    assert_eq!(left_out, None);
 }
 
 /// Starts the service on `dir`, holding the library thread at the first

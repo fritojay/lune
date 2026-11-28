@@ -12,6 +12,8 @@ Dialog {
     onAboutToShow: Preferences.refreshOutputDevices()
     standardButtons: Dialog.Close
 
+    signal showLeftOutRequested()
+
     AddFolderDialog {
         id: folderDialog
     }
@@ -76,14 +78,6 @@ Dialog {
                                 textFormat: Text.PlainText
                                 elide: Text.ElideMiddle
                             }
-                            Label {
-                                Layout.fillWidth: true
-                                visible: text !== ""
-                                text: folderRow.modelData.leftOut ?? ""
-                                textFormat: Text.PlainText
-                                wrapMode: Text.WordWrap
-                                opacity: 0.7
-                            }
                         }
                         Label {
                             readonly property var scanned: folderRow.modelData.lastScanned
@@ -100,6 +94,23 @@ Dialog {
                         }
                     }
                 }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            visible: Library.leftOut !== ""
+            Label {
+                Layout.fillWidth: true
+                text: Library.leftOut
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                opacity: 0.7
+            }
+            Button {
+                text: qsTr("Show Files…")
+                flat: true
+                onClicked: preferences.showLeftOutRequested()
             }
         }
 

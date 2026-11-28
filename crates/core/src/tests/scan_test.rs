@@ -67,20 +67,40 @@ fn titles(conn: &Connection, album_id: i64) -> Vec<String> {
 }
 
 #[test]
-fn a_panicking_tag_reader_fails_one_file_not_the_scan() {
-    let dir = TempDir::new();
-    dir.touch("bad.mp3");
-    dir.touch("good.mp3");
-    let mut conn = db::open_in_memory().unwrap();
-    let report = scan_with(&mut conn, dir.path(), ScanMode::Thorough, |path: &Path| {
-        if path.ends_with("bad.mp3") {
-            panic!("simulated parser bug");
-        }
-        Ok(meta("Artist", "Album", 1))
-    })
-    .unwrap();
-    assert_eq!(report.failed, 1);
-    assert_eq!(report.added, 1);
+fn a_file_that_fails_to_read_is_left_out_with_why_and_the_scan_goes_on() {
+    let denied = || io::Error::from(io::ErrorKind::PermissionDenied);
+    type Reader = fn(&Path) -> Result<TrackMeta>;
+    let failures: [(Reader, LeftOutReason); 2] = [
+        (
+            |_| panic!("simulated parser bug"),
+            LeftOutReason::Tags("the tag parser panicked".into()),
+        ),
+        (
+            |path| {
+                Err(CoreError::Io {
+                    path: path.to_path_buf(),
+                    source: io::Error::from(io::ErrorKind::PermissionDenied),
+                })
+            },
+            LeftOutReason::Unreadable(denied().to_string()),
+        ),
+    ];
+    for (fail, reason) in failures {
+        let dir = TempDir::new();
+        dir.touch("bad.mp3");
+        dir.touch("good.mp3");
+        let mut conn = db::open_in_memory().unwrap();
+        let report = scan_with(&mut conn, dir.path(), ScanMode::Thorough, |path: &Path| {
+            if path.ends_with("bad.mp3") {
+                return fail(path);
+            }
+            Ok(meta("Artist", "Album", 1))
+        })
+        .unwrap();
+        let bad = std::fs::canonicalize(dir.path()).unwrap().join("bad.mp3");
+        assert_eq!(report.left_out, [LeftOut { path: bad, reason }]);
+        assert_eq!(report.added, 1);
+    }
 }
 
 // Creating the links needs `std::os::unix`; the code under test is portable.
@@ -108,10 +128,14 @@ fn symlinks_inside_a_folder_are_not_followed() {
     )
     .unwrap();
     assert_eq!(report.added, 1, "{report:?}");
-    assert_eq!(report.walk_errors, 0, "{report:?}");
+    let music = std::fs::canonicalize(dir.path().join("music")).unwrap();
     assert_eq!(
-        report.skipped_links, 1,
-        "only the linked file counts: {report:?}"
+        report.left_out,
+        [LeftOut {
+            path: music.join("link.mp3"),
+            reason: LeftOutReason::Link,
+        }],
+        "only the linked file is left out"
     );
     let paths: Vec<String> = conn
         .prepare("SELECT path FROM tracks")
@@ -121,6 +145,91 @@ fn symlinks_inside_a_folder_are_not_followed() {
         .collect::<rusqlite::Result<_>>()
         .unwrap();
     assert!(paths[0].ends_with("real/01.mp3"), "{paths:?}");
+}
+
+// Linux takes any bytes in a name; macOS refuses ones that aren't UTF-8.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_whose_name_isnt_utf8_is_left_out_by_its_path() {
+    let dir = TempDir::new();
+    let mut name = non_utf8_name();
+    name.push(".mp3");
+    let path = std::fs::canonicalize(dir.path()).unwrap().join(name);
+    #[expect(clippy::disallowed_methods, reason = "test fixture in a temp dir")]
+    std::fs::write(&path, b"").unwrap();
+    dir.touch("good.mp3");
+    let mut conn = db::open_in_memory().unwrap();
+    let report = scan_with(&mut conn, dir.path(), ScanMode::Thorough, |_: &Path| {
+        Ok(meta("A", "B", 1))
+    })
+    .unwrap();
+    assert_eq!(report.added, 1, "{report:?}");
+    assert_eq!(
+        report.left_out,
+        [LeftOut {
+            path,
+            reason: LeftOutReason::NonUtf8Name,
+        }]
+    );
+}
+
+// Taking away read permission needs `std::os::unix`. Root (as in the Linux
+// CI container) reads the folder anyway, so there it checks nothing.
+#[cfg(unix)]
+#[test]
+fn a_folder_that_cant_be_listed_is_left_out_with_why() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new();
+    dir.touch("locked/01.mp3");
+    let locked = std::fs::canonicalize(dir.path()).unwrap().join("locked");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(&locked).is_ok() {
+        return;
+    }
+    let mut conn = db::open_in_memory().unwrap();
+    let report = scan_with(&mut conn, dir.path(), ScanMode::Thorough, |_: &Path| {
+        Ok(meta("A", "B", 1))
+    });
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let report = report.unwrap();
+    let [
+        LeftOut {
+            path,
+            reason: LeftOutReason::Unreadable(why),
+        },
+    ] = report.left_out.as_slice()
+    else {
+        panic!("{report:?}");
+    };
+    assert_eq!(path, &locked);
+    assert!(why.contains("ermission denied"), "{why}");
+}
+
+#[test]
+fn what_was_left_out_is_counted_by_reason() {
+    let file = |reason| LeftOut {
+        path: PathBuf::from("x"),
+        reason,
+    };
+    assert_eq!(LeftOutCounts::of(&[]), LeftOutCounts::default());
+    let files = [
+        file(LeftOutReason::Tags("bad".into())),
+        file(LeftOutReason::Link),
+        file(LeftOutReason::Unreadable("denied".into())),
+        file(LeftOutReason::Link),
+        file(LeftOutReason::NonUtf8Name),
+        file(LeftOutReason::Tags("worse".into())),
+        file(LeftOutReason::Link),
+    ];
+    assert_eq!(
+        LeftOutCounts::of(&files),
+        LeftOutCounts {
+            tags: 2,
+            links: 3,
+            non_utf8_names: 1,
+            unreadable: 1,
+        }
+    );
 }
 
 // Creating the links needs `std::os::unix`; the code under test is portable.
@@ -1133,7 +1242,7 @@ fn a_quick_scan_skips_unchanged_directories() {
     let (_dir, music, mut conn) = settled_library();
     let (report, reads) = scan_counting(&mut conn, &music, ScanMode::Quick);
     assert_eq!(reads, 0);
-    assert_eq!(report.dirs_skipped, 2, "{report:?}");
+    assert_eq!(report.dirs_skipped.len(), 2, "{report:?}");
     assert_eq!((report.unchanged, report.files_found), (2, 2), "{report:?}");
     assert_eq!(report.missing, 0);
     assert_eq!(present_titles(&conn), ["1", "2"]);
@@ -1144,7 +1253,11 @@ fn a_quick_scan_finds_a_file_added_deep_inside_an_unchanged_directory() {
     let (dir, music, mut conn) = settled_library();
     dir.touch("music/sub/3.mp3");
     let (report, _) = scan_counting(&mut conn, &music, ScanMode::Quick);
-    assert_eq!((report.added, report.dirs_skipped), (1, 1), "{report:?}");
+    assert_eq!(
+        (report.added, report.dirs_skipped.len()),
+        (1, 1),
+        "{report:?}"
+    );
     assert_eq!(present_titles(&conn), ["1", "2", "3"]);
 }
 
@@ -1183,11 +1296,15 @@ fn a_quick_scan_rereads_tracks_read_by_an_older_reader_once() {
         (1, 1, 1),
         "{report:?}"
     );
-    assert_eq!(report.dirs_skipped, 1, "only `sub` holds a stale track");
+    assert_eq!(
+        report.dirs_skipped.len(),
+        1,
+        "only `sub` holds a stale track"
+    );
     assert_eq!(query::track_list(&conn).unwrap(), before);
 
     let (report, reads) = scan_counting(&mut conn, &music, ScanMode::Quick);
-    assert_eq!((reads, report.dirs_skipped), (0, 2), "{report:?}");
+    assert_eq!((reads, report.dirs_skipped.len()), (0, 2), "{report:?}");
 }
 
 #[test]
@@ -1221,7 +1338,7 @@ fn a_just_modified_directory_is_not_skipped_by_the_next_quick_scan() {
     let mut conn = db::open_in_memory().unwrap();
     scan_counting(&mut conn, &music, ScanMode::Thorough);
     let (report, _) = scan_counting(&mut conn, &music, ScanMode::Quick);
-    assert_eq!(report.dirs_skipped, 0, "{report:?}");
+    assert_eq!(report.dirs_skipped.len(), 0, "{report:?}");
     assert_eq!(report.unchanged, 1);
 }
 
@@ -1239,7 +1356,7 @@ fn a_directory_changed_just_before_the_newest_change_seen_is_not_skipped() {
     let mut conn = db::open_in_memory().unwrap();
     scan_counting(&mut conn, &music, ScanMode::Thorough);
     let (report, _) = scan_counting(&mut conn, &music, ScanMode::Quick);
-    assert_eq!(report.dirs_skipped, 1, "only music: {report:?}");
+    assert_eq!(report.dirs_skipped.len(), 1, "only music: {report:?}");
     assert_eq!(report.unchanged, 1);
 }
 
@@ -1255,7 +1372,7 @@ fn a_file_dated_in_the_future_does_not_settle_a_just_modified_directory() {
     let mut conn = db::open_in_memory().unwrap();
     scan_counting(&mut conn, &music, ScanMode::Thorough);
     let (report, _) = scan_counting(&mut conn, &music, ScanMode::Quick);
-    assert_eq!(report.dirs_skipped, 0, "{report:?}");
+    assert_eq!(report.dirs_skipped.len(), 0, "{report:?}");
 }
 
 #[test]
@@ -1273,7 +1390,7 @@ fn a_file_whose_tags_failed_is_retried_by_a_quick_scan() {
         Ok(meta("A", "Album", 1))
     })
     .unwrap();
-    assert_eq!(report.failed, 1);
+    assert_eq!(report.left_out.len(), 1, "{report:?}");
 
     let (report, reads) = scan_counting(&mut conn, &music, ScanMode::Quick);
     assert_eq!((report.added, reads), (1, 1), "{report:?}");
@@ -1403,7 +1520,8 @@ fn an_interrupted_scan_resumes_from_the_directories_it_had_not_finished() {
     assert_eq!(reads, per_dir, "only the unfinished directory is read");
     assert_eq!(report.added, per_dir);
     assert_eq!(
-        report.dirs_skipped, 6,
+        report.dirs_skipped.len(),
+        6,
         "the root and five finished: {report:?}"
     );
     assert_eq!(report.missing, 0);
@@ -1417,7 +1535,7 @@ fn a_subdirectory_gone_from_a_directory_whose_mtime_is_unchanged_is_marked_missi
     dir.remove_dir("music/sub");
     dir.set_mtime("music", mtime);
     let (report, _) = scan_counting(&mut conn, &music, ScanMode::Quick);
-    assert_eq!(report.dirs_skipped, 1, "{report:?}");
+    assert_eq!(report.dirs_skipped.len(), 1, "{report:?}");
     assert_eq!(missing_titles(&conn), ["2"]);
 }
 
@@ -1556,10 +1674,34 @@ fn a_scan_stopped_while_listing_changes_nothing_and_marks_nothing_missing() {
         &|| true,
     )
     .unwrap();
-    assert!(report.stopped);
+    assert!(report.stopped && !report.listed, "{report:?}");
     assert_eq!(query::track_list(&conn).unwrap(), tracks);
     assert!(missing_titles(&conn).is_empty());
     assert_eq!(stored_dir_rows(&conn), dirs);
+}
+
+#[test]
+fn a_scan_stopped_while_reading_has_listed_everything() {
+    let dir = TempDir::new();
+    dir.touch("a/1.mp3");
+    dir.touch("a/2.mp3");
+    let mut conn = db::open_in_memory().unwrap();
+    // Asked once per directory while listing, then once per file read.
+    let asked = AtomicUsize::new(0);
+    let report = scan_until(
+        &mut conn,
+        dir.path(),
+        ScanMode::Thorough,
+        titled,
+        &mut |_| {},
+        &|| asked.fetch_add(1, Ordering::Relaxed) >= 2,
+    )
+    .unwrap();
+    assert!(report.stopped && report.listed, "{report:?}");
+    assert_eq!(report.added, 1, "{report:?}");
+
+    let report = scan_with(&mut conn, dir.path(), ScanMode::Thorough, titled).unwrap();
+    assert!(!report.stopped && report.listed, "{report:?}");
 }
 
 proptest::proptest! {

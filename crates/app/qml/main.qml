@@ -43,6 +43,10 @@ ApplicationWindow {
                 text: qsTr("&Unavailable Tracks (%1)…").arg(Library.missingCount)
                 onTriggered: unavailableList.open()
             }
+            Action {
+                text: qsTr("Files &Not Added (%1)…").arg(Library.leftOutCount)
+                onTriggered: leftOutList.open()
+            }
             MenuSeparator {}
             Action {
                 text: Qt.platform.os === "windows" ? qsTr("E&xit") : qsTr("&Quit")
@@ -173,10 +177,18 @@ ApplicationWindow {
         id: settings
         anchors.centerIn: parent
         width: Math.min(560, window.width - 40)
+        onShowLeftOutRequested: leftOutList.open()
     }
 
     UnavailableDialog {
         id: unavailableList
+        anchors.centerIn: parent
+        width: Math.min(720, window.width - 40)
+        height: Math.min(560, window.height - 40)
+    }
+
+    LeftOutDialog {
+        id: leftOutList
         anchors.centerIn: parent
         width: Math.min(720, window.width - 40)
         height: Math.min(560, window.height - 40)

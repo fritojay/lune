@@ -15,8 +15,8 @@ use std::time::SystemTime;
 
 use cxx_qt::{CxxQtThread, Threading};
 use lune_core::{
-    BrowseState, Catalog, Library, ListId, MissingTrack, Playlist, Queue, QueueItem, SlotId,
-    SortColumn, View, WindowState,
+    BrowseState, Catalog, LeftOut, Library, ListId, MissingTrack, Playlist, Queue, QueueItem,
+    SlotId, SortColumn, View, WindowState,
 };
 use lune_engine::{EntryId, PlayQueue, QueueEntry};
 
@@ -30,6 +30,8 @@ pub enum Change {
     /// (a rescan), so the list keeps its position.
     ViewRefreshed,
     Missing,
+    /// [`left_out`] changed.
+    LeftOut,
     Playlists,
     /// Its contents, order, or shuffle. The current item is `PlayerController.queueIndex`.
     Queue,
@@ -52,6 +54,7 @@ struct UiState {
     catalog: Option<Rc<Catalog>>,
     view: Rc<View>,
     missing: Rc<Vec<MissingTrack>>,
+    left_out: Arc<Vec<LeftOut>>,
     playlists: Rc<Vec<Playlist>>,
     /// For the next new playlist; `None` until the playlists have loaded.
     unused_playlist_id: Option<ListId>,
@@ -87,6 +90,16 @@ pub fn missing() -> Rc<Vec<MissingTrack>> {
 pub fn set_missing(tracks: Vec<MissingTrack>) {
     UI.with_borrow_mut(|ui| ui.missing = Rc::new(tracks));
     notify(Change::Missing);
+}
+
+/// What the scans saw but didn't add, shared with the library thread.
+pub fn left_out() -> Arc<Vec<LeftOut>> {
+    UI.with_borrow(|ui| Arc::clone(&ui.left_out))
+}
+
+pub fn set_left_out(files: Arc<Vec<LeftOut>>) {
+    UI.with_borrow_mut(|ui| ui.left_out = files);
+    notify(Change::LeftOut);
 }
 
 pub fn playlists() -> Rc<Vec<Playlist>> {
