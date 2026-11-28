@@ -9,7 +9,7 @@ Read `DEVELOPMENT.md` (setup, build, run) before making changes. The rules below
 - Never write, rename, move, or delete music files. Open them read-only. Never call lofty write APIs. The app writes only its own SQLite DB, cache, config, and log.
 - Audio callback: no allocation, locks, I/O, or logging. It only drains a lock-free ring buffer.
 - Startup loads from SQLite. Scanning runs in the background. Lists are virtualized. Art is decoded off the UI thread.
-- Gapless playback is required.
+- Gapless playback is required, and on by default. Preferences can turn it off: each track then plays out before the next one opens, as in players without gapless playback.
 - No Qt types or Qt crate dependencies outside `crates/app`.
 - UI is QML. Rust exposes list models and controller objects (player, search/filter, library manager, window layout) that QML only binds to and calls. No business logic in QML.
 

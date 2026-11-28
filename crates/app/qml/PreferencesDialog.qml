@@ -148,6 +148,12 @@ Dialog {
             onActivated: index => Preferences.outputDevice = index
         }
 
+        CheckBox {
+            text: qsTr("Gapless playback")
+            checked: Preferences.gapless
+            onToggled: Preferences.gapless = checked
+        }
+
         Label {
             Layout.topMargin: 12
             text: qsTr("Scrolling")

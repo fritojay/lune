@@ -11,6 +11,7 @@ use crate::VecQueue;
 use crate::output::Signal;
 use crate::render::Renderer;
 use crate::test_util::{TempDir, write_wav};
+use crate::units::duration_to_frames;
 
 const OUT_RATE: u32 = 48_000;
 
@@ -18,12 +19,18 @@ struct Sim {
     decoder: Decoder,
     renderer: Renderer,
     captured: u64,
+    /// Frames rendered silent between the first audio and the end.
+    silence: u64,
     _commands: mpsc::Sender<Command>,
     wakes: mpsc::Receiver<Signal>,
 }
 
 impl Sim {
     fn new(queue: Arc<dyn PlayQueue>, ring_frames: usize) -> Self {
+        Self::with_gapless(queue, ring_frames, true)
+    }
+
+    fn with_gapless(queue: Arc<dyn PlayQueue>, ring_frames: usize, gapless: bool) -> Self {
         let shared = Arc::new(Shared::new());
         let (producer, samples) = RingBuffer::new(ring_frames * 2);
         let (discards_tx, discards_rx) = RingBuffer::new(64);
@@ -44,15 +51,34 @@ impl Sim {
                 discards_tx,
                 command_rx,
                 wake,
+                gapless,
             ),
             renderer: Renderer::new(samples, discards_rx, 2, shared),
             captured: 0,
+            silence: 0,
             _commands: commands,
             wakes,
         }
     }
 
+    /// One step of `Decoder::run`, without a command. Its waits pass as the
+    /// output would meanwhile: a timed one plays that much and, as there,
+    /// is checked again; one for a command, or a timed one that played
+    /// nothing (paused), ends the step.
     fn pump(&mut self) {
+        loop {
+            self.decoder.update_expecting_data();
+            match self.decoder.wait() {
+                Wait::Poll => break,
+                Wait::For(wait) => {
+                    let frames = duration_to_frames(wait, OUT_RATE).max(1);
+                    if self.render(usize::try_from(frames).unwrap()) == 0 {
+                        return;
+                    }
+                }
+                Wait::UntilCommand => return,
+            }
+        }
         let d = &mut self.decoder;
         d.flush_discards();
         if d.out_pos < d.out.len() {
@@ -64,15 +90,23 @@ impl Sim {
         d.work();
     }
 
-    fn render(&mut self, frames: usize) {
+    /// Returns the frames that came from the ring.
+    fn render(&mut self, frames: usize) -> usize {
         let mut buf = vec![0.0; frames * 2];
-        self.captured += self.renderer.render(&mut buf) as u64;
+        let got = self.renderer.render(&mut buf);
+        let started = self.captured > 0;
+        self.captured += got as u64;
+        if started && !self.finished() {
+            self.silence += (frames - got) as u64;
+        }
+        got
     }
 
     fn finished(&self) -> bool {
         let d = &self.decoder;
         d.current.is_none()
             && d.resume_skip.is_none()
+            && d.ended.is_none()
             && d.out_pos >= d.out.len()
             && self.renderer.available_frames() == 0
     }
@@ -408,20 +442,26 @@ fn heard(sim: &mut Sim) -> Vec<(EntryId, u64)> {
 
 #[test]
 fn a_repeated_track_plays_again_whole_as_a_new_playthrough() {
-    let dir = TempDir::new();
-    let a = dir.join("a.wav");
-    write_wav(&a, OUT_RATE, 2, 0, 10_000);
-    let queue = Repeating::new(vec![a], 1, false);
-    let mut sim = Sim::new(queue.clone(), 4096);
-    assert!(
-        sim.decoder
-            .handle(Command::Play(queue.entry(0), Duration::ZERO))
-    );
-    assert_eq!(heard(&mut sim), [(EntryId(0), 1), (EntryId(0), 2)]);
-    assert_eq!(
-        sim.captured, 20_000,
-        "both playthroughs, with nothing cut or added"
-    );
+    for gapless in [true, false] {
+        let dir = TempDir::new();
+        let a = dir.join("a.wav");
+        write_wav(&a, OUT_RATE, 2, 0, 10_000);
+        let queue = Repeating::new(vec![a], 1, false);
+        let mut sim = Sim::with_gapless(queue.clone(), 4096, gapless);
+        assert!(
+            sim.decoder
+                .handle(Command::Play(queue.entry(0), Duration::ZERO))
+        );
+        assert_eq!(
+            heard(&mut sim),
+            [(EntryId(0), 1), (EntryId(0), 2)],
+            "gapless {gapless}"
+        );
+        assert_eq!(
+            sim.captured, 20_000,
+            "gapless {gapless}: both playthroughs, with nothing cut or added"
+        );
+    }
 }
 
 #[test]
@@ -519,4 +559,218 @@ fn a_seek_stays_in_its_playthrough_and_a_play_from_a_position_starts_one() {
             .handle(Command::Play(entry, Duration::from_millis(200)))
     );
     assert_eq!(playthroughs(&mut sim), [2]);
+}
+
+/// Plays until the decoder is done with the playing track and only its
+/// last audio is left in the ring.
+fn play_until_it_plays_out(sim: &mut Sim) {
+    for _ in 0..100_000 {
+        sim.pump();
+        if current_id(sim).is_none() && sim.renderer.available_frames() > 0 {
+            return;
+        }
+        sim.render(16);
+    }
+    panic!("the track never played out");
+}
+
+/// A's lengths put its end at different points of the resampler's chunk
+/// and filter delay, whose tail must still play before the gap; B at the
+/// output rate starts a stream of another format.
+#[test]
+fn without_gapless_the_next_track_opens_once_the_last_one_has_played_out() {
+    for (a_len, b_rate) in [
+        (3_000, 44_100),
+        (7_777, 44_100),
+        (15_000, 44_100),
+        (7_777, OUT_RATE),
+    ] {
+        let dir = TempDir::new();
+        let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+        write_wav(&a, 44_100, 2, 0, a_len);
+        write_wav(&b, b_rate, 2, 0, 9_000);
+        let b_frames = if b_rate == OUT_RATE {
+            9_000
+        } else {
+            out_frames(9_000)
+        };
+        let queue = Arc::new(VecQueue::from_paths([a, b]));
+        let mut sim = Sim::with_gapless(queue.clone(), 4096, false);
+        assert!(
+            sim.decoder
+                .handle(Command::Play(queue.first().unwrap(), Duration::ZERO))
+        );
+
+        let mut opened_after = None;
+        for _ in 0..100_000 {
+            sim.pump();
+            if current_id(&sim) == Some(EntryId(1)) {
+                opened_after = Some((sim.captured, sim.renderer.available_frames()));
+                break;
+            }
+            sim.render(256);
+        }
+        let case = format!("A = {a_len}, B at {b_rate} Hz");
+        assert_eq!(
+            opened_after,
+            Some((out_frames(a_len), 0)),
+            "{case}: B opens after all of A played, and not before"
+        );
+
+        sim.run_to_end();
+        assert_eq!(sim.captured, out_frames(a_len) + b_frames, "{case}");
+        assert_eq!(
+            sim.renderer.shared().underruns.load(Ordering::Relaxed),
+            0,
+            "{case}: the gap is not an underrun"
+        );
+    }
+}
+
+/// Each step renders 256 frames (5 ms), and the decoder's waits play
+/// what they last. With gapless off the gap is the steps that open B,
+/// decode its first audio, and push it: a wait added past the end of A, or
+/// a track's tail played late, would lengthen it.
+#[test]
+fn without_gapless_the_gap_is_only_the_time_to_open_the_next_track() {
+    for (gapless, most) in [(true, 0), (false, 2 * 256)] {
+        let dir = TempDir::new();
+        let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+        write_wav(&a, 44_100, 2, 0, 7_777);
+        write_wav(&b, 44_100, 2, 7_777, 9_000);
+        let queue = Arc::new(VecQueue::from_paths([a, b]));
+        let mut sim = Sim::with_gapless(queue.clone(), 4096, gapless);
+        assert!(
+            sim.decoder
+                .handle(Command::Play(queue.first().unwrap(), Duration::ZERO))
+        );
+        sim.run_to_end();
+        assert_eq!(sim.captured, out_frames(7_777) + out_frames(9_000));
+        assert!(
+            sim.silence <= most,
+            "gapless {gapless}: {} silent frames",
+            sim.silence
+        );
+    }
+}
+
+/// What a command, given while A plays out, leads to: what is heard next,
+/// and the frames played in all, from those played before it.
+type PlayOutCase = (
+    &'static str,
+    fn(&mut Sim, &VecQueue),
+    &'static [(u64, u64)],
+    fn(u64) -> u64,
+);
+
+#[test]
+fn without_gapless_commands_while_a_track_plays_out_take_effect() {
+    const LEN: u64 = 6_000;
+    let cases: [PlayOutCase; 6] = [
+        (
+            "next",
+            |sim, _| assert!(sim.decoder.handle(Command::Next)),
+            &[(1, 2), (2, 3)],
+            |before| before + 2 * LEN,
+        ),
+        (
+            "stop",
+            |sim, _| assert!(sim.decoder.handle(Command::Stop)),
+            &[],
+            |before| before,
+        ),
+        (
+            "seek",
+            |sim, _| {
+                assert!(sim.decoder.handle(Command::Seek(Duration::from_millis(50))));
+            },
+            &[(0, 1), (1, 2), (2, 3)],
+            |before| before + (LEN - 2_400) + 2 * LEN,
+        ),
+        (
+            "previous, at the first track",
+            |sim, _| assert!(sim.decoder.handle(Command::Previous)),
+            &[(0, 1), (1, 2), (2, 3)],
+            |before| before + 3 * LEN,
+        ),
+        (
+            "gapless turned back on",
+            |sim, _| assert!(sim.decoder.handle(Command::SetGapless(true))),
+            &[(0, 1), (1, 2), (2, 3)],
+            |_| 3 * LEN,
+        ),
+        (
+            "queue edit",
+            |sim, queue| {
+                let a = queue.first().unwrap();
+                let c = queue.next_after(EntryId(1)).unwrap();
+                queue.set(vec![a, c]);
+                assert!(sim.decoder.handle(Command::QueueChanged));
+                assert_eq!(current_id(sim), None, "C waits for A to play out");
+            },
+            &[(0, 1), (2, 2)],
+            |_| 2 * LEN,
+        ),
+    ];
+    for (name, command, then, total) in cases {
+        let dir = TempDir::new();
+        let paths = ["a", "b", "c"].map(|name| {
+            let path = dir.join(&format!("{name}.wav"));
+            write_wav(&path, OUT_RATE, 2, 0, LEN);
+            path
+        });
+        let queue = Arc::new(VecQueue::from_paths(paths));
+        let mut sim = Sim::with_gapless(queue.clone(), 4096, false);
+        assert!(
+            sim.decoder
+                .handle(Command::Play(queue.first().unwrap(), Duration::ZERO))
+        );
+        play_until_it_plays_out(&mut sim);
+        let before = sim.captured;
+
+        command(&mut sim, &queue);
+        let then: Vec<_> = then.iter().map(|&(id, p)| (EntryId(id), p)).collect();
+        assert_eq!(heard(&mut sim), then, "{name}");
+        assert_eq!(sim.captured, total(before), "{name}");
+    }
+}
+
+#[test]
+fn without_gapless_a_pause_while_a_track_plays_out_holds_the_next_one_back() {
+    let dir = TempDir::new();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, OUT_RATE, 2, 0, 30_000);
+    write_wav(&b, OUT_RATE, 2, 0, 30_000);
+    let queue = Arc::new(VecQueue::from_paths([a, b]));
+    // Holds more than `RING_FULL_WAIT` of A's end.
+    let mut sim = Sim::with_gapless(queue.clone(), 24_000, false);
+    assert!(
+        sim.decoder
+            .handle(Command::Play(queue.first().unwrap(), Duration::ZERO))
+    );
+    play_until_it_plays_out(&mut sim);
+    let before = sim.captured;
+
+    let shared = sim.renderer.shared();
+    shared.paused.store(true, Ordering::Relaxed);
+    for _ in 0..1_000 {
+        sim.pump();
+        sim.render(256);
+    }
+    assert_eq!(sim.captured, before, "nothing plays while paused");
+    assert_eq!(current_id(&sim), None, "B waits for A to play out");
+    assert_eq!(
+        sim.decoder.wait(),
+        Wait::UntilCommand,
+        "no timed wakeups while paused"
+    );
+
+    shared.paused.store(false, Ordering::Relaxed);
+    assert!(sim.decoder.handle(Command::Resumed));
+    assert!(
+        matches!(sim.decoder.wait(), Wait::For(wait) if wait <= RING_FULL_WAIT),
+        "a capped wait for A to play out"
+    );
+    assert_eq!(heard(&mut sim), [(EntryId(0), 1), (EntryId(1), 2)]);
+    assert_eq!(sim.captured, 60_000);
 }

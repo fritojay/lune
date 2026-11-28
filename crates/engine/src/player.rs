@@ -28,6 +28,9 @@ pub struct PlayerConfig {
     /// such as a sleeping disk waking to open the next track; it does not
     /// delay pause, seek, or skip (stale audio is discarded).
     pub buffer: Duration,
+    /// Off, the next track is opened only after the current one has played
+    /// out, as players that don't do gapless playback do.
+    pub gapless: bool,
 }
 
 impl Default for PlayerConfig {
@@ -35,6 +38,7 @@ impl Default for PlayerConfig {
         Self {
             output: OutputKind::Device { preferred: None },
             buffer: Duration::from_secs(5),
+            gapless: true,
         }
     }
 }
@@ -114,6 +118,7 @@ impl Player {
             discards,
             command_rx,
             output.waker(),
+            config.gapless,
         );
         let decoder = std::thread::Builder::new()
             .name("lune-decoder".into())
@@ -153,6 +158,8 @@ impl Player {
     pub fn resume(&self) {
         self.wake_output();
         self.shared.paused.store(false, Ordering::Relaxed);
+        // Only fails once the decoder has stopped.
+        let _ = self.commands.send(Command::Resumed);
     }
 
     fn wake_output(&self) {
@@ -191,6 +198,12 @@ impl Player {
     /// next, it is dropped and the new next track is decoded instead.
     pub fn queue_changed(&self) -> Result<()> {
         self.send(Command::QueueChanged)
+    }
+
+    /// Changes [`PlayerConfig::gapless`]. Takes effect from the next track
+    /// whose decoding ends: one already buffered stays.
+    pub fn set_gapless(&self, gapless: bool) -> Result<()> {
+        self.send(Command::SetGapless(gapless))
     }
 
     /// Output volume, 0.0 to 1.0.

@@ -101,9 +101,19 @@ pub fn play_to_end(
     queue: Arc<dyn PlayQueue>,
     first: crate::QueueEntry,
 ) -> u64 {
+    play_to_end_with(dir, |out| capture(out, rate), queue, first)
+}
+
+/// [`play_to_end`] with the config `config` makes for the capture file.
+pub fn play_to_end_with(
+    dir: &TempDir,
+    config: impl FnOnce(&Path) -> PlayerConfig,
+    queue: Arc<dyn PlayQueue>,
+    first: crate::QueueEntry,
+) -> u64 {
     let out = dir.join("capture.wav");
     {
-        let player = Player::new(capture(&out, rate), queue).unwrap();
+        let player = Player::new(config(&out), queue).unwrap();
         player.play(first).unwrap();
         wait_stopped(&player);
     }

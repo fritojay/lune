@@ -27,6 +27,9 @@ pub struct Settings {
     /// the system default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_device: Option<String>,
+    /// Off: each track plays out to its end before the next one is opened,
+    /// which leaves a short gap between them.
+    pub gapless: bool,
     /// Whether the file lists the library folders. One that doesn't (left
     /// empty by a crash, or edited by hand) leaves the library as it is
     /// rather than pruning it to no folders, and is saved without the list
@@ -45,6 +48,7 @@ impl Default for Settings {
             library_folders: Vec::new(),
             scroll_speed: DEFAULT_SCROLL_SPEED,
             output_device: None,
+            gapless: true,
             folders_listed: true,
             extra: toml::Table::new(),
         }

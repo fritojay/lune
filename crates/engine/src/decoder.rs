@@ -1,7 +1,8 @@
 //! The decoder thread. It keeps the ring buffer full: when a track ends it
 //! asks the [`PlayQueue`] for the next entry and keeps decoding straight into
 //! the same ring, so the next track is pre-buffered behind the current one
-//! and the output stream never stops (gapless).
+//! and the output stream never stops (gapless). With gapless off, it waits
+//! for the ring to play out first.
 
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
@@ -20,7 +21,9 @@ use crate::timeline::{Boundary, Timeline, lock};
 use crate::units::frames_to_duration;
 
 /// Commands still wake it at once; this only paces refilling, which the
-/// ring's seconds of audio leave plenty of time for.
+/// ring's seconds of audio leave plenty of time for, and the check for the
+/// end of a track playing out, so a capture faster than real time isn't
+/// kept waiting.
 const RING_FULL_WAIT: Duration = Duration::from_millis(100);
 const MAX_OPEN_ATTEMPTS: usize = 32;
 const PREVIOUS_RESTART_AFTER: Duration = Duration::from_secs(3);
@@ -32,7 +35,23 @@ pub(crate) enum Command {
     Next,
     Previous,
     QueueChanged,
+    SetGapless(bool),
+    /// Playback was unpaused: a track playing out, waited on without a
+    /// timeout while paused, can end now.
+    Resumed,
     Shutdown,
+}
+
+/// How the decoder loop waits for a command before its next step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wait {
+    /// It has work: only takes a command already sent.
+    Poll,
+    /// A track plays out of the ring: up to this long, as it may be done
+    /// by then.
+    For(Duration),
+    /// Nothing to do until a command comes.
+    UntilCommand,
 }
 
 struct Current {
@@ -83,6 +102,10 @@ pub(crate) struct Decoder {
     /// The first of the unplayable entries skipped in a row, so a repeating
     /// queue of them stops after one lap instead of going round forever.
     failed_since: Option<EntryId>,
+    gapless: bool,
+    /// With gapless off, the entry whose audio is all decoded: the next one
+    /// opens once the ring has played it out.
+    ended: Option<EntryId>,
 }
 
 impl Decoder {
@@ -99,6 +122,7 @@ impl Decoder {
         discards: Producer<DiscardRange>,
         commands: Receiver<Command>,
         wake: Waker,
+        gapless: bool,
     ) -> Self {
         Self {
             queue,
@@ -120,30 +144,31 @@ impl Decoder {
             resume_skip: None,
             playthroughs: 0,
             failed_since: None,
+            gapless,
+            ended: None,
         }
     }
 
     pub(crate) fn run(mut self) {
         loop {
-            let has_work = self.current.is_some()
-                || self.out_pos < self.out.len()
-                || self.resume_skip.is_some();
-            self.shared
-                .expecting_data
-                .store(has_work && !self.refilling, Ordering::Release);
+            self.update_expecting_data();
 
             // Commands first, so controls stay responsive.
-            let command = if has_work {
-                match self.commands.try_recv() {
+            let command = match self.wait() {
+                Wait::Poll => match self.commands.try_recv() {
                     Ok(c) => Some(c),
                     Err(TryRecvError::Empty) => None,
                     Err(TryRecvError::Disconnected) => return,
-                }
-            } else {
-                match self.commands.recv() {
+                },
+                Wait::For(wait) => match self.commands.recv_timeout(wait) {
+                    Ok(c) => Some(c),
+                    Err(RecvTimeoutError::Timeout) => None,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                },
+                Wait::UntilCommand => match self.commands.recv() {
                     Ok(c) => Some(c),
                     Err(_) => return,
-                }
+                },
             };
             if let Some(command) = command {
                 if !self.handle(command) {
@@ -173,7 +198,60 @@ impl Decoder {
         }
     }
 
+    fn has_work(&self) -> bool {
+        self.current.is_some()
+            || self.out_pos < self.out.len()
+            || self.resume_skip.is_some()
+            || self.ended.is_some()
+    }
+
+    /// With gapless off, the playing track's audio is all in the ring.
+    fn playing_out(&self) -> bool {
+        self.ended.is_some() && self.out_pos >= self.out.len()
+    }
+
+    /// The gap after a track has played out is silence on purpose, not an
+    /// underrun; running out while its last audio still waits to be pushed is.
+    fn update_expecting_data(&self) {
+        let expecting = self.has_work() && !self.refilling && !self.playing_out();
+        self.shared
+            .expecting_data
+            .store(expecting, Ordering::Release);
+    }
+
+    fn unplayed_frames(&self) -> u64 {
+        self.written
+            .saturating_sub(self.shared.consumed.load(Ordering::Acquire))
+    }
+
+    /// While paused, a track playing out can't end before
+    /// [`Command::Resumed`].
+    fn wait(&self) -> Wait {
+        if !self.has_work() {
+            return Wait::UntilCommand;
+        }
+        let left = self.unplayed_frames();
+        if !self.playing_out() || left == 0 {
+            return Wait::Poll;
+        }
+        if self.shared.paused.load(Ordering::Relaxed) {
+            return Wait::UntilCommand;
+        }
+        Wait::For(frames_to_duration(left, self.spec.rate).min(RING_FULL_WAIT))
+    }
+
     fn work(&mut self) {
+        if let Some(ended) = self.ended {
+            if self.unplayed_frames() == 0 {
+                self.ended = None;
+                // The output may sleep in the gap; the next track's first
+                // audio must wake it.
+                self.refilling = true;
+                let next = self.queue.next_after(ended);
+                self.start_entry(next, Duration::ZERO);
+            }
+            return;
+        }
         match self.resume_skip.take() {
             Some(entry) => self.start_entry(Some(entry), Duration::ZERO),
             None => self.decode_step(),
@@ -239,6 +317,8 @@ impl Decoder {
                 self.failed_since = None;
                 self.revalidate_next();
             }
+            Command::SetGapless(gapless) => self.gapless = gapless,
+            Command::Resumed => {}
         }
         true
     }
@@ -317,6 +397,7 @@ impl Decoder {
         self.current = None;
         self.resume_skip = None;
         self.failed_since = None;
+        self.ended = None;
         let mut timeline = lock(&self.timeline);
         timeline.boundaries.clear();
         timeline.end = None;
@@ -442,13 +523,23 @@ impl Decoder {
         }
     }
 
-    /// Doesn't discard anything: this is the gapless path.
+    /// Doesn't discard anything: the transition at the end of a track.
     fn advance(&mut self) {
-        let next = self
-            .current
-            .take()
-            .and_then(|c| self.queue.next_after(c.entry.id));
-        self.start_entry(next, Duration::ZERO);
+        let ended = self.current.take().map(|c| c.entry.id);
+        match ended {
+            Some(id) if !self.gapless => {
+                // Each track gets its own resampler stream, so its tail
+                // plays out with it.
+                if let Err(err) = self.converter.finish(&mut self.out) {
+                    tracing::warn!(err = %err, "resampler flush failed");
+                }
+                self.ended = Some(id);
+            }
+            _ => {
+                let next = ended.and_then(|id| self.queue.next_after(id));
+                self.start_entry(next, Duration::ZERO);
+            }
+        }
     }
 
     /// After a queue edit: checks that every track buffered after the playing
@@ -488,6 +579,8 @@ impl Decoder {
                     self.start_entry(expected, Duration::ZERO);
                 }
             }
+            // The next one is asked for once the ended track has played out.
+            None if self.ended.is_some() => {}
             None => {
                 // Decoding had reached the end of the queue; resume if the
                 // queue now has more.
@@ -530,6 +623,7 @@ impl Decoder {
         self.converter = Converter::new(self.spec.rate, self.spec.channels);
         self.converter_base = self.written + (self.out.len() / channels) as u64;
         self.current = None;
+        self.ended = None;
         self.start_entry(next, Duration::ZERO);
     }
 

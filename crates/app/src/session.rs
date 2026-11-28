@@ -43,6 +43,8 @@ pub enum Change {
     Columns,
     /// The user chose another audio output.
     OutputDevice,
+    /// The user turned gapless playback on or off.
+    Gapless,
     /// [`has_folders`] changed.
     Folders,
     /// [`now_playing`] changed.
@@ -278,6 +280,10 @@ fn lock(queue: &Mutex<Queue>) -> MutexGuard<'_, Queue> {
 
 pub fn output_device_changed() {
     notify(Change::OutputDevice);
+}
+
+pub fn gapless_changed() {
+    notify(Change::Gapless);
 }
 
 /// Call after editing the queue through [`lock_queue`].

@@ -279,7 +279,16 @@ impl cxx_qt::Initialize for qobject::PlayerController {
         }
         session::on_change(self.qt_thread(), Change::Catalog, Self::refresh);
         session::on_change(self.qt_thread(), Change::OutputDevice, Self::reopen);
+        session::on_change(self.qt_thread(), Change::Gapless, |controller| {
+            if let Some(player) = &controller.player {
+                apply_gapless(player);
+            }
+        });
     }
+}
+
+fn apply_gapless(player: &Player) {
+    log_err(player.set_gapless(with_store(|store| store.settings().gapless)));
 }
 
 /// Rows of one of the lists QML shows tracks in, ascending and without
@@ -707,9 +716,13 @@ impl qobject::PlayerController {
         {
             return;
         }
-        let preferred = with_store(|store| store.settings().output_device.clone());
+        let (preferred, gapless) = with_store(|store| {
+            let settings = store.settings();
+            (settings.output_device.clone(), settings.gapless)
+        });
         let config = PlayerConfig {
             output: OutputKind::Device { preferred },
+            gapless,
             ..PlayerConfig::default()
         };
         let closing = std::mem::take(&mut self.as_mut().rust_mut().closing);
@@ -741,6 +754,8 @@ impl qobject::PlayerController {
             }
             Finished::Opened(player, resume) => {
                 player.set_volume(self.volume_state().output() as f32);
+                // It may have been toggled while the output opened.
+                apply_gapless(&player);
                 self.as_mut().rust_mut().player = Some(player);
                 set!(self, available, available_changed, true);
                 if let Some(resume) = resume {

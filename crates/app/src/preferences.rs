@@ -43,6 +43,7 @@ pub mod qobject {
         /// What `outputDevice` picks from: the system default first.
         #[qproperty(QStringList, output_devices, cxx_name = "outputDevices", READ, NOTIFY)]
         #[qproperty(i32, output_device, cxx_name = "outputDevice", READ, WRITE = set_output_device, NOTIFY)]
+        #[qproperty(bool, gapless, READ, WRITE = set_gapless, NOTIFY)]
         type Preferences = super::PreferencesRust;
     }
 
@@ -55,6 +56,9 @@ pub mod qobject {
 
         #[cxx_name = "setOutputDevice"]
         fn set_output_device(self: Pin<&mut Preferences>, index: i32);
+
+        #[cxx_name = "setGapless"]
+        fn set_gapless(self: Pin<&mut Preferences>, gapless: bool);
 
         /// Lists the connected devices again, in the background (slow on
         /// some systems).
@@ -78,6 +82,7 @@ pub struct PreferencesRust {
     output_device: i32,
     /// The device each of `output_devices` names; `None` is the default.
     output_ids: Vec<Option<String>>,
+    gapless: bool,
     /// Only one listing runs at a time, so a sound server that never answers
     /// holds one thread rather than one per refresh.
     listing_outputs: bool,
@@ -96,6 +101,7 @@ impl Default for PreferencesRust {
             output_devices: QStringList::default(),
             output_device: 0,
             output_ids: Vec::new(),
+            gapless: with_store(|store| store.settings().gapless),
             listing_outputs: false,
         }
     }
@@ -136,6 +142,23 @@ impl qobject::Preferences {
         if index != self.output_device {
             set!(self, output_device, output_device_changed, index);
             session::output_device_changed();
+        }
+        if let Err(message) = saved {
+            set!(self, error, error_changed, QString::from(&message));
+        }
+    }
+
+    fn set_gapless(mut self: Pin<&mut Self>, gapless: bool) {
+        let saved = with_store(|store| {
+            store.update(|s| {
+                let changed = s.gapless != gapless;
+                s.gapless = gapless;
+                changed
+            })
+        });
+        if gapless != self.gapless {
+            set!(self, gapless, gapless_changed, gapless);
+            session::gapless_changed();
         }
         if let Err(message) = saved {
             set!(self, error, error_changed, QString::from(&message));

@@ -28,6 +28,7 @@ fn settings_survive_a_save_and_load_and_create_the_folder() {
         library_folders: vec![PathBuf::from("/music"), PathBuf::from("/mnt/Ünïcode dir")],
         scroll_speed: 7,
         output_device: Some("alsa:hw:CARD=USB,DEV=0".to_owned()),
+        gapless: false,
         ..Settings::default()
     };
     settings.save(&path).unwrap();
@@ -176,12 +177,30 @@ fn an_unreadable_scroll_speed_gets_the_default_and_keeps_the_folders() {
 }
 
 #[test]
-fn a_file_without_a_scroll_speed_gets_the_default() {
+fn an_unreadable_gapless_setting_gets_the_default() {
+    let dir = TempDir::new();
+    for text in ["gapless = \"no\"", "gapless = 0"] {
+        let path = dir.write(
+            "config.toml",
+            format!("library_folders = [\"/a\"]\n{text}\n").as_bytes(),
+        );
+        let settings = Settings::load(&path).unwrap().unwrap();
+        assert!(settings.gapless, "{text}");
+        assert_eq!(folders(&settings), ["/a"], "{text}");
+    }
+}
+
+/// Such as one saved before a setting was added.
+#[test]
+fn a_file_without_a_setting_gets_its_default() {
     let dir = TempDir::new();
     let path = dir.write("config.toml", b"library_folders = [\"/a\"]\n");
     assert_eq!(
-        Settings::load(&path).unwrap().unwrap().scroll_speed,
-        Settings::default().scroll_speed
+        Settings::load(&path).unwrap().unwrap(),
+        Settings {
+            library_folders: vec![PathBuf::from("/a")],
+            ..Settings::default()
+        }
     );
 }
 
