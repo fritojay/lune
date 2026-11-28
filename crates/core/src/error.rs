@@ -12,11 +12,12 @@ pub enum CoreError {
         source: std::io::Error,
     },
 
-    #[error("could not read tags from {path}: {source}")]
+    /// The message includes the whole chain, so this variant has no
+    /// `source()`: a caller printing the chain would show it twice.
+    #[error("could not read tags from {path}: {}", causes(.cause))]
     Tags {
         path: PathBuf,
-        #[source]
-        source: lofty::error::FileParseError,
+        cause: lofty::error::FileParseError,
     },
 
     #[error("the tag parser panicked on {0}")]
@@ -61,6 +62,19 @@ pub enum CoreError {
 
     #[error("could not determine the user's home directory")]
     NoHomeDir,
+}
+
+/// `err` and each error under it, so a log line names the actual problem
+/// (lofty's top-level message is only "failed to parse Mpeg file").
+fn causes(err: &dyn std::error::Error) -> String {
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

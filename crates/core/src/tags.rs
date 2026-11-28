@@ -66,9 +66,9 @@ pub fn read_track_meta(path: &Path) -> Result<TrackMeta> {
         path: path.to_path_buf(),
         source,
     };
-    let tag_err = |source| CoreError::Tags {
+    let tag_err = |cause| CoreError::Tags {
         path: path.to_path_buf(),
-        source,
+        cause,
     };
 
     let file = File::open(path).map_err(io_err)?;
@@ -89,7 +89,7 @@ pub fn read_track_meta(path: &Path) -> Result<TrackMeta> {
         let codec = mp4.properties().codec();
         (TaggedFile::from(mp4), codec)
     } else {
-        (probe.read().map_err(tag_err)?, None)
+        (read_tagged(path, probe, options)?, None)
     };
 
     let props = tagged.properties();
@@ -114,6 +114,19 @@ pub fn read_track_meta(path: &Path) -> Result<TrackMeta> {
         sample_rate: props.sample_rate(),
         bitrate_kbps: props.audio_bitrate().filter(|&kbps| kbps > 0),
         art: tag.and_then(embedded_art),
+    })
+}
+
+fn read_tagged(
+    path: &Path,
+    probe: Probe<BufReader<File>>,
+    options: ParseOptions,
+) -> Result<TaggedFile> {
+    probe.read().or_else(|cause| {
+        crate::id3_repair::read_repaired(path, options).ok_or_else(|| CoreError::Tags {
+            path: path.to_path_buf(),
+            cause,
+        })
     })
 }
 
@@ -155,18 +168,14 @@ pub fn read_cover(path: &Path) -> Result<Option<Vec<u8>>> {
     let options = ParseOptions::new()
         .read_properties(false)
         .read_cover_art(true);
-    let tagged = Probe::new(BufReader::new(file))
+    let probe = Probe::new(BufReader::new(file))
         .options(options)
         .guess_file_type()
         .map_err(|source| CoreError::Io {
             path: path.to_path_buf(),
             source,
-        })?
-        .read()
-        .map_err(|source| CoreError::Tags {
-            path: path.to_path_buf(),
-            source,
         })?;
+    let tagged = read_tagged(path, probe, options)?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
     Ok(tag.and_then(cover).map(|p| p.data().to_vec()))
 }
