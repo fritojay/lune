@@ -863,6 +863,8 @@ fn a_quick_scan_keeps_what_a_full_scan_left_out() {
     assert!(!merge_left_out(&mut left_out, report), "{left_out:?}");
 }
 
+// Only the tests that make links (`std::os::unix`) wait for the list.
+#[cfg(unix)]
 fn left_out_of(h: &Harness, wanted: usize) -> Vec<LeftOut> {
     h.wait_for(|u| match u {
         Update::Error(message) => panic!("reported as an error: {message}"),
